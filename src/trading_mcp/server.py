@@ -636,6 +636,7 @@ def get_economic_calendar(from_date: str, to_date: str, ctx: Context) -> list[di
     Returns events with: event name, country, date/time, actual value, estimate,
     previous value, and impact level (low/medium/high).
 
+    Note: requires Finnhub premium plan. Free tier returns 403.
     Requires [finnhub] section in ~/.tradingrc.
     """
     return _finnhub(ctx).get_economic_calendar(from_date, to_date)
@@ -687,6 +688,7 @@ def get_eps_estimates(symbol: str, ctx: Context) -> list[dict]:
 
     symbol: ticker symbol (e.g. 'AAPL').
 
+    Note: requires Finnhub premium plan. Free tier returns 403.
     Requires [finnhub] section in ~/.tradingrc.
     """
     return _finnhub(ctx).get_eps_estimates(symbol)
@@ -800,19 +802,19 @@ def get_key_metrics(
 
 @mcp.tool()
 def get_fmp_earnings_calendar(
+    symbol: str,
     ctx: Context,
-    from_date: str | None = None,
-    to_date: str | None = None,
+    limit: int = 5,
 ) -> list[dict]:
-    """Get earnings calendar from FMP: date, symbol, EPS estimate, EPS actual, revenue
-    estimate, revenue actual. Covers a broader universe than Finnhub.
+    """Get earnings history for a specific company from FMP: date, EPS estimate, EPS actual,
+    revenue estimate, revenue actual.
 
-    from_date: start date (YYYY-MM-DD). Omit for default range.
-    to_date: end date (YYYY-MM-DD). Omit for default range.
+    symbol: ticker symbol (e.g. 'AAPL').
+    limit: number of recent earnings to return (default 5, max 5 on free tier).
 
     Requires [fmp] section in ~/.tradingrc.
     """
-    return _fmp(ctx).get_earnings_calendar(from_date, to_date)
+    return _fmp(ctx).get_earnings_calendar(symbol, limit)
 
 
 # ═══════════════════════════════════════════════════════════════

@@ -245,13 +245,16 @@ def _transform_earnings_calendar(data: list[dict]) -> str:
 def _transform_company_profile(data: dict) -> str:
     if not data:
         return "(no data)"
+    mkt_cap = data.get("marketCapitalization")
+    # Finnhub reports market cap in millions
+    mkt_cap_display = _fmt_large(mkt_cap * 1e6) if mkt_cap else ""
     return _kv_table(
         {
             "Name": data.get("name"),
             "Ticker": data.get("ticker"),
             "Exchange": data.get("exchange"),
             "Industry": data.get("finnhubIndustry"),
-            "Market Cap": _fmt_large(data.get("marketCapitalization")),
+            "Market Cap": mkt_cap_display,
             "IPO Date": data.get("ipo"),
             "Website": data.get("weburl"),
         }
@@ -272,7 +275,8 @@ def _transform_basic_financials(data: dict) -> str:
         "Beta": _fmt_number(metric.get("beta")),
         "52W High": _fmt_number(metric.get("52WeekHigh")),
         "52W Low": _fmt_number(metric.get("52WeekLow")),
-        "Market Cap": _fmt_large(metric.get("marketCapitalization")),
+        # Finnhub reports market cap in millions
+        "Market Cap": _fmt_large(mc * 1e6) if (mc := metric.get("marketCapitalization")) else "",
         "ROE (TTM)": _fmt_number(metric.get("roeTTM")),
         "Debt/Equity": _fmt_number(metric.get("totalDebt/totalEquityAnnual")),
         "Current Ratio": _fmt_number(metric.get("currentRatioAnnual")),
@@ -325,15 +329,14 @@ def _transform_fmp_profile(data: dict) -> str:
             "Name": data.get("companyName"),
             "Symbol": data.get("symbol"),
             "Price": _fmt_number(data.get("price")),
-            "Market Cap": _fmt_large(data.get("mktCap")),
-            "P/E": _fmt_number(data.get("pe") if data.get("pe") else None),
+            "Market Cap": _fmt_large(data.get("marketCap")),
             "Beta": _fmt_number(data.get("beta")),
-            "Vol Avg": _fmt_large(data.get("volAvg")),
-            "Div Yield": _fmt_number(data.get("lastDiv")),
+            "Vol Avg": _fmt_large(data.get("averageVolume")),
+            "Last Dividend": _fmt_number(data.get("lastDividend")),
             "52W Range": data.get("range", ""),
             "Sector": data.get("sector"),
             "Industry": data.get("industry"),
-            "Exchange": data.get("exchangeShortName"),
+            "Exchange": data.get("exchange"),
             "CEO": data.get("ceo"),
         }
     )
@@ -383,7 +386,7 @@ def _transform_cash_flow(data: list[dict]) -> str:
             "Operating CF": _fmt_large(s.get("operatingCashFlow")),
             "Capex": _fmt_large(s.get("capitalExpenditure")),
             "Free CF": _fmt_large(s.get("freeCashFlow")),
-            "Dividends": _fmt_large(s.get("dividendsPaid")),
+            "Dividends": _fmt_large(s.get("commonDividendsPaid")),
             "Buybacks": _fmt_large(s.get("commonStockRepurchased")),
         }
         for s in data
@@ -397,13 +400,13 @@ def _transform_key_metrics(data: list[dict]) -> str:
     rows = [
         {
             "Date": m.get("date", ""),
-            "P/E": _fmt_number(m.get("peRatio")),
-            "P/B": _fmt_number(m.get("pbRatio")),
-            "P/S": _fmt_number(m.get("priceToSalesRatio")),
-            "EV/EBITDA": _fmt_number(m.get("enterpriseValueOverEBITDA")),
-            "ROE": _fmt_number(m.get("roe")),
-            "D/E": _fmt_number(m.get("debtToEquity")),
+            "EV/EBITDA": _fmt_number(m.get("evToEBITDA")),
+            "EV/Sales": _fmt_number(m.get("evToSales")),
+            "ROE": _fmt_number(m.get("returnOnEquity")),
+            "ROA": _fmt_number(m.get("returnOnAssets")),
             "Curr Ratio": _fmt_number(m.get("currentRatio")),
+            "Net Debt/EBITDA": _fmt_number(m.get("netDebtToEBITDA")),
+            "FCF Yield": _fmt_number(m.get("freeCashFlowYield"), 4),
         }
         for m in data
     ]
@@ -418,9 +421,9 @@ def _transform_fmp_earnings(data: list[dict]) -> str:
             "Date": e.get("date", ""),
             "Symbol": e.get("symbol", ""),
             "EPS Est": _fmt_number(e.get("epsEstimated")),
-            "EPS Act": _fmt_number(e.get("eps")),
+            "EPS Act": _fmt_number(e.get("epsActual")),
             "Rev Est": _fmt_large(e.get("revenueEstimated")),
-            "Rev Act": _fmt_large(e.get("revenue")),
+            "Rev Act": _fmt_large(e.get("revenueActual")),
         }
         for e in data
     ]
