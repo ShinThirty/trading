@@ -24,11 +24,11 @@ To add to Claude Code: `claude mcp add trading-mcp -- uv run trading-mcp`
 src/trading_mcp/
 ├── config.py            # Loads credentials from ~/.webullrc (INI format, [webull] section)
 ├── webull_client.py     # Direct HTTP calls to Webull API with HMAC-SHA1 signing
-├── response_filters.py  # Per-endpoint field filters to reduce token usage
+├── response_filters.py  # Per-endpoint field filtering + markdown table transformation
 └── server.py            # FastMCP server definition, tool registration, lifespan
 ```
 
-**Data flow:** MCP tool call → `server.py` (extracts client from lifespan context) → `webull_client.py` (signed HTTP request to Webull) → `response_filters.process()` (filter fields, then transform) → returns dict/list to FastMCP for JSON serialization.
+**Data flow:** MCP tool call → `server.py` (extracts client from lifespan context) → `webull_client.py` (signed HTTP request to Webull) → `response_filters.process()` (filter fields, then transform to markdown table) → returns string to FastMCP.
 
 The `WebullClient` is created once during server lifespan startup and shared across all tool invocations via FastMCP's lifespan context pattern.
 
@@ -59,15 +59,20 @@ region_id = us
 Webull API responses contain many fields that waste tokens and can confuse the model. All responses pass through a two-stage pipeline in `response_filters.py` via `process()`:
 
 1. **Field filtering (`FIELD_FILTERS`)** — maps endpoint path to a set of top-level keys to keep. `None` means passthrough (current default for all endpoints).
-2. **Transformation (`TRANSFORMERS`)** — maps endpoint path to a function that reshapes the filtered data: rename keys, flatten nested structures, add computed values, etc. The goal is model-friendly output.
+2. **Transformation (`TRANSFORMERS`)** — maps endpoint path to a function that converts the filtered data into a **markdown table string**. This is critical for reducing hallucinations — the model parses tables far more reliably than nested JSON.
+
+Helper functions in `response_filters.py`:
+- `_kv_table(data)` — for single-object responses (e.g. account profile → two-column Field/Value table)
+- `_list_table(items, columns)` — for list responses (e.g. positions → one row per holding)
+- `_md_table(headers, rows)` — low-level builder for custom layouts
 
 When adding a new endpoint or updating processing, inspect the raw API response first, then:
 - Populate the keep-set in `FIELD_FILTERS` with only the fields needed.
-- Add a transformer in `TRANSFORMERS` to reshape the output for clarity.
+- Add a transformer in `TRANSFORMERS` that returns a markdown table string.
 
 ## Conventions
 
 - All MCP tools are defined in `server.py` and delegate to `WebullClient` methods
-- `WebullClient` methods return filtered dicts/lists (see Response Filtering above)
-- New tools should follow the same pattern: `@mcp.tool()` in server.py → method in webull_client.py → filter in response_filters.py
+- `WebullClient` methods return markdown table strings (once transformers are populated) or raw dicts/lists (passthrough)
+- New tools should follow the same pattern: `@mcp.tool()` in server.py → method in webull_client.py → filter + transformer in response_filters.py
 - Ruff rules: E, F, I (isort), UP (pyupgrade). Line length: 100.
