@@ -53,6 +53,7 @@ region_id = us
 - **Market data host:** `usquotes-api.webullfintech.com`
 - **Option order endpoints** use different paths (`/openapi/account/orders/option/*`) and pass `account_id` as a query param (not in body). Stock order endpoints (`/trade/order/*`) pass `account_id` in the POST body.
 - **Auth:** HMAC-SHA1 signature over sorted headers + URI + query params + MD5(body). Headers: `x-api-key`, `x-api-timestamp`, `x-api-sign-version`, `x-api-sign-algorithm`, `x-api-nonce`, `x-api-signature`.
+- **Option API regional availability:** The v2 option endpoints (`/openapi/account/orders/option/*`) are documented as **HK-only** in SDK v0.1.18 (Sep 2025). The v1 stock order endpoints (`/trade/order/*`) have no region restriction and work for US. The `new_orders` body structure supports multi-leg strategies (nested `orders` list per entry). When US API access is available, test the option endpoints — US support may have been added since the SDK was published. Do not remove the option tools; they're ready for when US support lands.
 
 ## Response Processing
 
