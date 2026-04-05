@@ -149,13 +149,23 @@ def cancel_order(client_order_id: str, ctx: Context) -> dict:
 
 @mcp.tool()
 def preview_option(new_orders: list[dict], ctx: Context) -> dict:
-    """Preview an option order before placing. Returns estimated cost, margin impact, etc."""
+    """Preview an option order before placing. Returns estimated cost, margin impact, etc.
+
+    new_orders is a list of order groups. Each group contains an `orders` list of legs.
+    Single-leg: one group with one leg. Multi-leg (spreads, iron condors, etc.): one group
+    with multiple legs, each specifying instrument_id, side, qty, order_type, etc.
+    """
     return _client(ctx).preview_option(new_orders)
 
 
 @mcp.tool()
 def place_option(new_orders: list[dict], ctx: Context) -> dict:
-    """Place a single-leg option order. new_orders is a list with one order dict."""
+    """Place an option order (single-leg or multi-leg).
+
+    new_orders is a list of order groups. Each group contains an `orders` list of legs.
+    Single-leg: one group with one leg. Multi-leg (spreads, iron condors, etc.): one group
+    with multiple legs, each specifying instrument_id, side, qty, order_type, etc.
+    """
     return _client(ctx).place_option(new_orders)
 
 

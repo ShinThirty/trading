@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-MCP server for trading stocks and options on Webull. Exposes Webull brokerage data and order management as MCP tools for use with Claude. Supports stock and single-leg option orders. Multi-leg strategies planned for follow-up.
+MCP server for trading stocks and options on Webull. Exposes Webull brokerage data and order management as MCP tools for use with Claude. Supports stock orders and option orders (single-leg and multi-leg strategies like spreads, iron condors, etc.).
 
 ## Commands
 
@@ -53,7 +53,7 @@ region_id = us
 - **Market data host:** `usquotes-api.webullfintech.com`
 - **Option order endpoints** use different paths (`/openapi/account/orders/option/*`) and pass `account_id` as a query param (not in body). Stock order endpoints (`/trade/order/*`) pass `account_id` in the POST body.
 - **Auth:** HMAC-SHA1 signature over sorted headers + URI + query params + MD5(body). Headers: `x-api-key`, `x-api-timestamp`, `x-api-sign-version`, `x-api-sign-algorithm`, `x-api-nonce`, `x-api-signature`.
-- **Option API regional availability:** The v2 option endpoints (`/openapi/account/orders/option/*`) are documented as **HK-only** in SDK v0.1.18 (Sep 2025). The v1 stock order endpoints (`/trade/order/*`) have no region restriction and work for US. The `new_orders` body structure supports multi-leg strategies (nested `orders` list per entry). When US API access is available, test the option endpoints — US support may have been added since the SDK was published. Do not remove the option tools; they're ready for when US support lands.
+- **Option API regional availability:** The option order endpoints (`/openapi/account/orders/option/*`) are documented as **HK-only** in the Webull SDK docs (v0.1.18, Sep 2025). Stock order endpoints (`/trade/order/*`) have no region restriction and work for US. The `new_orders` body structure supports both single-leg and multi-leg strategies (nested `orders` list per entry). When US API access is available, test the option endpoints — US support may have been added since the docs were last updated. Do not remove the option tools; they're ready for when US support lands.
 
 ## Response Processing
 
