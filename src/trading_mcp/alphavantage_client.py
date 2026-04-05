@@ -38,6 +38,11 @@ class AlphaVantageClient:
         resp.raise_for_status()
         result = resp.json()
 
+        # Alpha Vantage returns 200 with error message on rate limit (25/day free tier)
+        if isinstance(result, dict) and ("Note" in result or "Information" in result):
+            msg = result.get("Note") or result.get("Information", "")
+            raise RuntimeError(f"Alpha Vantage API limit reached: {msg}")
+
         if ttl > 0 and cache_key:
             self._cache.put(full_key, result)
 

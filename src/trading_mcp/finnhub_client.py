@@ -52,16 +52,20 @@ class FinnhubClient:
 
         return result
 
-    def get_company_news(self, symbol: str, from_date: str, to_date: str) -> Any:
+    def get_company_news(self, symbol: str, from_date: str, to_date: str, limit: int = 20) -> Any:
         data = self._get(
             "/company-news",
             {"symbol": symbol, "from": from_date, "to": to_date},
             cache_key="company-news",
         )
+        if isinstance(data, list):
+            data = data[:limit]
         return process("finnhub:company-news", data)
 
-    def get_market_news(self, category: str = "general") -> Any:
+    def get_market_news(self, category: str = "general", limit: int = 20) -> Any:
         data = self._get("/news", {"category": category}, cache_key="market-news")
+        if isinstance(data, list):
+            data = data[:limit]
         return process("finnhub:market-news", data)
 
     def get_economic_calendar(self, from_date: str, to_date: str) -> Any:
@@ -73,14 +77,18 @@ class FinnhubClient:
         events = data.get("economicCalendar", [])
         return process("finnhub:economic-calendar", events)
 
-    def get_earnings_calendar(self, from_date: str, to_date: str) -> Any:
+    def get_earnings_calendar(self, from_date: str, to_date: str, limit: int = 50) -> Any:
         data = self._get(
             "/calendar/earnings",
             {"from": from_date, "to": to_date},
             cache_key="earnings-calendar",
         )
         earnings = data.get("earningsCalendar", [])
-        return process("finnhub:earnings-calendar", earnings)
+        # Filter out micro-caps: drop entries with no analyst coverage
+        earnings = [
+            e for e in earnings if e.get("epsEstimate") is not None or e.get("revenueEstimate")
+        ]
+        return process("finnhub:earnings-calendar", earnings[:limit])
 
     def get_company_profile(self, symbol: str) -> Any:
         data = self._get("/stock/profile2", {"symbol": symbol}, cache_key="company-profile")

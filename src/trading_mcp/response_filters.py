@@ -195,7 +195,6 @@ def _transform_company_news(data: list[dict]) -> str:
             "Date": _unix_to_date(a.get("datetime")),
             "Headline": a.get("headline", ""),
             "Source": a.get("source", ""),
-            "URL": a.get("url", ""),
         }
         for a in data
     ]

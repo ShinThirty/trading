@@ -602,29 +602,35 @@ def get_option_chain(
 
 
 @mcp.tool()
-def get_company_news(symbol: str, from_date: str, to_date: str, ctx: Context) -> list[dict]:
+def get_company_news(
+    symbol: str, from_date: str, to_date: str, ctx: Context, limit: int = 20
+) -> list[dict]:
     """Get recent news articles for a specific company.
 
     symbol: ticker symbol (e.g. 'AAPL').
     from_date: start date (YYYY-MM-DD).
     to_date: end date (YYYY-MM-DD).
-    Returns a list of articles with headline, summary, source, url, and datetime.
+    limit: max number of articles to return (default 20).
+    Returns a list of articles with headline, source, and datetime.
 
+    Rate limit: 60 requests/min (shared across all Finnhub tools).
     Requires [finnhub] section in ~/.tradingrc.
     """
-    return _finnhub(ctx).get_company_news(symbol, from_date, to_date)
+    return _finnhub(ctx).get_company_news(symbol, from_date, to_date, limit)
 
 
 @mcp.tool()
-def get_market_news(ctx: Context, category: str = "general") -> list[dict]:
+def get_market_news(ctx: Context, category: str = "general", limit: int = 20) -> list[dict]:
     """Get general market news headlines.
 
     category: 'general', 'forex', 'crypto', or 'merger'.
-    Returns a list of articles with headline, summary, source, url, and datetime.
+    limit: max number of articles to return (default 20).
+    Returns a list of articles with headline, source, and datetime.
 
+    Rate limit: 60 requests/min (shared across all Finnhub tools).
     Requires [finnhub] section in ~/.tradingrc.
     """
-    return _finnhub(ctx).get_market_news(category)
+    return _finnhub(ctx).get_market_news(category, limit)
 
 
 @mcp.tool()
@@ -637,23 +643,29 @@ def get_economic_calendar(from_date: str, to_date: str, ctx: Context) -> list[di
     previous value, and impact level (low/medium/high).
 
     Note: requires Finnhub premium plan. Free tier returns 403.
+    Rate limit: 60 requests/min (shared across all Finnhub tools).
     Requires [finnhub] section in ~/.tradingrc.
     """
     return _finnhub(ctx).get_economic_calendar(from_date, to_date)
 
 
 @mcp.tool()
-def get_earnings_calendar(from_date: str, to_date: str, ctx: Context) -> list[dict]:
-    """Get upcoming and recent earnings reports.
+def get_earnings_calendar(
+    from_date: str, to_date: str, ctx: Context, limit: int = 50
+) -> list[dict]:
+    """Get upcoming and recent earnings reports. Automatically filters out micro-caps
+    (companies with no analyst coverage).
 
     from_date: start date (YYYY-MM-DD).
     to_date: end date (YYYY-MM-DD).
+    limit: max number of entries to return (default 50).
     Returns each report's symbol, date, EPS actual, EPS estimate, revenue actual,
     revenue estimate, and reporting time (bmo=before market open, amc=after market close).
 
+    Rate limit: 60 requests/min (shared across all Finnhub tools).
     Requires [finnhub] section in ~/.tradingrc.
     """
-    return _finnhub(ctx).get_earnings_calendar(from_date, to_date)
+    return _finnhub(ctx).get_earnings_calendar(from_date, to_date, limit)
 
 
 @mcp.tool()
@@ -663,6 +675,7 @@ def get_company_profile(symbol: str, ctx: Context) -> dict:
 
     symbol: ticker symbol (e.g. 'AAPL').
 
+    Rate limit: 60 requests/min (shared across all Finnhub tools).
     Requires [finnhub] section in ~/.tradingrc.
     """
     return _finnhub(ctx).get_company_profile(symbol)
@@ -676,6 +689,7 @@ def get_basic_financials(symbol: str, ctx: Context) -> dict:
     symbol: ticker symbol (e.g. 'AAPL').
     Returns a dict with 'metric' (current values) and 'series' (quarterly/annual history).
 
+    Rate limit: 60 requests/min (shared across all Finnhub tools).
     Requires [finnhub] section in ~/.tradingrc.
     """
     return _finnhub(ctx).get_basic_financials(symbol)
@@ -689,6 +703,7 @@ def get_eps_estimates(symbol: str, ctx: Context) -> list[dict]:
     symbol: ticker symbol (e.g. 'AAPL').
 
     Note: requires Finnhub premium plan. Free tier returns 403.
+    Rate limit: 60 requests/min (shared across all Finnhub tools).
     Requires [finnhub] section in ~/.tradingrc.
     """
     return _finnhub(ctx).get_eps_estimates(symbol)
@@ -701,6 +716,7 @@ def get_recommendation_trends(symbol: str, ctx: Context) -> list[dict]:
 
     symbol: ticker symbol (e.g. 'AAPL').
 
+    Rate limit: 60 requests/min (shared across all Finnhub tools).
     Requires [finnhub] section in ~/.tradingrc.
     """
     return _finnhub(ctx).get_recommendation_trends(symbol)
@@ -719,6 +735,7 @@ def get_fmp_company_profile(symbol: str, ctx: Context) -> dict:
     symbol: ticker symbol (e.g. 'AAPL').
     More detailed than get_company_profile (Finnhub) — includes valuation metrics.
 
+    Rate limit: 250 requests/day (shared across all FMP tools).
     Requires [fmp] section in ~/.tradingrc.
     """
     return _fmp(ctx).get_company_profile(symbol)
@@ -738,6 +755,7 @@ def get_income_statement(
     period: 'annual' or 'quarter'.
     limit: number of periods to return (default 4).
 
+    Rate limit: 250 requests/day (shared across all FMP tools).
     Requires [fmp] section in ~/.tradingrc.
     """
     return _fmp(ctx).get_income_statement(symbol, period, limit)
@@ -757,6 +775,7 @@ def get_balance_sheet(
     period: 'annual' or 'quarter'.
     limit: number of periods to return (default 4).
 
+    Rate limit: 250 requests/day (shared across all FMP tools).
     Requires [fmp] section in ~/.tradingrc.
     """
     return _fmp(ctx).get_balance_sheet(symbol, period, limit)
@@ -776,6 +795,7 @@ def get_cash_flow(
     period: 'annual' or 'quarter'.
     limit: number of periods to return (default 4).
 
+    Rate limit: 250 requests/day (shared across all FMP tools).
     Requires [fmp] section in ~/.tradingrc.
     """
     return _fmp(ctx).get_cash_flow(symbol, period, limit)
@@ -795,6 +815,7 @@ def get_key_metrics(
     period: 'annual' or 'quarter'.
     limit: number of periods to return (default 4).
 
+    Rate limit: 250 requests/day (shared across all FMP tools).
     Requires [fmp] section in ~/.tradingrc.
     """
     return _fmp(ctx).get_key_metrics(symbol, period, limit)
@@ -812,6 +833,7 @@ def get_fmp_earnings_calendar(
     symbol: ticker symbol (e.g. 'AAPL').
     limit: number of recent earnings to return (default 5, max 5 on free tier).
 
+    Rate limit: 250 requests/day (shared across all FMP tools).
     Requires [fmp] section in ~/.tradingrc.
     """
     return _fmp(ctx).get_earnings_calendar(symbol, limit)
@@ -912,7 +934,7 @@ def get_news_sentiment(
       'energy_transportation', 'finance', 'technology', etc. Omit for all topics.
     limit: max articles to return (default 10, max 50).
 
-    Note: Alpha Vantage free tier is limited to 25 requests/day. Use strategically.
+    Rate limit: 25 requests/day (shared across all Alpha Vantage tools). Use sparingly.
     Requires [alphavantage] section in ~/.tradingrc.
     """
     return _alphavantage(ctx).get_news_sentiment(tickers, topics, limit=limit)
@@ -923,7 +945,7 @@ def get_top_movers(ctx: Context) -> dict:
     """Get today's top market movers: top 20 gainers, top 20 losers, and most actively
     traded stocks. Each entry includes ticker, price, change amount, change %, and volume.
 
-    Note: Alpha Vantage free tier is limited to 25 requests/day.
+    Rate limit: 25 requests/day (shared across all Alpha Vantage tools). Use sparingly.
     Requires [alphavantage] section in ~/.tradingrc.
     """
     return _alphavantage(ctx).get_top_gainers_losers()
