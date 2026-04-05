@@ -3,6 +3,7 @@ import hashlib
 import hmac
 import json
 import socket
+import time
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -15,6 +16,57 @@ from trading_mcp.response_filters import process
 
 API_HOST = "api.webull.com"
 QUOTES_HOST = "usquotes-api.webullfintech.com"
+
+# ── Cache TTLs (seconds) per endpoint path ──────────────────
+# 0 or absent = no caching.
+CACHE_TTLS: dict[str, int] = {
+    # Static metadata
+    "/account/profile": 3600,
+    "/trade/instrument": 3600,
+    "/trade/security": 3600,
+    "/instrument/list": 3600,
+    "/trade/calendar": 3600,
+    "/trade/instrument/tradable/list": 3600,
+    "/app/subscriptions/list": 3600,
+    "/instrument/corp-action": 3600,
+    # Historical data (latest bar may still be open)
+    "/market-data/bars": 300,
+    "/market-data/eod-bars": 3600,
+    # Account state
+    "/account/balance": 60,
+    "/account/positions": 60,
+    "/account/position/details": 60,
+    # Orders
+    "/trade/orders/list-open": 30,
+    "/trade/orders/list-today": 30,
+    "/trade/order/detail": 30,
+    "/openapi/account/orders/history": 30,
+}
+
+
+class _TTLCache:
+    def __init__(self) -> None:
+        self._store: dict[str, tuple[float, Any]] = {}
+
+    def get(self, key: str, ttl: int) -> Any | None:
+        entry = self._store.get(key)
+        if entry is None:
+            return None
+        ts, value = entry
+        if time.monotonic() - ts > ttl:
+            del self._store[key]
+            return None
+        return value
+
+    def put(self, key: str, value: Any) -> None:
+        self._store[key] = (time.monotonic(), value)
+
+    def invalidate(self, prefix: str | None = None) -> None:
+        if prefix is None:
+            self._store.clear()
+        else:
+            for k in [k for k in self._store if k.startswith(prefix)]:
+                del self._store[k]
 
 
 def _iso8601_now() -> str:
@@ -81,6 +133,13 @@ class WebullClient:
     def __init__(self, config: WebullConfig) -> None:
         self._config = config
         self._http = httpx.Client(timeout=15)
+        self._cache = _TTLCache()
+
+    def _cache_key(self, path: str, params: dict[str, str] | None) -> str:
+        parts = [path]
+        if params:
+            parts.extend(f"{k}={v}" for k, v in sorted(params.items()))
+        return "&".join(parts)
 
     def _get(
         self,
@@ -88,6 +147,13 @@ class WebullClient:
         path: str,
         params: dict[str, str] | None = None,
     ) -> Any:
+        ttl = CACHE_TTLS.get(path, 0)
+        if ttl > 0:
+            key = self._cache_key(path, params)
+            cached = self._cache.get(key, ttl)
+            if cached is not None:
+                return cached
+
         headers = _build_signature(
             host=host,
             uri=path,
@@ -99,7 +165,12 @@ class WebullClient:
         url = f"https://{host}{path}"
         resp = self._http.get(url, headers=headers, params=params)
         resp.raise_for_status()
-        return process(path, resp.json())
+        result = process(path, resp.json())
+
+        if ttl > 0:
+            self._cache.put(key, result)
+
+        return result
 
     def _post(
         self,
@@ -197,7 +268,34 @@ class WebullClient:
             {"account_id": self._config.account_id, "client_order_id": client_order_id},
         )
 
+    def get_order_history(
+        self,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        page_size: int = 100,
+        last_client_order_id: str | None = None,
+    ) -> Any:
+        params: dict[str, str] = {
+            "account_id": self._config.account_id,
+            "page_size": str(page_size),
+        }
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+        if last_client_order_id:
+            params["last_client_order_id"] = last_client_order_id
+        return self._get(API_HOST, "/openapi/account/orders/history", params)
+
     # ── Stock Order Management ───────────────────────────────
+
+    def preview_order(self, new_orders: list[dict[str, Any]]) -> dict:
+        return self._post(
+            API_HOST,
+            "/openapi/account/orders/preview",
+            {"new_orders": new_orders},
+            params={"account_id": self._config.account_id},
+        )
 
     def place_order(self, stock_order: dict[str, Any]) -> dict:
         body: dict[str, Any] = {

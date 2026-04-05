@@ -74,6 +74,8 @@ FIELD_FILTERS: dict[str, set[str] | None] = {
     "/trade/orders/list-today": None,
     "/trade/order/detail": None,
     # Order management
+    "/openapi/account/orders/history": None,
+    "/openapi/account/orders/preview": None,
     "/trade/order/place": None,
     "/trade/order/replace": None,
     "/trade/order/cancel": None,
