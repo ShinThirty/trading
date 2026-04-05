@@ -1,0 +1,99 @@
+from typing import Any
+
+import httpx
+
+from trading_mcp.cache import TTLCache
+from trading_mcp.config import FmpConfig
+from trading_mcp.response_filters import process
+
+BASE_URL = "https://financialmodelingprep.com/api/v3"
+
+CACHE_TTLS: dict[str, int] = {
+    "profile": 3600,
+    "income": 3600,
+    "balance": 3600,
+    "cashflow": 3600,
+    "metrics": 3600,
+    "earnings": 3600,
+}
+
+
+class FmpClient:
+    def __init__(self, config: FmpConfig) -> None:
+        self._api_key = config.api_key
+        self._http = httpx.Client(timeout=15)
+        self._cache = TTLCache()
+
+    def _get(
+        self, path: str, params: dict[str, str] | None = None, cache_key: str | None = None
+    ) -> Any:
+        params = dict(params) if params else {}
+        params["apikey"] = self._api_key
+
+        ttl = CACHE_TTLS.get(cache_key or "", 0)
+        if ttl > 0 and cache_key:
+            full_key = (
+                cache_key
+                + "&"
+                + "&".join(f"{k}={v}" for k, v in sorted(params.items()) if k != "apikey")
+            )
+            cached = self._cache.get(full_key, ttl)
+            if cached is not None:
+                return cached
+
+        resp = self._http.get(f"{BASE_URL}{path}", params=params)
+        resp.raise_for_status()
+        result = resp.json()
+
+        if ttl > 0 and cache_key:
+            self._cache.put(full_key, result)
+
+        return result
+
+    def get_company_profile(self, symbol: str) -> Any:
+        data = self._get(f"/profile/{symbol}", cache_key="profile")
+        profile = data[0] if data else {}
+        return process("fmp:profile", profile)
+
+    def get_income_statement(self, symbol: str, period: str = "annual", limit: int = 4) -> Any:
+        data = self._get(
+            f"/income-statement/{symbol}",
+            {"period": period, "limit": str(limit)},
+            cache_key="income",
+        )
+        return process("fmp:income-statement", data)
+
+    def get_balance_sheet(self, symbol: str, period: str = "annual", limit: int = 4) -> Any:
+        data = self._get(
+            f"/balance-sheet-statement/{symbol}",
+            {"period": period, "limit": str(limit)},
+            cache_key="balance",
+        )
+        return process("fmp:balance-sheet", data)
+
+    def get_cash_flow(self, symbol: str, period: str = "annual", limit: int = 4) -> Any:
+        data = self._get(
+            f"/cash-flow-statement/{symbol}",
+            {"period": period, "limit": str(limit)},
+            cache_key="cashflow",
+        )
+        return process("fmp:cash-flow", data)
+
+    def get_key_metrics(self, symbol: str, period: str = "annual", limit: int = 4) -> Any:
+        data = self._get(
+            f"/key-metrics/{symbol}",
+            {"period": period, "limit": str(limit)},
+            cache_key="metrics",
+        )
+        return process("fmp:key-metrics", data)
+
+    def get_earnings_calendar(
+        self, from_date: str | None = None, to_date: str | None = None
+    ) -> Any:
+        params: dict[str, str] = {}
+        if from_date:
+            params["from"] = from_date
+        if to_date:
+            params["to"] = to_date
+        data = self._get("/earning_calendar", params, cache_key="earnings")
+        return process("fmp:earnings-calendar", data)

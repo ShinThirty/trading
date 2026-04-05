@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-MCP server for trading stocks and options on Webull. Exposes Webull brokerage data and order management as MCP tools for use with Claude. Supports stock orders and option orders (single-leg and multi-leg strategies like spreads, iron condors, etc.).
+MCP server for trading stocks and options on Webull, with integrated market analysis data from multiple providers. Exposes brokerage operations, option chains with greeks, fundamentals, news, economic data, and sentiment as MCP tools for use with Claude.
 
 ## Commands
 
@@ -22,15 +22,31 @@ To add to Claude Code: `claude mcp add trading-mcp -- uv run trading-mcp`
 
 ```
 src/trading_mcp/
-├── config.py            # Loads credentials from ~/.webullrc (INI format, [webull] section)
-├── webull_client.py     # Direct HTTP calls to Webull API with HMAC-SHA1 signing
-├── response_filters.py  # Per-endpoint field filtering + markdown table transformation
-└── server.py            # FastMCP server definition, tool registration, lifespan
+├── config.py              # Loads credentials from ~/.tradingrc (all providers)
+├── webull_client.py       # Webull REST API with HMAC-SHA1 signing + TTL cache
+├── tradier_client.py      # Tradier API — option chains, greeks, IV
+├── finnhub_client.py      # Finnhub API — news, earnings, economic calendar, financials
+├── fmp_client.py          # FMP API — income statement, balance sheet, cash flow, metrics
+├── fred_client.py         # FRED API — macroeconomic data series (CPI, GDP, VIX, etc.)
+├── alphavantage_client.py # Alpha Vantage API — news sentiment, top movers
+├── response_filters.py    # Per-endpoint field filtering + markdown table transformation
+└── server.py              # FastMCP server, tool registration, lifespan
 ```
 
-**Data flow:** MCP tool call → `server.py` (extracts client from lifespan context) → `webull_client.py` (signed HTTP request to Webull) → `response_filters.process()` (filter fields, then transform to markdown table) → returns string to FastMCP.
+**Data flow:** MCP tool call → `server.py` (extracts client from lifespan context) → `*_client.py` (HTTP request to provider) → returns data to FastMCP. Webull responses additionally pass through `response_filters.process()` for field filtering and markdown table transformation.
 
-The `WebullClient` is created once during server lifespan startup and shared across all tool invocations via FastMCP's lifespan context pattern.
+All clients are created once during server lifespan startup. Only Webull is required — other providers are optional and tools will return a clear error if the provider isn't configured.
+
+### Provider Roles
+
+| Provider | Role | Auth |
+|---|---|---|
+| **Webull** (required) | Brokerage: account, orders, positions, quotes, bars | HMAC-SHA1 |
+| **Tradier** | Option chains with greeks + IV | Bearer token |
+| **Finnhub** | News, earnings calendar, economic calendar, key metrics | API key |
+| **FMP** | Financial statements, company profiles, valuation metrics | API key |
+| **FRED** | Macroeconomic data (CPI, GDP, rates, VIX, yield curve) | API key |
+| **Alpha Vantage** | News sentiment scoring, top market movers | API key |
 
 ### No Webull SDK
 
@@ -38,13 +54,30 @@ We call the Webull REST API directly instead of using `webull-python-sdk-*` pack
 
 ## Credentials
 
-Stored in `~/.webullrc`:
+Stored in `~/.tradingrc` (INI format). Only `[webull]` is required — other sections are optional:
+
 ```ini
 [webull]
 app_key = <your_app_key>
 app_secret = <your_app_secret>
 account_id = <your_account_id>
 region_id = us
+
+[tradier]
+api_token = <your_sandbox_or_production_token>
+sandbox = true
+
+[finnhub]
+api_key = <your_api_key>
+
+[fmp]
+api_key = <your_api_key>
+
+[fred]
+api_key = <your_api_key>
+
+[alphavantage]
+api_key = <your_api_key>
 ```
 
 ## Webull API
@@ -54,10 +87,11 @@ region_id = us
 - **Option order endpoints** use different paths (`/openapi/account/orders/option/*`) and pass `account_id` as a query param (not in body). Stock order endpoints (`/trade/order/*`) pass `account_id` in the POST body.
 - **Auth:** HMAC-SHA1 signature over sorted headers + URI + query params + MD5(body). Headers: `x-api-key`, `x-api-timestamp`, `x-api-sign-version`, `x-api-sign-algorithm`, `x-api-nonce`, `x-api-signature`.
 - **Option API regional availability:** The option order endpoints (`/openapi/account/orders/option/*`) are documented as **HK-only** in the Webull SDK docs (v0.1.18, Sep 2025). Stock order endpoints (`/trade/order/*`) have no region restriction and work for US. The `new_orders` body structure supports both single-leg and multi-leg strategies (nested `orders` list per entry). When US API access is available, test the option endpoints — US support may have been added since the docs were last updated. Do not remove the option tools; they're ready for when US support lands.
+- **Caching:** GET requests are cached in-memory with per-endpoint TTLs configured in `CACHE_TTLS` (webull_client.py). Static metadata: 1 hour. Historical bars: 5 min. Account state: 60s. Orders: 30s. Live quotes: not cached.
 
 ## Response Processing
 
-Webull API responses contain many fields that waste tokens and can confuse the model. All responses pass through a two-stage pipeline in `response_filters.py` via `process()`:
+Webull API responses contain many fields that waste tokens and can confuse the model. All Webull responses pass through a two-stage pipeline in `response_filters.py` via `process()`:
 
 1. **Field filtering (`FIELD_FILTERS`)** — maps endpoint path to a set of top-level keys to keep. `None` means passthrough (current default for all endpoints).
 2. **Transformation (`TRANSFORMERS`)** — maps endpoint path to a function that converts the filtered data into a **markdown table string**. This is critical for reducing hallucinations — the model parses tables far more reliably than nested JSON.
@@ -73,7 +107,8 @@ When adding a new endpoint or updating processing, inspect the raw API response 
 
 ## Conventions
 
-- All MCP tools are defined in `server.py` and delegate to `WebullClient` methods
-- `WebullClient` methods return markdown table strings (once transformers are populated) or raw dicts/lists (passthrough)
-- New tools should follow the same pattern: `@mcp.tool()` in server.py → method in webull_client.py → filter + transformer in response_filters.py
+- All MCP tools are defined in `server.py` and delegate to client methods
+- Each provider has its own client file with a simple HTTP wrapper
+- Client helper functions in server.py (`_webull()`, `_tradier()`, etc.) extract the client from lifespan context and raise a clear error if the provider isn't configured
+- New tools should follow the same pattern: `@mcp.tool()` in server.py → method in `*_client.py`
 - Ruff rules: E, F, I (isort), UP (pyupgrade). Line length: 100.

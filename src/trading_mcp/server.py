@@ -1,25 +1,85 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
 
+from trading_mcp.alphavantage_client import AlphaVantageClient
 from trading_mcp.config import load_config
+from trading_mcp.finnhub_client import FinnhubClient
+from trading_mcp.fmp_client import FmpClient
+from trading_mcp.fred_client import FredClient
+from trading_mcp.tradier_client import TradierClient
 from trading_mcp.webull_client import WebullClient
 
 
 @asynccontextmanager
 async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
     config = load_config()
-    client = WebullClient(config)
-    yield {"client": client}
+    ctx: dict[str, Any] = {"webull": WebullClient(config.webull)}
+    if config.tradier:
+        ctx["tradier"] = TradierClient(config.tradier)
+    if config.finnhub:
+        ctx["finnhub"] = FinnhubClient(config.finnhub)
+    if config.fmp:
+        ctx["fmp"] = FmpClient(config.fmp)
+    if config.fred:
+        ctx["fred"] = FredClient(config.fred)
+    if config.alphavantage:
+        ctx["alphavantage"] = AlphaVantageClient(config.alphavantage)
+    yield ctx
 
 
 mcp = FastMCP("trading-mcp", lifespan=lifespan)
 
 
-def _client(ctx: Context) -> WebullClient:
-    return ctx.request_context.lifespan_context["client"]
+# ── Client helpers ──────────────────────────────────────────
 
+
+def _webull(ctx: Context) -> WebullClient:
+    return ctx.request_context.lifespan_context["webull"]
+
+
+def _tradier(ctx: Context) -> TradierClient:
+    client = ctx.request_context.lifespan_context.get("tradier")
+    if client is None:
+        raise RuntimeError("Tradier not configured. Add [tradier] section to ~/.tradingrc")
+    return client
+
+
+def _finnhub(ctx: Context) -> FinnhubClient:
+    client = ctx.request_context.lifespan_context.get("finnhub")
+    if client is None:
+        raise RuntimeError("Finnhub not configured. Add [finnhub] section to ~/.tradingrc")
+    return client
+
+
+def _fmp(ctx: Context) -> FmpClient:
+    client = ctx.request_context.lifespan_context.get("fmp")
+    if client is None:
+        raise RuntimeError("FMP not configured. Add [fmp] section to ~/.tradingrc")
+    return client
+
+
+def _fred(ctx: Context) -> FredClient:
+    client = ctx.request_context.lifespan_context.get("fred")
+    if client is None:
+        raise RuntimeError("FRED not configured. Add [fred] section to ~/.tradingrc")
+    return client
+
+
+def _alphavantage(ctx: Context) -> AlphaVantageClient:
+    client = ctx.request_context.lifespan_context.get("alphavantage")
+    if client is None:
+        raise RuntimeError(
+            "Alpha Vantage not configured. Add [alphavantage] section to ~/.tradingrc"
+        )
+    return client
+
+
+# ═══════════════════════════════════════════════════════════════
+# WEBULL — Brokerage (Account, Orders, Market Data)
+# ═══════════════════════════════════════════════════════════════
 
 # ── Account ──────────────────────────────────────────────────
 
@@ -27,7 +87,7 @@ def _client(ctx: Context) -> WebullClient:
 @mcp.tool()
 def get_account_profile(ctx: Context) -> dict:
     """Get account profile: account number, account type, and registration details."""
-    return _client(ctx).get_account_profile()
+    return _webull(ctx).get_account_profile()
 
 
 @mcp.tool()
@@ -36,7 +96,7 @@ def get_account_balance(ctx: Context, currency: str = "USD") -> dict:
 
     currency: the currency to report total assets in. Defaults to 'USD'.
     """
-    return _client(ctx).get_account_balance(currency)
+    return _webull(ctx).get_account_balance(currency)
 
 
 @mcp.tool()
@@ -45,7 +105,7 @@ def get_account_positions(ctx: Context) -> list[dict]:
     quantity, cost basis, market value, and unrealized P&L. Automatically paginates to
     fetch all positions.
     """
-    return _client(ctx).get_account_positions()
+    return _webull(ctx).get_account_positions()
 
 
 @mcp.tool()
@@ -57,7 +117,7 @@ def get_account_position_details(instrument_id: str, ctx: Context, size: int = 2
     get_instruments).
     size: max number of lots to return per page (default 20).
     """
-    return _client(ctx).get_account_position_details(instrument_id, size)
+    return _webull(ctx).get_account_position_details(instrument_id, size)
 
 
 # ── Orders ───────────────────────────────────────────────────
@@ -68,7 +128,7 @@ def get_open_orders(ctx: Context, page_size: int = 100) -> dict:
     """Get all currently open/pending orders. Returns each order's client_order_id,
     instrument_id, side, order_type, qty, status, limit_price, and time in force.
     """
-    return _client(ctx).get_open_orders(page_size)
+    return _webull(ctx).get_open_orders(page_size)
 
 
 @mcp.tool()
@@ -76,7 +136,7 @@ def get_today_orders(ctx: Context, page_size: int = 100) -> dict:
     """Get all orders placed today, including filled, cancelled, and pending.
     Returns each order's client_order_id, status, side, qty, filled_qty, and price.
     """
-    return _client(ctx).get_today_orders(page_size)
+    return _webull(ctx).get_today_orders(page_size)
 
 
 @mcp.tool()
@@ -86,7 +146,7 @@ def get_order_detail(client_order_id: str, ctx: Context) -> dict:
     client_order_id: the unique order ID assigned when the order was placed.
     Use get_open_orders or get_today_orders to find client_order_ids.
     """
-    return _client(ctx).get_order_detail(client_order_id)
+    return _webull(ctx).get_order_detail(client_order_id)
 
 
 @mcp.tool()
@@ -102,7 +162,7 @@ def get_order_history(
     start_date: earliest date to include (YYYY-MM-DD). Defaults to 7 days ago.
     end_date: latest date to include (YYYY-MM-DD). Defaults to today.
     """
-    return _client(ctx).get_order_history(start_date, end_date, page_size)
+    return _webull(ctx).get_order_history(start_date, end_date, page_size)
 
 
 # ── Stock Order Management ───────────────────────────────────
@@ -124,7 +184,7 @@ def preview_order(new_orders: list[dict], ctx: Context) -> dict:
       - limit_price: str (required for LIMIT and STOP_LIMIT)
       - stop_price: str (required for STOP and STOP_LIMIT)
     """
-    return _client(ctx).preview_order(new_orders)
+    return _webull(ctx).preview_order(new_orders)
 
 
 @mcp.tool()
@@ -156,7 +216,7 @@ def place_order(
     trailing_type: 'AMOUNT' or 'PERCENTAGE' for trailing stop orders.
     trailing_stop_step: the trailing amount or percentage (e.g. '1.00' or '2.5').
     """
-    return _client(ctx).place_order(
+    return _webull(ctx).place_order(
         {
             "client_order_id": client_order_id,
             "instrument_id": instrument_id,
@@ -194,7 +254,7 @@ def replace_order(
     All fields from place_order apply. You must re-specify all order parameters, not just
     the ones you want to change. The order must still be in a pending/open state.
     """
-    return _client(ctx).replace_order(
+    return _webull(ctx).replace_order(
         {
             "client_order_id": client_order_id,
             "instrument_id": instrument_id,
@@ -218,7 +278,7 @@ def cancel_order(client_order_id: str, ctx: Context) -> dict:
     client_order_id: the unique order ID from when the order was placed.
     Use get_open_orders to find cancellable orders.
     """
-    return _client(ctx).cancel_order(client_order_id)
+    return _webull(ctx).cancel_order(client_order_id)
 
 
 # ── Option Order Management ──────────────────────────────────
@@ -247,7 +307,7 @@ def preview_option(new_orders: list[dict], ctx: Context) -> dict:
 
     Multi-leg (e.g. vertical spread): one group with multiple legs at different strikes.
     """
-    return _client(ctx).preview_option(new_orders)
+    return _webull(ctx).preview_option(new_orders)
 
 
 @mcp.tool()
@@ -273,7 +333,7 @@ def place_option(new_orders: list[dict], ctx: Context) -> dict:
     Multi-leg (e.g. bull call spread): use one group with two legs — buy the lower
     strike call and sell the higher strike call, same expiration.
     """
-    return _client(ctx).place_option(new_orders)
+    return _webull(ctx).place_option(new_orders)
 
 
 @mcp.tool()
@@ -286,7 +346,7 @@ def replace_option(modify_orders: list[dict], ctx: Context) -> dict:
       - tif: 'DAY' or 'GTC'
     All order parameters must be re-specified, not just the changed ones.
     """
-    return _client(ctx).replace_option(modify_orders)
+    return _webull(ctx).replace_option(modify_orders)
 
 
 @mcp.tool()
@@ -296,7 +356,7 @@ def cancel_option(client_order_id: str, ctx: Context) -> dict:
     client_order_id: the unique order ID from when the order was placed.
     Use get_open_orders to find cancellable option orders.
     """
-    return _client(ctx).cancel_option(client_order_id)
+    return _webull(ctx).cancel_option(client_order_id)
 
 
 # ── Trade Info ───────────────────────────────────────────────
@@ -311,7 +371,7 @@ def get_trade_calendar(market: str, start: str, end: str, ctx: Context) -> dict:
     end: end date (YYYY-MM-DD).
     Returns a list of dates with their open/closed status.
     """
-    return _client(ctx).get_trade_calendar(market, start, end)
+    return _webull(ctx).get_trade_calendar(market, start, end)
 
 
 @mcp.tool()
@@ -322,7 +382,7 @@ def get_trade_instrument_detail(instrument_id: str, ctx: Context) -> dict:
     instrument_id: the Webull instrument ID (get from get_instruments, get_security_detail,
     or get_account_positions).
     """
-    return _client(ctx).get_trade_instrument_detail(instrument_id)
+    return _webull(ctx).get_trade_instrument_detail(instrument_id)
 
 
 @mcp.tool()
@@ -351,7 +411,7 @@ def get_security_detail(
 
     market: market code, defaults to 'US'.
     """
-    return _client(ctx).get_security_detail(
+    return _webull(ctx).get_security_detail(
         symbol, market, instrument_super_type, instrument_type, strike_price, init_exp_date
     )
 
@@ -362,7 +422,7 @@ def get_tradeable_instruments(ctx: Context, page_size: int = 100) -> dict:
     Returns instrument IDs, symbols, and instrument types. Useful for discovering
     what securities are tradeable.
     """
-    return _client(ctx).get_tradeable_instruments(page_size)
+    return _webull(ctx).get_tradeable_instruments(page_size)
 
 
 @mcp.tool()
@@ -370,10 +430,10 @@ def get_app_subscriptions(ctx: Context) -> dict:
     """Get API app subscription details: subscription ID, status, plan type, and
     which market data feeds are active.
     """
-    return _client(ctx).get_app_subscriptions()
+    return _webull(ctx).get_app_subscriptions()
 
 
-# ── Market Data ──────────────────────────────────────────────
+# ── Webull Market Data ──────────────────────────────────────
 
 
 @mcp.tool()
@@ -384,7 +444,7 @@ def get_quote(symbols: str, ctx: Context) -> list[dict]:
     symbols: comma-separated ticker symbols (e.g. 'AAPL,TSLA,MSFT').
     Results are not cached — each call fetches live data.
     """
-    return _client(ctx).get_quote(symbols)
+    return _webull(ctx).get_quote(symbols)
 
 
 @mcp.tool()
@@ -396,7 +456,7 @@ def get_instruments(symbols: str, ctx: Context) -> list[dict]:
     symbols: comma-separated ticker symbols (e.g. 'AAPL,TSLA').
     category: 'US_STOCK' (default), 'US_OPTION', 'HK_STOCK', etc.
     """
-    return _client(ctx).get_instruments(symbols)
+    return _webull(ctx).get_instruments(symbols)
 
 
 @mcp.tool()
@@ -418,7 +478,7 @@ def get_historical_bars(
     trading_sessions: set to 'pre_market', 'after_hours', or 'pre_market,after_hours'
       to include extended hours data. Omit for regular hours only.
     """
-    return _client(ctx).get_historical_bars(symbol, timespan, count, category, trading_sessions)
+    return _webull(ctx).get_historical_bars(symbol, timespan, count, category, trading_sessions)
 
 
 @mcp.tool()
@@ -439,7 +499,7 @@ def get_batch_historical_bars(
     category: 'US_STOCK' (default), 'US_OPTION', 'HK_STOCK', etc.
     trading_sessions: 'pre_market', 'after_hours', or both, to include extended hours.
     """
-    return _client(ctx).get_batch_historical_bars(
+    return _webull(ctx).get_batch_historical_bars(
         symbols, timespan, count, category, trading_sessions
     )
 
@@ -453,7 +513,7 @@ def get_eod_bars(instrument_ids: str, date: str, ctx: Context, count: int = 1) -
     date: the date to start from (YYYY-MM-DD).
     count: number of trading days of data to return (default 1).
     """
-    return _client(ctx).get_eod_bars(instrument_ids, date, count)
+    return _webull(ctx).get_eod_bars(instrument_ids, date, count)
 
 
 @mcp.tool()
@@ -474,9 +534,400 @@ def get_corp_actions(
     start_date: earliest event date (YYYY-MM-DD). Omit for no lower bound.
     end_date: latest event date (YYYY-MM-DD). Omit for no upper bound.
     """
-    return _client(ctx).get_corp_actions(
+    return _webull(ctx).get_corp_actions(
         instrument_ids, event_types, start_date, end_date, page_number, page_size
     )
+
+
+# ═══════════════════════════════════════════════════════════════
+# TRADIER — Option Chains, Greeks, IV
+# ═══════════════════════════════════════════════════════════════
+
+
+@mcp.tool()
+def get_option_expirations(symbol: str, ctx: Context) -> list[str]:
+    """Get all available option expiration dates for an underlying symbol.
+    Use this first to discover which expirations are available before fetching
+    the full chain.
+
+    symbol: underlying ticker symbol (e.g. 'AAPL', 'SPY', 'TSLA').
+    Returns a list of expiration dates as strings (YYYY-MM-DD).
+
+    Requires [tradier] section in ~/.tradingrc.
+    """
+    return _tradier(ctx).get_option_expirations(symbol)
+
+
+@mcp.tool()
+def get_option_strikes(symbol: str, expiration: str, ctx: Context) -> list[float]:
+    """Get all available strike prices for an underlying symbol at a specific expiration.
+
+    symbol: underlying ticker symbol (e.g. 'AAPL').
+    expiration: expiration date (YYYY-MM-DD, from get_option_expirations).
+    Returns a list of strike prices as numbers.
+
+    Requires [tradier] section in ~/.tradingrc.
+    """
+    return _tradier(ctx).get_option_strikes(symbol, expiration)
+
+
+@mcp.tool()
+def get_option_chain(
+    symbol: str,
+    expiration: str,
+    ctx: Context,
+    greeks: bool = True,
+) -> list[dict]:
+    """Get the full option chain for an underlying symbol at a specific expiration.
+    Returns all calls and puts with bid/ask, last price, volume, open interest,
+    and optionally greeks (delta, gamma, theta, vega, rho) and implied volatility.
+
+    symbol: underlying ticker symbol (e.g. 'AAPL').
+    expiration: expiration date (YYYY-MM-DD, from get_option_expirations).
+    greeks: include greeks and IV per contract (default True).
+
+    Typical workflow:
+    1. get_option_expirations('AAPL') → list of dates
+    2. get_option_chain('AAPL', '2026-04-17') → full chain with greeks
+
+    Note: Tradier sandbox data is delayed ~15 minutes.
+    Requires [tradier] section in ~/.tradingrc.
+    """
+    return _tradier(ctx).get_option_chain(symbol, expiration, greeks)
+
+
+# ═══════════════════════════════════════════════════════════════
+# FINNHUB — News, Earnings Calendar, Economic Calendar
+# ═══════════════════════════════════════════════════════════════
+
+
+@mcp.tool()
+def get_company_news(symbol: str, from_date: str, to_date: str, ctx: Context) -> list[dict]:
+    """Get recent news articles for a specific company.
+
+    symbol: ticker symbol (e.g. 'AAPL').
+    from_date: start date (YYYY-MM-DD).
+    to_date: end date (YYYY-MM-DD).
+    Returns a list of articles with headline, summary, source, url, and datetime.
+
+    Requires [finnhub] section in ~/.tradingrc.
+    """
+    return _finnhub(ctx).get_company_news(symbol, from_date, to_date)
+
+
+@mcp.tool()
+def get_market_news(ctx: Context, category: str = "general") -> list[dict]:
+    """Get general market news headlines.
+
+    category: 'general', 'forex', 'crypto', or 'merger'.
+    Returns a list of articles with headline, summary, source, url, and datetime.
+
+    Requires [finnhub] section in ~/.tradingrc.
+    """
+    return _finnhub(ctx).get_market_news(category)
+
+
+@mcp.tool()
+def get_economic_calendar(from_date: str, to_date: str, ctx: Context) -> list[dict]:
+    """Get upcoming economic events: FOMC meetings, CPI releases, jobs reports, GDP, etc.
+
+    from_date: start date (YYYY-MM-DD).
+    to_date: end date (YYYY-MM-DD).
+    Returns events with: event name, country, date/time, actual value, estimate,
+    previous value, and impact level (low/medium/high).
+
+    Requires [finnhub] section in ~/.tradingrc.
+    """
+    return _finnhub(ctx).get_economic_calendar(from_date, to_date)
+
+
+@mcp.tool()
+def get_earnings_calendar(from_date: str, to_date: str, ctx: Context) -> list[dict]:
+    """Get upcoming and recent earnings reports.
+
+    from_date: start date (YYYY-MM-DD).
+    to_date: end date (YYYY-MM-DD).
+    Returns each report's symbol, date, EPS actual, EPS estimate, revenue actual,
+    revenue estimate, and reporting time (bmo=before market open, amc=after market close).
+
+    Requires [finnhub] section in ~/.tradingrc.
+    """
+    return _finnhub(ctx).get_earnings_calendar(from_date, to_date)
+
+
+@mcp.tool()
+def get_company_profile(symbol: str, ctx: Context) -> dict:
+    """Get company profile from Finnhub: name, ticker, exchange, market cap, sector,
+    industry, IPO date, logo, and website.
+
+    symbol: ticker symbol (e.g. 'AAPL').
+
+    Requires [finnhub] section in ~/.tradingrc.
+    """
+    return _finnhub(ctx).get_company_profile(symbol)
+
+
+@mcp.tool()
+def get_basic_financials(symbol: str, ctx: Context) -> dict:
+    """Get key financial metrics: P/E ratio, P/B ratio, EPS, dividend yield, 52-week
+    high/low, market cap, beta, ROE, debt/equity, and dozens more.
+
+    symbol: ticker symbol (e.g. 'AAPL').
+    Returns a dict with 'metric' (current values) and 'series' (quarterly/annual history).
+
+    Requires [finnhub] section in ~/.tradingrc.
+    """
+    return _finnhub(ctx).get_basic_financials(symbol)
+
+
+@mcp.tool()
+def get_eps_estimates(symbol: str, ctx: Context) -> list[dict]:
+    """Get analyst EPS estimates for upcoming quarters: average, high, low, and number
+    of analysts.
+
+    symbol: ticker symbol (e.g. 'AAPL').
+
+    Requires [finnhub] section in ~/.tradingrc.
+    """
+    return _finnhub(ctx).get_eps_estimates(symbol)
+
+
+@mcp.tool()
+def get_recommendation_trends(symbol: str, ctx: Context) -> list[dict]:
+    """Get analyst recommendation trends: counts of strong buy, buy, hold, sell, and
+    strong sell ratings by month.
+
+    symbol: ticker symbol (e.g. 'AAPL').
+
+    Requires [finnhub] section in ~/.tradingrc.
+    """
+    return _finnhub(ctx).get_recommendation_trends(symbol)
+
+
+# ═══════════════════════════════════════════════════════════════
+# FMP — Fundamental Financial Data
+# ═══════════════════════════════════════════════════════════════
+
+
+@mcp.tool()
+def get_fmp_company_profile(symbol: str, ctx: Context) -> dict:
+    """Get detailed company profile from FMP: price, market cap, P/E, beta, vol avg,
+    last dividend, 52-week range, DCF, sector, industry, CEO, description, and more.
+
+    symbol: ticker symbol (e.g. 'AAPL').
+    More detailed than get_company_profile (Finnhub) — includes valuation metrics.
+
+    Requires [fmp] section in ~/.tradingrc.
+    """
+    return _fmp(ctx).get_company_profile(symbol)
+
+
+@mcp.tool()
+def get_income_statement(
+    symbol: str,
+    ctx: Context,
+    period: str = "annual",
+    limit: int = 4,
+) -> list[dict]:
+    """Get income statement: revenue, gross profit, operating income, net income, EPS,
+    EBITDA, and all line items.
+
+    symbol: ticker symbol (e.g. 'AAPL').
+    period: 'annual' or 'quarter'.
+    limit: number of periods to return (default 4).
+
+    Requires [fmp] section in ~/.tradingrc.
+    """
+    return _fmp(ctx).get_income_statement(symbol, period, limit)
+
+
+@mcp.tool()
+def get_balance_sheet(
+    symbol: str,
+    ctx: Context,
+    period: str = "annual",
+    limit: int = 4,
+) -> list[dict]:
+    """Get balance sheet: total assets, liabilities, equity, cash, debt, inventory,
+    and all line items.
+
+    symbol: ticker symbol (e.g. 'AAPL').
+    period: 'annual' or 'quarter'.
+    limit: number of periods to return (default 4).
+
+    Requires [fmp] section in ~/.tradingrc.
+    """
+    return _fmp(ctx).get_balance_sheet(symbol, period, limit)
+
+
+@mcp.tool()
+def get_cash_flow(
+    symbol: str,
+    ctx: Context,
+    period: str = "annual",
+    limit: int = 4,
+) -> list[dict]:
+    """Get cash flow statement: operating cash flow, capex, free cash flow, dividends
+    paid, share buybacks, and all line items.
+
+    symbol: ticker symbol (e.g. 'AAPL').
+    period: 'annual' or 'quarter'.
+    limit: number of periods to return (default 4).
+
+    Requires [fmp] section in ~/.tradingrc.
+    """
+    return _fmp(ctx).get_cash_flow(symbol, period, limit)
+
+
+@mcp.tool()
+def get_key_metrics(
+    symbol: str,
+    ctx: Context,
+    period: str = "annual",
+    limit: int = 4,
+) -> list[dict]:
+    """Get key financial metrics over time: revenue per share, net income per share,
+    P/E, P/B, P/S, EV/EBITDA, debt/equity, ROE, ROA, current ratio, and more.
+
+    symbol: ticker symbol (e.g. 'AAPL').
+    period: 'annual' or 'quarter'.
+    limit: number of periods to return (default 4).
+
+    Requires [fmp] section in ~/.tradingrc.
+    """
+    return _fmp(ctx).get_key_metrics(symbol, period, limit)
+
+
+@mcp.tool()
+def get_fmp_earnings_calendar(
+    ctx: Context,
+    from_date: str | None = None,
+    to_date: str | None = None,
+) -> list[dict]:
+    """Get earnings calendar from FMP: date, symbol, EPS estimate, EPS actual, revenue
+    estimate, revenue actual. Covers a broader universe than Finnhub.
+
+    from_date: start date (YYYY-MM-DD). Omit for default range.
+    to_date: end date (YYYY-MM-DD). Omit for default range.
+
+    Requires [fmp] section in ~/.tradingrc.
+    """
+    return _fmp(ctx).get_earnings_calendar(from_date, to_date)
+
+
+# ═══════════════════════════════════════════════════════════════
+# FRED — Macroeconomic Data
+# ═══════════════════════════════════════════════════════════════
+
+
+@mcp.tool()
+def get_economic_data(
+    series_id: str,
+    ctx: Context,
+    limit: int = 12,
+    sort_order: str = "desc",
+) -> list[dict]:
+    """Get historical values for a FRED economic data series.
+
+    series_id: FRED series ID. Common series:
+      - 'CPIAUCSL' — Consumer Price Index (CPI, monthly)
+      - 'GDP' — Gross Domestic Product (quarterly)
+      - 'UNRATE' — Unemployment Rate (monthly)
+      - 'FEDFUNDS' — Federal Funds Rate (monthly)
+      - 'T10Y2Y' — 10Y-2Y Treasury Yield Spread (daily, yield curve)
+      - 'VIXCLS' — CBOE VIX Volatility Index (daily)
+      - 'PAYEMS' — Nonfarm Payrolls (monthly)
+      - 'UMCSENT' — Consumer Sentiment (monthly)
+      - 'DGS10' — 10-Year Treasury Yield (daily)
+    limit: number of most recent observations to return (default 12).
+    sort_order: 'desc' (newest first) or 'asc' (oldest first).
+
+    Use search_fred_series to find other series by keyword.
+    Requires [fred] section in ~/.tradingrc.
+    """
+    return _fred(ctx).get_series_observations(series_id, limit, sort_order)
+
+
+@mcp.tool()
+def get_fred_series_info(series_id: str, ctx: Context) -> dict:
+    """Get metadata for a FRED series: title, frequency, units, seasonal adjustment,
+    last updated date, and description.
+
+    series_id: FRED series ID (e.g. 'CPIAUCSL', 'GDP', 'VIXCLS').
+
+    Requires [fred] section in ~/.tradingrc.
+    """
+    return _fred(ctx).get_series_info(series_id)
+
+
+@mcp.tool()
+def get_upcoming_economic_releases(ctx: Context, limit: int = 20) -> list[dict]:
+    """Get upcoming FRED data release dates: when the next CPI, GDP, jobs report,
+    and other economic data will be published.
+
+    limit: number of upcoming releases to return (default 20).
+
+    Requires [fred] section in ~/.tradingrc.
+    """
+    return _fred(ctx).get_upcoming_releases(limit)
+
+
+@mcp.tool()
+def search_fred_series(query: str, ctx: Context, limit: int = 10) -> list[dict]:
+    """Search for FRED economic data series by keyword. Returns series ID, title,
+    frequency, units, and description for each match.
+
+    query: search terms (e.g. 'inflation', 'housing starts', 'consumer credit').
+    limit: max results to return (default 10).
+
+    Use the returned series_id with get_economic_data to fetch actual values.
+    Requires [fred] section in ~/.tradingrc.
+    """
+    return _fred(ctx).search_series(query, limit)
+
+
+# ═══════════════════════════════════════════════════════════════
+# ALPHA VANTAGE — News Sentiment, Market Movers
+# ═══════════════════════════════════════════════════════════════
+
+
+@mcp.tool()
+def get_news_sentiment(
+    ctx: Context,
+    tickers: str | None = None,
+    topics: str | None = None,
+    limit: int = 10,
+) -> list[dict]:
+    """Get news articles with AI-generated sentiment scores per ticker.
+
+    Each article includes: title, summary, source, url, overall_sentiment_score (-1 to 1),
+    overall_sentiment_label (Bearish/Somewhat-Bearish/Neutral/Somewhat-Bullish/Bullish),
+    and per-ticker sentiment with relevance scores.
+
+    tickers: comma-separated symbols to filter by (e.g. 'AAPL,TSLA'). Omit for broad news.
+    topics: comma-separated topic filters — 'earnings', 'ipo', 'mergers_and_acquisitions',
+      'financial_markets', 'economy_fiscal', 'economy_monetary', 'economy_macro',
+      'energy_transportation', 'finance', 'technology', etc. Omit for all topics.
+    limit: max articles to return (default 10, max 50).
+
+    Note: Alpha Vantage free tier is limited to 25 requests/day. Use strategically.
+    Requires [alphavantage] section in ~/.tradingrc.
+    """
+    return _alphavantage(ctx).get_news_sentiment(tickers, topics, limit=limit)
+
+
+@mcp.tool()
+def get_top_movers(ctx: Context) -> dict:
+    """Get today's top market movers: top 20 gainers, top 20 losers, and most actively
+    traded stocks. Each entry includes ticker, price, change amount, change %, and volume.
+
+    Note: Alpha Vantage free tier is limited to 25 requests/day.
+    Requires [alphavantage] section in ~/.tradingrc.
+    """
+    return _alphavantage(ctx).get_top_gainers_losers()
+
+
+# ═══════════════════════════════════════════════════════════════
 
 
 def main():

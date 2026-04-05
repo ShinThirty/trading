@@ -3,7 +3,6 @@ import hashlib
 import hmac
 import json
 import socket
-import time
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -11,6 +10,7 @@ from urllib.parse import quote
 
 import httpx
 
+from trading_mcp.cache import TTLCache
 from trading_mcp.config import WebullConfig
 from trading_mcp.response_filters import process
 
@@ -42,31 +42,6 @@ CACHE_TTLS: dict[str, int] = {
     "/trade/order/detail": 30,
     "/openapi/account/orders/history": 30,
 }
-
-
-class _TTLCache:
-    def __init__(self) -> None:
-        self._store: dict[str, tuple[float, Any]] = {}
-
-    def get(self, key: str, ttl: int) -> Any | None:
-        entry = self._store.get(key)
-        if entry is None:
-            return None
-        ts, value = entry
-        if time.monotonic() - ts > ttl:
-            del self._store[key]
-            return None
-        return value
-
-    def put(self, key: str, value: Any) -> None:
-        self._store[key] = (time.monotonic(), value)
-
-    def invalidate(self, prefix: str | None = None) -> None:
-        if prefix is None:
-            self._store.clear()
-        else:
-            for k in [k for k in self._store if k.startswith(prefix)]:
-                del self._store[k]
 
 
 def _iso8601_now() -> str:
@@ -133,7 +108,7 @@ class WebullClient:
     def __init__(self, config: WebullConfig) -> None:
         self._config = config
         self._http = httpx.Client(timeout=15)
-        self._cache = _TTLCache()
+        self._cache = TTLCache()
 
     def _cache_key(self, path: str, params: dict[str, str] | None) -> str:
         parts = [path]
