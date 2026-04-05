@@ -9,8 +9,8 @@ from trading_mcp.response_filters import process
 BASE_URL = "https://www.alphavantage.co/query"
 
 CACHE_TTLS: dict[str, int] = {
-    "sentiment": 300,
-    "movers": 300,
+    "sentiment": 3600,
+    "movers": 900,
 }
 
 

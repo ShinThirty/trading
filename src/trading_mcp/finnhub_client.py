@@ -13,7 +13,6 @@ CACHE_TTLS: dict[str, int] = {
     "market-news": 300,
     "economic-calendar": 3600,
     "earnings-calendar": 3600,
-    "company-profile": 3600,
     "basic-financials": 3600,
     "eps-estimates": 3600,
     "recommendations": 3600,
@@ -89,10 +88,6 @@ class FinnhubClient:
             e for e in earnings if e.get("epsEstimate") is not None or e.get("revenueEstimate")
         ]
         return process("finnhub:earnings-calendar", earnings[:limit])
-
-    def get_company_profile(self, symbol: str) -> Any:
-        data = self._get("/stock/profile2", {"symbol": symbol}, cache_key="company-profile")
-        return process("finnhub:company-profile", data)
 
     def get_basic_financials(self, symbol: str) -> Any:
         data = self._get(

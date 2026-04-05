@@ -669,19 +669,6 @@ def get_earnings_calendar(
 
 
 @mcp.tool()
-def get_company_profile(symbol: str, ctx: Context) -> dict:
-    """Get company profile from Finnhub: name, ticker, exchange, market cap, sector,
-    industry, IPO date, logo, and website.
-
-    symbol: ticker symbol (e.g. 'AAPL').
-
-    Rate limit: 60 requests/min (shared across all Finnhub tools).
-    Requires [finnhub] section in ~/.tradingrc.
-    """
-    return _finnhub(ctx).get_company_profile(symbol)
-
-
-@mcp.tool()
 def get_basic_financials(symbol: str, ctx: Context) -> dict:
     """Get key financial metrics: P/E ratio, P/B ratio, EPS, dividend yield, 52-week
     high/low, market cap, beta, ROE, debt/equity, and dozens more.
@@ -728,12 +715,11 @@ def get_recommendation_trends(symbol: str, ctx: Context) -> list[dict]:
 
 
 @mcp.tool()
-def get_fmp_company_profile(symbol: str, ctx: Context) -> dict:
-    """Get detailed company profile from FMP: price, market cap, P/E, beta, vol avg,
-    last dividend, 52-week range, DCF, sector, industry, CEO, description, and more.
+def get_company_profile(symbol: str, ctx: Context) -> dict:
+    """Get company profile: name, price, market cap, beta, avg volume, last dividend,
+    52-week range, sector, industry, exchange, and CEO.
 
     symbol: ticker symbol (e.g. 'AAPL').
-    More detailed than get_company_profile (Finnhub) — includes valuation metrics.
 
     Rate limit: 250 requests/day (shared across all FMP tools).
     Requires [fmp] section in ~/.tradingrc.

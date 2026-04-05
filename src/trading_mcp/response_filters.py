@@ -241,25 +241,6 @@ def _transform_earnings_calendar(data: list[dict]) -> str:
     return _list_table(rows)
 
 
-def _transform_company_profile(data: dict) -> str:
-    if not data:
-        return "(no data)"
-    mkt_cap = data.get("marketCapitalization")
-    # Finnhub reports market cap in millions
-    mkt_cap_display = _fmt_large(mkt_cap * 1e6) if mkt_cap else ""
-    return _kv_table(
-        {
-            "Name": data.get("name"),
-            "Ticker": data.get("ticker"),
-            "Exchange": data.get("exchange"),
-            "Industry": data.get("finnhubIndustry"),
-            "Market Cap": mkt_cap_display,
-            "IPO Date": data.get("ipo"),
-            "Website": data.get("weburl"),
-        }
-    )
-
-
 def _transform_basic_financials(data: dict) -> str:
     if not data:
         return "(no data)"
@@ -539,7 +520,6 @@ TRANSFORMERS: dict[str, Callable[[Any], Any]] = {
     "finnhub:market-news": _transform_market_news,
     "finnhub:economic-calendar": _transform_economic_calendar,
     "finnhub:earnings-calendar": _transform_earnings_calendar,
-    "finnhub:company-profile": _transform_company_profile,
     "finnhub:basic-financials": _transform_basic_financials,
     "finnhub:eps-estimates": _transform_eps_estimates,
     "finnhub:recommendations": _transform_recommendations,
