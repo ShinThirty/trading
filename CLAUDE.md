@@ -91,24 +91,45 @@ api_key = <your_api_key>
 
 ## Response Processing
 
-Webull API responses contain many fields that waste tokens and can confuse the model. All Webull responses pass through a two-stage pipeline in `response_filters.py` via `process()`:
+All API responses pass through `process(key, data)` in `response_filters.py`, which applies two stages:
 
-1. **Field filtering (`FIELD_FILTERS`)** — maps endpoint path to a set of top-level keys to keep. `None` means passthrough (current default for all endpoints).
-2. **Transformation (`TRANSFORMERS`)** — maps endpoint path to a function that converts the filtered data into a **markdown table string**. This is critical for reducing hallucinations — the model parses tables far more reliably than nested JSON.
+1. **Field filtering (`FIELD_FILTERS`)** — maps key to a set of top-level keys to keep. `None` means passthrough. Only used for Webull endpoints currently.
+2. **Transformation (`TRANSFORMERS`)** — maps key to a function that converts data into a **markdown table string**. This is critical for reducing hallucinations — the model parses tables far more reliably than nested JSON.
+
+Keys use the API path for Webull endpoints (e.g. `"/account/profile"`) and a namespaced logical key for external providers (e.g. `"tradier:chain"`, `"finnhub:company-news"`).
 
 Helper functions in `response_filters.py`:
-- `_kv_table(data)` — for single-object responses (e.g. account profile → two-column Field/Value table)
-- `_list_table(items, columns)` — for list responses (e.g. positions → one row per holding)
+- `_kv_table(data)` — for single-object responses (e.g. company profile → two-column Field/Value table)
+- `_list_table(items, columns)` — for list responses (e.g. option chain → one row per contract)
 - `_md_table(headers, rows)` — low-level builder for custom layouts
-
-When adding a new endpoint or updating processing, inspect the raw API response first, then:
-- Populate the keep-set in `FIELD_FILTERS` with only the fields needed.
-- Add a transformer in `TRANSFORMERS` that returns a markdown table string.
+- `_fmt_number(val, decimals)` — format numbers with commas and fixed decimals
+- `_fmt_large(val)` — format large numbers as B/M/K (e.g. 2.5T, 150.3B, 42.1M)
+- `_unix_to_date(ts)` — convert unix timestamps to `YYYY-MM-DD HH:MM`
 
 ## Conventions
 
 - All MCP tools are defined in `server.py` and delegate to client methods
 - Each provider has its own client file with a simple HTTP wrapper
 - Client helper functions in server.py (`_webull()`, `_tradier()`, etc.) extract the client from lifespan context and raise a clear error if the provider isn't configured
-- New tools should follow the same pattern: `@mcp.tool()` in server.py → method in `*_client.py`
 - Ruff rules: E, F, I (isort), UP (pyupgrade). Line length: 100.
+
+### Adding a New API Provider
+
+Follow these steps to integrate a new data provider:
+
+1. **Config** (`config.py`): Add a frozen dataclass for the provider's credentials (e.g. `NewProviderConfig`). Add it as an optional field on `AppConfig`. Parse it from `~/.tradingrc` in `load_config()` if the section exists.
+
+2. **Client** (`newprovider_client.py`): Create a client class with:
+   - `__init__` taking the config dataclass, creating an `httpx.Client` and a `TTLCache` (from `cache.py`)
+   - A `_get()` method that handles auth (add API key to params or headers), caching (check/store with `cache_key`), and calls `process()` from `response_filters.py` on the result
+   - One public method per API endpoint, each passing a logical key to `process()` (e.g. `"provider:endpoint-name"`)
+   - A module-level `CACHE_TTLS` dict mapping cache keys to TTL in seconds. Use 0 or omit for no caching. Exclude API keys/tokens from cache keys.
+
+3. **Response transformers** (`response_filters.py`): For each endpoint, add a transformer function that converts the raw response to a markdown table string using the helper functions (`_kv_table`, `_list_table`, `_fmt_number`, `_fmt_large`). Register it in the `TRANSFORMERS` dict with the same logical key used in the client.
+
+4. **Server** (`server.py`):
+   - Import the client class and add a `_newprovider(ctx)` helper that extracts it from lifespan context (raising `RuntimeError` with setup instructions if not configured)
+   - In the `lifespan()` function, create the client if the config section exists
+   - Add `@mcp.tool()` functions with detailed docstrings covering: what the tool returns, what each parameter means with valid values, where to get required IDs, and a note that it requires the provider's config section
+
+5. **Docs** (`CLAUDE.md`): Add the provider to the Architecture file tree, Provider Roles table, and Credentials example.
