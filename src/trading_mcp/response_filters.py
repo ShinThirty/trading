@@ -134,6 +134,207 @@ FIELD_FILTERS: dict[str, set[str] | None] = {
 # ── Transformers ─────────────────────────────────────────────
 
 
+# ── Webull ──
+
+
+def _transform_account_profile(data: dict) -> str:
+    if not data:
+        return "(no data)"
+    return _kv_table(data)
+
+
+def _transform_account_balance(data: dict) -> str:
+    if not data:
+        return "(no data)"
+    # Flatten the nested account_currency_assets into top-level
+    assets = data.get("account_currency_assets", [])
+    usd = assets[0] if assets else {}
+    selected = {
+        "Net Liquidation": _fmt_number(usd.get("net_liquidation_value")),
+        "Market Value": _fmt_number(data.get("total_market_value")),
+        "Cash Balance": _fmt_number(data.get("total_cash_balance")),
+        "Cash Power": _fmt_number(usd.get("cash_power")),
+        "Margin Power": _fmt_number(usd.get("margin_power")),
+        "Margin Utilization": data.get("margin_utilization_rate"),
+        "Available Withdrawal": _fmt_number(usd.get("available_withdrawal")),
+        "Pending Incoming": _fmt_number(usd.get("pending_incoming")),
+    }
+    return _kv_table({k: v for k, v in selected.items() if v and v != "0.00"})
+
+
+def _transform_account_positions(data: list[dict]) -> str:
+    if not data:
+        return "(no positions)"
+    rows = [
+        {
+            "Symbol": p.get("symbol", ""),
+            "Qty": p.get("qty", ""),
+            "Cost": _fmt_number(p.get("unit_cost")),
+            "Last": _fmt_number(p.get("last_price")),
+            "Mkt Value": _fmt_number(p.get("market_value")),
+            "P&L": _fmt_number(p.get("unrealized_profit_loss")),
+            "P&L %": _fmt_number(float(p.get("unrealized_profit_loss_rate", 0)) * 100),
+        }
+        for p in data
+    ]
+    return _list_table(rows)
+
+
+def _transform_snapshot(data: list[dict]) -> str:
+    if not data:
+        return "(no quotes)"
+    rows = [
+        {
+            "Symbol": q.get("symbol", ""),
+            "Price": _fmt_number(q.get("price")),
+            "Open": _fmt_number(q.get("open")),
+            "High": _fmt_number(q.get("high")),
+            "Low": _fmt_number(q.get("low")),
+            "Prev Close": _fmt_number(q.get("pre_close")),
+            "Volume": _fmt_large(q.get("volume")),
+            "Change": _fmt_number(q.get("change")),
+            "Change %": _fmt_number(float(q.get("change_ratio", 0)) * 100),
+        }
+        for q in data
+    ]
+    return _list_table(rows)
+
+
+def _transform_instruments(data: list[dict]) -> str:
+    if not data:
+        return "(no instruments)"
+    rows = [
+        {
+            "Symbol": i.get("symbol", ""),
+            "Name": i.get("name", ""),
+            "Instrument ID": i.get("instrument_id", ""),
+            "Exchange": i.get("exchange_code", ""),
+            "Currency": i.get("currency", ""),
+        }
+        for i in data
+    ]
+    return _list_table(rows)
+
+
+def _transform_bars(data: list[dict]) -> str:
+    if not data:
+        return "(no bars)"
+    rows = [
+        {
+            "Date": (b.get("time") or "")[:10],
+            "Open": _fmt_number(b.get("open")),
+            "High": _fmt_number(b.get("high")),
+            "Low": _fmt_number(b.get("low")),
+            "Close": _fmt_number(b.get("close")),
+            "Volume": _fmt_large(b.get("volume")),
+        }
+        for b in data
+    ]
+    return _list_table(rows)
+
+
+def _transform_trade_instrument(data: dict) -> str:
+    if not data:
+        return "(no data)"
+    return _kv_table(data)
+
+
+def _transform_trade_calendar(data: list[dict]) -> str:
+    if not data:
+        return "(no data)"
+    rows = [
+        {
+            "Date": d.get("trade_day", ""),
+            "Type": d.get("trade_date_type", ""),
+        }
+        for d in data
+    ]
+    return _list_table(rows)
+
+
+def _transform_subscriptions(data: list[dict]) -> str:
+    if not data:
+        return "(no subscriptions)"
+    rows = [
+        {
+            "Account Number": s.get("account_number", ""),
+            "Account ID": s.get("account_id", ""),
+        }
+        for s in data
+    ]
+    return _list_table(rows)
+
+
+def _transform_open_orders(data: dict) -> str:
+    orders = data.get("orders", []) if isinstance(data, dict) else []
+    if not orders:
+        return "(no open orders)"
+    return _transform_order_list(orders)
+
+
+def _transform_today_orders(data: dict) -> str:
+    orders = data.get("orders", []) if isinstance(data, dict) else []
+    if not orders:
+        return "(no orders today)"
+    return _transform_order_list(orders)
+
+
+def _transform_order_list(orders: list[dict]) -> str:
+    rows = []
+    for o in orders:
+        items = o.get("items", [])
+        for item in items:
+            rows.append(
+                {
+                    "Symbol": item.get("symbol", ""),
+                    "Side": item.get("side", ""),
+                    "Type": item.get("order_type", ""),
+                    "Qty": item.get("qty", ""),
+                    "Filled": item.get("filled_qty", ""),
+                    "Price": _fmt_number(item.get("limit_price")),
+                    "Status": item.get("order_status", ""),
+                    "Time": (item.get("place_time") or "")[:19],
+                }
+            )
+    return _list_table(rows) if rows else "(no orders)"
+
+
+def _transform_order_detail(data: dict) -> str:
+    if not data:
+        return "(no data)"
+    items = data.get("items", [])
+    header = {
+        "Order ID": data.get("client_order_id"),
+        "TIF": data.get("tif"),
+        "Extended Hours": str(data.get("extended_hours_trading", "")),
+    }
+    result = _kv_table({k: v for k, v in header.items() if v})
+    if items:
+        result += "\n\n"
+        rows = [
+            {
+                "Symbol": item.get("symbol", ""),
+                "Side": item.get("side", ""),
+                "Type": item.get("order_type", ""),
+                "Qty": item.get("qty", ""),
+                "Filled": item.get("filled_qty", ""),
+                "Price": _fmt_number(item.get("limit_price")),
+                "Status": item.get("order_status", ""),
+                "Time": (item.get("place_time") or "")[:19],
+                "Commission": _fmt_number(item.get("commission")),
+            }
+            for item in items
+        ]
+        result += _list_table(rows)
+    return result
+
+
+def _transform_order_result(data: dict) -> str:
+    if not data:
+        return "(no data)"
+    return _kv_table(data)
+
+
 # ── Tradier ──
 
 
@@ -802,6 +1003,22 @@ def _transform_movers(data: dict) -> str:
 # ── Transformer registry ────────────────────────────────────
 
 TRANSFORMERS: dict[str, Callable[[Any], Any]] = {
+    # Webull
+    "/account/profile": _transform_account_profile,
+    "/account/balance": _transform_account_balance,
+    "/account/positions": _transform_account_positions,
+    "/market-data/snapshot": _transform_snapshot,
+    "/instrument/list": _transform_instruments,
+    "/market-data/bars": _transform_bars,
+    "/trade/instrument": _transform_trade_instrument,
+    "/trade/calendar": _transform_trade_calendar,
+    "/app/subscriptions/list": _transform_subscriptions,
+    "/trade/orders/list-open": _transform_open_orders,
+    "/trade/orders/list-today": _transform_today_orders,
+    "/trade/order/detail": _transform_order_detail,
+    "/trade/order/place": _transform_order_result,
+    "/trade/order/replace": _transform_order_result,
+    "/trade/order/cancel": _transform_order_result,
     # Tradier
     "tradier:expirations": _transform_option_expirations,
     "tradier:strikes": _transform_option_strikes,

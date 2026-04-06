@@ -119,6 +119,26 @@ class WebullClient:
             parts.extend(f"{k}={v}" for k, v in sorted(params.items()))
         return "&".join(parts)
 
+    def _get_raw(
+        self,
+        host: str,
+        path: str,
+        params: dict[str, str] | None = None,
+    ) -> Any:
+        """GET without process() — for paginated endpoints that need post-aggregation."""
+        headers = _build_signature(
+            host=host,
+            uri=path,
+            app_key=self._config.app_key,
+            app_secret=self._config.app_secret,
+            query_params=params,
+        )
+        headers["Accept-Encoding"] = "gzip"
+        url = f"https://{host}{path}"
+        resp = self._http.get(url, headers=headers, params=params)
+        resp.raise_for_status()
+        return resp.json()
+
     def _get(
         self,
         host: str,
@@ -186,7 +206,7 @@ class WebullClient:
             {"account_id": self._resolve_account_id(account_id), "total_asset_currency": currency},
         )
 
-    def get_account_positions(self, account_id: str | None = None) -> list[dict]:
+    def get_account_positions(self, account_id: str | None = None) -> Any:
         aid = self._resolve_account_id(account_id)
         positions: list[dict] = []
         last_id: str | None = None
@@ -197,7 +217,8 @@ class WebullClient:
             }
             if last_id:
                 params["last_instrument_id"] = last_id
-            data = self._get(API_HOST, "/account/positions", params)
+            # Skip process() for pagination — apply after aggregation
+            data = self._get_raw(API_HOST, "/account/positions", params)
             holdings = data.get("holdings", [])
             positions.extend(holdings)
             if not data.get("has_next", False):
@@ -206,7 +227,7 @@ class WebullClient:
                 last_id = holdings[-1].get("instrument_id")
             else:
                 break
-        return positions
+        return process("/account/positions", positions)
 
     # ── Orders ───────────────────────────────────────────────
 
