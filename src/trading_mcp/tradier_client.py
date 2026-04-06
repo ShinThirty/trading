@@ -166,10 +166,10 @@ class TradierClient:
             ticks = [ticks]
         return process("tradier:timesales", ticks)
 
-    def get_clock(self) -> Any:
+    def get_clock(self) -> dict:
+        """Return raw market clock data (state, description, next change, etc.)."""
         data = self._get("/v1/markets/clock", cache_key="clock")
-        clock = data.get("clock", {})
-        return process("tradier:clock", clock)
+        return data.get("clock", {})
 
     # ── HTTP helpers for brokerage endpoints ────────────────────
 

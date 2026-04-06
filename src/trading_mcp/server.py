@@ -81,6 +81,21 @@ def _alphavantage(ctx: Context) -> AlphaVantageClient:
     return client
 
 
+def _check_market(ctx: Context, order_type: str, extended_hours: bool) -> None:
+    """Validate market state before placing an order."""
+    tradier = ctx.request_context.lifespan_context.get("tradier")
+    if tradier is None:
+        return  # skip check if Tradier not configured
+    state = tradier.get_clock().get("state", "closed")
+    if state == "closed":
+        raise RuntimeError(f"Market is closed. Cannot place orders. Current state: {state}")
+    if order_type == "MARKET" and state != "open" and not extended_hours:
+        raise RuntimeError(
+            f"MARKET orders require regular hours (state: {state}). "
+            "Use a LIMIT order with extended_hours_trading=True, or wait for market open."
+        )
+
+
 # ═══════════════════════════════════════════════════════════════
 # WEBULL — Brokerage (Account, Orders, Market Data)
 # ═══════════════════════════════════════════════════════════════
@@ -205,6 +220,7 @@ def place_order(
     trailing_type: 'AMOUNT' or 'PERCENTAGE' for trailing stop orders.
     trailing_stop_step: the trailing amount or percentage (e.g. '1.00' or '2.5').
     """
+    _check_market(ctx, order_type, extended_hours_trading)
     return _webull(ctx).place_order(
         {
             "client_order_id": client_order_id,
@@ -245,6 +261,7 @@ def replace_order(
     All fields from place_order apply. You must re-specify all order parameters, not just
     the ones you want to change. The order must still be in a pending/open state.
     """
+    _check_market(ctx, order_type, extended_hours_trading)
     return _webull(ctx).replace_order(
         {
             "client_order_id": client_order_id,
@@ -585,7 +602,9 @@ def get_market_clock(ctx: Context) -> str:
 
     Requires [tradier] section in ~/.tradingrc.
     """
-    return _tradier(ctx).get_clock()
+    from trading_mcp.response_filters import process
+
+    return process("tradier:clock", _tradier(ctx).get_clock())
 
 
 # ── Tradier Account ─────────────────────────────────────────
