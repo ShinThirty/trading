@@ -17,6 +17,7 @@ class WebullConfig:
 class TradierConfig:
     api_token: str
     sandbox: bool = True
+    account_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -80,6 +81,7 @@ def load_config(path: Path = RC_PATH) -> AppConfig:
         tradier = TradierConfig(
             api_token=parser.get("tradier", "api_token"),
             sandbox=parser.getboolean("tradier", "sandbox", fallback=True),
+            account_id=parser.get("tradier", "account_id", fallback=None) or None,
         )
 
     # Finnhub (optional)

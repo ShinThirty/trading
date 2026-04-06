@@ -493,6 +493,274 @@ def get_option_chain(
     return _tradier(ctx).get_option_chain(symbol, expiration, greeks)
 
 
+@mcp.tool()
+def get_option_lookup(ctx: Context, underlying: str) -> list:
+    """Get all option symbols for an underlying, including alternate roots (e.g. SPXW
+    for SPX weeklies). Useful for discovering available option contracts before pulling
+    historical data with get_tradier_history.
+
+    underlying: ticker symbol (e.g. 'AAPL', 'SPX', 'SPY').
+    Returns a list of OCC option symbols (e.g. 'AAPL260417C00260000').
+
+    Requires [tradier] section in ~/.tradingrc.
+    """
+    return _tradier(ctx).get_option_lookup(underlying)
+
+
+@mcp.tool()
+def get_tradier_history(
+    ctx: Context,
+    symbol: str,
+    interval: str = "daily",
+    start: str | None = None,
+    end: str | None = None,
+) -> list[dict]:
+    """Get historical OHLCV pricing data. Works for both stocks AND option contracts.
+
+    For option contracts, pass the OCC symbol (e.g. 'AAPL260417C00260000') — use
+    get_option_lookup to discover available symbols.
+
+    symbol: ticker or OCC option symbol.
+    interval: 'daily', 'weekly', or 'monthly'.
+    start: start date (YYYY-MM-DD). Defaults to beginning of available data.
+    end: end date (YYYY-MM-DD). Defaults to today.
+
+    Requires [tradier] section in ~/.tradingrc.
+    """
+    return _tradier(ctx).get_history(symbol, interval, start, end)
+
+
+@mcp.tool()
+def search_symbols(ctx: Context, query: str, indexes: bool = False) -> list[dict]:
+    """Search for stocks and ETFs by company name or partial symbol. Results are sorted
+    by average volume (most liquid first). Useful for stock discovery.
+
+    query: search term — company name or partial symbol (e.g. 'apple', 'semi', 'AI').
+    indexes: set True to include index symbols in results.
+
+    Requires [tradier] section in ~/.tradingrc.
+    """
+    return _tradier(ctx).search_symbols(query, indexes)
+
+
+@mcp.tool()
+def get_tradier_quote(ctx: Context, symbols: str, greeks: bool = False) -> list[dict]:
+    """Get real-time quotes for stocks or option contracts. When greeks=True, option
+    quotes include delta, gamma, theta, vega, and implied volatility.
+
+    symbols: comma-separated ticker symbols or OCC option symbols
+      (e.g. 'AAPL,TSLA' or 'AAPL260417C00260000').
+    greeks: include greeks and IV for option symbols (default False).
+
+    Requires [tradier] section in ~/.tradingrc.
+    """
+    return _tradier(ctx).get_quotes(symbols, greeks)
+
+
+@mcp.tool()
+def get_timesales(
+    ctx: Context,
+    symbol: str,
+    interval: str = "5min",
+    start: str | None = None,
+    end: str | None = None,
+) -> list[dict]:
+    """Get intraday time-and-sales tick data for a stock or option contract.
+    Higher granularity than historical bars — useful for intraday analysis and charting.
+
+    symbol: ticker or OCC option symbol (e.g. 'AAPL' or 'AAPL260417C00260000').
+    interval: tick interval — '1min', '5min', '15min'. Default '5min'.
+    start: start datetime (YYYY-MM-DD HH:MM). Defaults to market open today.
+    end: end datetime (YYYY-MM-DD HH:MM). Defaults to now.
+
+    Requires [tradier] section in ~/.tradingrc.
+    """
+    return _tradier(ctx).get_timesales(symbol, interval, start, end)
+
+
+@mcp.tool()
+def get_market_clock(ctx: Context) -> dict:
+    """Get current market status: whether the market is open, in pre-market, post-market,
+    or closed, plus the time of the next state change.
+
+    Requires [tradier] section in ~/.tradingrc.
+    """
+    return _tradier(ctx).get_clock()
+
+
+# ── Tradier Account ─────────────────────────────────────────
+
+
+@mcp.tool()
+def get_tradier_profile(ctx: Context) -> list[dict]:
+    """Get Tradier user profile with all linked accounts. Returns account number,
+    type, classification, option level, and day trader status for each account.
+
+    Use this to find your Tradier account_id.
+    Requires [tradier] section in ~/.tradingrc.
+    """
+    return _tradier(ctx).get_user_profile()
+
+
+@mcp.tool()
+def get_tradier_balances(ctx: Context, account_id: str | None = None) -> dict:
+    """Get Tradier account balance: total equity, cash, market value, option value,
+    buying power.
+
+    account_id: Tradier account number. Omit to use the default from ~/.tradingrc.
+    Requires [tradier] section in ~/.tradingrc.
+    """
+    return _tradier(ctx).get_tradier_balances(account_id)
+
+
+@mcp.tool()
+def get_tradier_positions(ctx: Context, account_id: str | None = None) -> list[dict]:
+    """Get current positions in a Tradier account: symbol, quantity, cost basis,
+    and date acquired.
+
+    account_id: Tradier account number. Omit to use the default from ~/.tradingrc.
+    Requires [tradier] section in ~/.tradingrc.
+    """
+    return _tradier(ctx).get_tradier_positions(account_id)
+
+
+@mcp.tool()
+def get_tradier_orders(
+    ctx: Context,
+    status: str | None = None,
+    page: int | None = None,
+    limit: int | None = None,
+    account_id: str | None = None,
+) -> list[dict]:
+    """Get orders in a Tradier account.
+
+    status: filter by status — 'pending', 'open', 'partially_filled', 'filled',
+      'rejected', 'cancelled'. Omit for all.
+    page: page number for pagination.
+    limit: max results per page.
+    account_id: Tradier account number. Omit to use the default from ~/.tradingrc.
+    Requires [tradier] section in ~/.tradingrc.
+    """
+    return _tradier(ctx).get_tradier_orders(status, page, limit, account_id)
+
+
+@mcp.tool()
+def get_tradier_order_detail(ctx: Context, order_id: str, account_id: str | None = None) -> dict:
+    """Get full detail for a specific Tradier order.
+
+    order_id: the numeric order ID (from get_tradier_orders).
+    account_id: Tradier account number. Omit to use the default from ~/.tradingrc.
+    Requires [tradier] section in ~/.tradingrc.
+    """
+    return _tradier(ctx).get_tradier_order_detail(order_id, account_id)
+
+
+@mcp.tool()
+def get_tradier_gainloss(
+    ctx: Context,
+    page: int | None = None,
+    limit: int | None = None,
+    sort_by: str | None = None,
+    sort: str | None = None,
+    account_id: str | None = None,
+) -> list[dict]:
+    """Get realized gain/loss for all closed positions in a Tradier account.
+
+    sort_by: 'closedate', 'opendate', 'symbol', or 'gainloss'.
+    sort: 'asc' or 'desc'.
+    account_id: Tradier account number. Omit to use the default from ~/.tradingrc.
+    Requires [tradier] section in ~/.tradingrc.
+    """
+    return _tradier(ctx).get_tradier_gainloss(page, limit, sort_by, sort, account_id)
+
+
+@mcp.tool()
+def get_tradier_account_history(
+    ctx: Context,
+    page: int | None = None,
+    limit: int | None = None,
+    activity_type: str | None = None,
+    account_id: str | None = None,
+) -> list[dict]:
+    """Get account activity history: trades, dividends, fees, transfers, etc.
+
+    activity_type: filter by type — 'trade', 'option', 'ach', 'wire', 'dividend',
+      'fee', 'tax', 'journal', 'check', 'transfer', 'adjustment'. Omit for all.
+    account_id: Tradier account number. Omit to use the default from ~/.tradingrc.
+    Requires [tradier] section in ~/.tradingrc.
+    """
+    return _tradier(ctx).get_tradier_history(page, limit, activity_type, account_id)
+
+
+# ── Tradier Order Management ───────────────────────────────
+
+
+@mcp.tool()
+def place_tradier_order(ctx: Context, order_params: dict, account_id: str | None = None) -> dict:
+    """Place an order on Tradier. Supports equity, option, multileg, combo, and
+    advanced order types (OTO, OCO, OTOCO).
+
+    order_params: dict with order parameters. The 'class' field determines the type.
+
+    EQUITY order:
+      {"class": "equity", "symbol": "AAPL", "side": "buy", "quantity": "10",
+       "type": "limit", "price": "250.00", "duration": "day"}
+      side: 'buy', 'sell', 'sell_short', 'buy_to_cover'
+
+    OPTION order:
+      {"class": "option", "symbol": "AAPL", "option_symbol": "AAPL260417C00260000",
+       "side": "buy_to_open", "quantity": "1", "type": "limit", "price": "4.50",
+       "duration": "day"}
+      side: 'buy_to_open', 'buy_to_close', 'sell_to_open', 'sell_to_close'
+
+    MULTILEG order (e.g. vertical spread, up to 4 legs):
+      {"class": "multileg", "symbol": "AAPL", "type": "debit", "price": "1.50",
+       "duration": "day",
+       "option_symbol[0]": "AAPL260417C00255000", "side[0]": "buy_to_open",
+       "quantity[0]": "1",
+       "option_symbol[1]": "AAPL260417C00265000", "side[1]": "sell_to_open",
+       "quantity[1]": "1"}
+      type: 'market', 'debit', 'credit', 'even'
+
+    PREVIEW: add "preview": "true" to any order to validate without executing.
+    Returns estimated commission, cost, and margin impact.
+
+    type: 'market', 'limit', 'stop', 'stop_limit'
+    duration: 'day', 'gtc', 'pre' (pre-market), 'post' (after-hours)
+    account_id: Tradier account number. Omit to use the default from ~/.tradingrc.
+    """
+    params = {k: str(v) for k, v in order_params.items()}
+    return _tradier(ctx).place_tradier_order(params, account_id)
+
+
+@mcp.tool()
+def modify_tradier_order(
+    ctx: Context,
+    order_id: str,
+    modifications: dict,
+    account_id: str | None = None,
+) -> dict:
+    """Modify a pending Tradier order. Only price, stop, type, and duration can be changed.
+
+    order_id: the numeric order ID (from get_tradier_orders).
+    modifications: dict of fields to change. Example:
+      {"type": "limit", "price": "255.00", "duration": "gtc"}
+    account_id: Tradier account number. Omit to use the default from ~/.tradingrc.
+    """
+    params = {k: str(v) for k, v in modifications.items()}
+    return _tradier(ctx).modify_tradier_order(order_id, params, account_id)
+
+
+@mcp.tool()
+def cancel_tradier_order(ctx: Context, order_id: str, account_id: str | None = None) -> dict:
+    """Cancel a pending Tradier order.
+
+    order_id: the numeric order ID (from get_tradier_orders).
+    account_id: Tradier account number. Omit to use the default from ~/.tradingrc.
+    """
+    return _tradier(ctx).cancel_tradier_order(order_id, account_id)
+
+
 # ═══════════════════════════════════════════════════════════════
 # FINNHUB — News, Earnings Calendar, Economic Calendar
 # ═══════════════════════════════════════════════════════════════

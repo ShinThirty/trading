@@ -151,6 +151,232 @@ def _transform_option_strikes(data: list) -> str:
     return _md_table(["Strike"], rows)
 
 
+def _transform_option_lookup(data: list) -> str:
+    if not data:
+        return "(no options)"
+    rows = [[str(o)] for o in data]
+    return _md_table(["Option Symbol"], rows)
+
+
+def _transform_tradier_history(data: list[dict]) -> str:
+    if not data:
+        return "(no data)"
+    rows = [
+        {
+            "Date": d.get("date", ""),
+            "Open": _fmt_number(d.get("open")),
+            "High": _fmt_number(d.get("high")),
+            "Low": _fmt_number(d.get("low")),
+            "Close": _fmt_number(d.get("close")),
+            "Volume": _fmt_large(d.get("volume")),
+        }
+        for d in data
+    ]
+    return _list_table(rows)
+
+
+def _transform_tradier_search(data: list[dict]) -> str:
+    if not data:
+        return "(no results)"
+    rows = [
+        {
+            "Symbol": s.get("symbol", ""),
+            "Exchange": s.get("exchange", ""),
+            "Type": s.get("type", ""),
+            "Description": s.get("description", ""),
+        }
+        for s in data
+    ]
+    return _list_table(rows)
+
+
+def _transform_tradier_quotes(data: list[dict]) -> str:
+    if not data:
+        return "(no quotes)"
+    rows = []
+    for q in data:
+        row: dict[str, str] = {
+            "Symbol": q.get("symbol", ""),
+            "Last": _fmt_number(q.get("last")),
+            "Bid": _fmt_number(q.get("bid")),
+            "Ask": _fmt_number(q.get("ask")),
+            "Volume": _fmt_large(q.get("volume")),
+            "Change": _fmt_number(q.get("change")),
+            "Change %": _fmt_number(q.get("change_percentage")),
+        }
+        greeks = q.get("greeks")
+        if greeks:
+            row["IV"] = _fmt_number(greeks.get("mid_iv"), 4)
+            row["Delta"] = _fmt_number(greeks.get("delta"), 4)
+            row["Gamma"] = _fmt_number(greeks.get("gamma"), 4)
+            row["Theta"] = _fmt_number(greeks.get("theta"), 4)
+            row["Vega"] = _fmt_number(greeks.get("vega"), 4)
+        rows.append(row)
+    return _list_table(rows)
+
+
+def _transform_tradier_timesales(data: list[dict]) -> str:
+    if not data:
+        return "(no data)"
+    rows = [
+        {
+            "Time": t.get("time", "")[:19],
+            "Open": _fmt_number(t.get("open")),
+            "High": _fmt_number(t.get("high")),
+            "Low": _fmt_number(t.get("low")),
+            "Close": _fmt_number(t.get("close")),
+            "Volume": _fmt_large(t.get("volume")),
+        }
+        for t in data
+    ]
+    return _list_table(rows)
+
+
+def _transform_tradier_clock(data: dict) -> str:
+    if not data:
+        return "(no data)"
+    return _kv_table(
+        {
+            "State": data.get("state"),
+            "Description": data.get("description"),
+            "Date": data.get("date"),
+            "Timestamp": data.get("timestamp"),
+            "Next State": data.get("next_state"),
+            "Next Change": data.get("next_change"),
+        }
+    )
+
+
+def _transform_tradier_profile(data: list[dict]) -> str:
+    if not data:
+        return "(no accounts)"
+    rows = [
+        {
+            "Account": a.get("account_number", ""),
+            "Type": a.get("type", ""),
+            "Classification": a.get("classification", ""),
+            "Option Level": str(a.get("option_level", "")),
+            "Day Trader": str(a.get("day_trader", "")),
+            "Status": a.get("status", ""),
+        }
+        for a in data
+    ]
+    return _list_table(rows)
+
+
+def _transform_tradier_balances(data: dict) -> str:
+    if not data:
+        return "(no data)"
+    selected = {
+        "Account": data.get("account_number"),
+        "Account Type": data.get("account_type"),
+        "Total Equity": _fmt_number(data.get("total_equity")),
+        "Total Cash": _fmt_number(data.get("total_cash")),
+        "Market Value": _fmt_number(data.get("market_value")),
+        "Option Value": _fmt_number(data.get("option_long_value")),
+        "Stock Buying Power": _fmt_number(data.get("stock_buying_power")),
+        "Option Buying Power": _fmt_number(data.get("option_buying_power")),
+        "Pending Cash": _fmt_number(data.get("pending_cash")),
+        "Uncleared Funds": _fmt_number(data.get("uncleared_funds")),
+    }
+    return _kv_table({k: v for k, v in selected.items() if v})
+
+
+def _transform_tradier_positions(data: list[dict]) -> str:
+    if not data:
+        return "(no positions)"
+    rows = [
+        {
+            "Symbol": p.get("symbol", ""),
+            "Qty": _fmt_number(p.get("quantity"), 0),
+            "Cost Basis": _fmt_number(p.get("cost_basis")),
+            "Date Acquired": p.get("date_acquired", ""),
+        }
+        for p in data
+    ]
+    return _list_table(rows)
+
+
+def _transform_tradier_orders(data: list[dict]) -> str:
+    if not data:
+        return "(no orders)"
+    rows = [
+        {
+            "ID": str(o.get("id", "")),
+            "Class": o.get("class", ""),
+            "Symbol": o.get("symbol", ""),
+            "Side": o.get("side", ""),
+            "Qty": _fmt_number(o.get("quantity"), 0),
+            "Type": o.get("type", ""),
+            "Price": _fmt_number(o.get("price")),
+            "Stop": _fmt_number(o.get("stop_price")),
+            "Status": o.get("status", ""),
+            "Duration": o.get("duration", ""),
+            "Created": (o.get("create_date") or "")[:10],
+        }
+        for o in data
+    ]
+    return _list_table(rows)
+
+
+def _transform_tradier_order_detail(data: dict) -> str:
+    if not data:
+        return "(no data)"
+    return _kv_table(data)
+
+
+def _transform_tradier_gainloss(data: list[dict]) -> str:
+    if not data:
+        return "(no closed positions)"
+    rows = [
+        {
+            "Symbol": g.get("symbol", ""),
+            "Qty": _fmt_number(g.get("quantity"), 0),
+            "Open Date": (g.get("open_date") or "")[:10],
+            "Close Date": (g.get("close_date") or "")[:10],
+            "Cost": _fmt_number(g.get("cost")),
+            "Proceeds": _fmt_number(g.get("proceeds")),
+            "Gain/Loss": _fmt_number(g.get("gain_loss")),
+            "G/L %": _fmt_number(g.get("gain_loss_percent")),
+        }
+        for g in data
+    ]
+    return _list_table(rows)
+
+
+def _transform_tradier_account_history(data: list[dict]) -> str:
+    if not data:
+        return "(no activity)"
+    rows = [
+        {
+            "Date": (e.get("date") or "")[:10],
+            "Type": e.get("type", ""),
+            "Amount": _fmt_number(e.get("amount")),
+            "Description": e.get("description", ""),
+        }
+        for e in data
+    ]
+    return _list_table(rows)
+
+
+def _transform_tradier_place_order(data: dict) -> str:
+    if not data:
+        return "(no data)"
+    return _kv_table(data)
+
+
+def _transform_tradier_modify_order(data: dict) -> str:
+    if not data:
+        return "(no data)"
+    return _kv_table(data)
+
+
+def _transform_tradier_cancel_order(data: dict) -> str:
+    if not data:
+        return "(no data)"
+    return _kv_table(data)
+
+
 def _transform_option_chain(data: list[dict]) -> str:
     if not data:
         return "(no options)"
@@ -580,6 +806,22 @@ TRANSFORMERS: dict[str, Callable[[Any], Any]] = {
     "tradier:expirations": _transform_option_expirations,
     "tradier:strikes": _transform_option_strikes,
     "tradier:chain": _transform_option_chain,
+    "tradier:option-lookup": _transform_option_lookup,
+    "tradier:history": _transform_tradier_history,
+    "tradier:search": _transform_tradier_search,
+    "tradier:quotes": _transform_tradier_quotes,
+    "tradier:timesales": _transform_tradier_timesales,
+    "tradier:clock": _transform_tradier_clock,
+    "tradier:profile": _transform_tradier_profile,
+    "tradier:balances": _transform_tradier_balances,
+    "tradier:positions": _transform_tradier_positions,
+    "tradier:orders": _transform_tradier_orders,
+    "tradier:order-detail": _transform_tradier_order_detail,
+    "tradier:gainloss": _transform_tradier_gainloss,
+    "tradier:account-history": _transform_tradier_account_history,
+    "tradier:place-order": _transform_tradier_place_order,
+    "tradier:modify-order": _transform_tradier_modify_order,
+    "tradier:cancel-order": _transform_tradier_cancel_order,
     # Finnhub
     "finnhub:company-news": _transform_company_news,
     "finnhub:market-news": _transform_market_news,
