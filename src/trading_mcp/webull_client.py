@@ -41,11 +41,11 @@ CACHE_TTLS: dict[str, int] = {
 # ── Rate limits per endpoint category ────────────────────────
 # (capacity, refill_rate_per_second)
 RATE_LIMITS: dict[str, tuple[int, float]] = {
-    "account": (2, 1.0),  # balance, positions, profile: 2 req/2s
-    "order_read": (2, 1.0),  # open orders, today orders, order detail: 2 req/2s
-    "order_write": (600, 10.0),  # place, replace, cancel: 600 req/60s
-    "instruments": (10, 0.33),  # instrument lookups: 10 req/30s
-    "market": (300, 5.0),  # quotes, bars: 300 req/60s
+    "account": (1, 1.0),  # balance, positions, profile: 2 req/2s — no burst
+    "order_read": (1, 1.0),  # open orders, today orders, order detail: 2 req/2s — no burst
+    "order_write": (5, 10.0),  # place, replace, cancel: 600 req/60s
+    "instruments": (3, 0.33),  # instrument lookups: 10 req/30s
+    "market": (10, 5.0),  # quotes, bars: 300 req/60s
 }
 
 _RATE_KEY_MAP: dict[str, str] = {

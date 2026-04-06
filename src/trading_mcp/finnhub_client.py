@@ -25,7 +25,7 @@ CACHE_TTLS: dict[str, int] = {
 
 
 RATE_LIMITS: dict[str, tuple[int, float]] = {
-    "default": (60, 1.0),  # 60 req/min
+    "default": (5, 1.0),  # 60 req/min — conservative burst
 }
 
 
