@@ -75,11 +75,11 @@ def _build_signature(
     body_params: dict[str, Any] | None = None,
 ) -> dict[str, str]:
     headers: dict[str, str] = {
-        "x-api-key": app_key,
-        "x-api-timestamp": _iso8601_now(),
-        "x-api-sign-version": "1.0",
-        "x-api-sign-algorithm": "HMAC-SHA1",
-        "x-api-nonce": _nonce(),
+        "x-app-key": app_key,
+        "x-timestamp": _iso8601_now(),
+        "x-signature-version": "1.0",
+        "x-signature-algorithm": "HMAC-SHA1",
+        "x-signature-nonce": _nonce(),
     }
     sign_params: dict[str, str] = {k.lower(): v for k, v in headers.items()}
     sign_params["host"] = host
@@ -100,7 +100,7 @@ def _build_signature(
         string_to_sign += "&" + body_string
     string_to_sign = quote(string_to_sign, safe="")
 
-    headers["x-api-signature"] = _sign(string_to_sign, app_secret)
+    headers["x-signature"] = _sign(string_to_sign, app_secret)
     return headers
 
 
