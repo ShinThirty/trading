@@ -7,6 +7,10 @@ class TokenBucket:
 
     Tokens refill at a constant rate up to a maximum capacity.
     acquire() blocks until a token is available, then consumes it.
+
+    Inspired by Apache Kafka's TokenBucket: tokens can go negative,
+    and the deficit deterministically computes the wait time. This
+    avoids retry loops and naturally staggers concurrent threads.
     """
 
     def __init__(self, capacity: int, refill_rate: float) -> None:
@@ -24,14 +28,13 @@ class TokenBucket:
 
     def acquire(self) -> None:
         """Block until a token is available, then consume it."""
-        while True:
-            with self._lock:
-                self._refill()
-                if self._tokens >= 1.0:
-                    self._tokens -= 1.0
-                    return
-                wait = (1.0 - self._tokens) / self._refill_rate
-            time.sleep(wait)
+        with self._lock:
+            self._refill()
+            self._tokens -= 1.0
+            if self._tokens >= 0.0:
+                return
+            wait = -self._tokens / self._refill_rate
+        time.sleep(wait)
 
 
 class RateLimiter:
