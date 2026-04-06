@@ -113,7 +113,7 @@ class WebullClient:
     def _cache_key(self, path: str, params: dict[str, str] | None) -> str:
         parts = [path]
         if params:
-            parts.extend(f"{k}={v}" for k, v in sorted(params.items()))
+            parts.extend(f"{k}={v}" for k, v in sorted(params.items()) if k != "account_id")
         return "&".join(parts)
 
     def _get(
