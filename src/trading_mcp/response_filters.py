@@ -168,6 +168,7 @@ def _transform_account_positions(data: list[dict]) -> str:
     rows = [
         {
             "Symbol": p.get("symbol", ""),
+            "Instrument ID": p.get("instrument_id", ""),
             "Qty": p.get("qty", ""),
             "Cost": _fmt_number(p.get("unit_cost")),
             "Last": _fmt_number(p.get("last_price")),
