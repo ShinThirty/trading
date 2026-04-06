@@ -15,6 +15,7 @@ CACHE_TTLS: dict[str, int] = {
     "cashflow": 3600,
     "metrics": 3600,
     "earnings": 3600,
+    "dividend-history": 3600,
 }
 
 
@@ -94,3 +95,11 @@ class FmpClient:
             cache_key="earnings",
         )
         return process("fmp:earnings-calendar", data)
+
+    def get_dividend_history(self, symbol: str) -> Any:
+        data = self._get(
+            "/dividends",
+            {"symbol": symbol},
+            cache_key="dividend-history",
+        )
+        return process("fmp:dividend-history", data)

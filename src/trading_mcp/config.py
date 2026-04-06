@@ -9,8 +9,8 @@ RC_PATH = Path.home() / ".tradingrc"
 class WebullConfig:
     app_key: str
     app_secret: str
-    account_id: str
     region_id: str
+    account_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -53,7 +53,7 @@ def load_config(path: Path = RC_PATH) -> AppConfig:
     if not path.exists():
         raise FileNotFoundError(
             f"{path} not found. Create it with a [webull] section containing "
-            "app_key, app_secret, account_id, and region_id."
+            "app_key, app_secret, and region_id."
         )
     parser = configparser.ConfigParser()
     parser.read(path)
@@ -63,15 +63,15 @@ def load_config(path: Path = RC_PATH) -> AppConfig:
     if section not in parser:
         raise KeyError(f"[{section}] section missing in {path}")
     cfg = parser[section]
-    required = ("app_key", "app_secret", "account_id", "region_id")
+    required = ("app_key", "app_secret", "region_id")
     missing = [k for k in required if not cfg.get(k)]
     if missing:
         raise KeyError(f"Missing keys in [{section}]: {', '.join(missing)}")
     webull = WebullConfig(
         app_key=cfg["app_key"],
         app_secret=cfg["app_secret"],
-        account_id=cfg["account_id"],
         region_id=cfg["region_id"],
+        account_id=cfg.get("account_id") or None,
     )
 
     # Tradier (optional)

@@ -19,6 +19,7 @@ CACHE_TTLS: dict[str, int] = {
     "price-target": 3600,
     "insider-transactions": 3600,
     "peers": 3600,
+    "dividends": 3600,
 }
 
 
@@ -122,3 +123,11 @@ class FinnhubClient:
     def get_company_peers(self, symbol: str) -> Any:
         data = self._get("/stock/peers", {"symbol": symbol}, cache_key="peers")
         return process("finnhub:peers", data)
+
+    def get_dividends(self, symbol: str, from_date: str, to_date: str) -> Any:
+        data = self._get(
+            "/stock/dividend",
+            {"symbol": symbol, "from": from_date, "to": to_date},
+            cache_key="dividends",
+        )
+        return process("finnhub:dividends", data)

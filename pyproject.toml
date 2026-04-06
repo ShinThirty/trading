@@ -5,7 +5,7 @@ description = "MCP server for trading stocks and options on Webull"
 requires-python = ">=3.12"
 dependencies = [
     "mcp[cli]",
-    "httpx",
+    "httpx[http2]",
 ]
 
 [project.scripts]

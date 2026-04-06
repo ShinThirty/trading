@@ -107,13 +107,11 @@ FIELD_FILTERS: dict[str, set[str] | None] = {
     "/account/profile": None,
     "/account/balance": None,
     "/account/positions": None,
-    "/account/position/details": None,
     # Orders (read)
     "/trade/orders/list-open": None,
     "/trade/orders/list-today": None,
     "/trade/order/detail": None,
     # Order management
-    "/openapi/account/orders/history": None,
     "/openapi/account/orders/preview": None,
     "/trade/order/place": None,
     "/trade/order/replace": None,
@@ -125,16 +123,11 @@ FIELD_FILTERS: dict[str, set[str] | None] = {
     # Trade info
     "/trade/calendar": None,
     "/trade/instrument": None,
-    "/trade/security": None,
-    "/trade/instrument/tradable/list": None,
     "/app/subscriptions/list": None,
     # Market data
     "/market-data/snapshot": None,
     "/instrument/list": None,
     "/market-data/bars": None,
-    "/market-data/batch-bars": None,
-    "/market-data/eod-bars": None,
-    "/instrument/corp-action": None,
 }
 
 
@@ -337,6 +330,22 @@ def _transform_peers(data: list[str]) -> str:
     return _md_table(["Symbol"], rows)
 
 
+def _transform_finnhub_dividends(data: list[dict]) -> str:
+    if not data:
+        return "(no dividends)"
+    rows = [
+        {
+            "Ex-Date": d.get("date", ""),
+            "Pay Date": d.get("payDate", ""),
+            "Record Date": d.get("recordDate", ""),
+            "Amount": _fmt_number(d.get("amount"), 4),
+            "Currency": d.get("currency", ""),
+        }
+        for d in data
+    ]
+    return _list_table(rows)
+
+
 # ── FMP ──
 
 
@@ -428,6 +437,23 @@ def _transform_key_metrics(data: list[dict]) -> str:
             "FCF Yield": _fmt_number(m.get("freeCashFlowYield"), 4),
         }
         for m in data
+    ]
+    return _list_table(rows)
+
+
+def _transform_fmp_dividend_history(data: list[dict]) -> str:
+    if not data:
+        return "(no dividends)"
+    rows = [
+        {
+            "Ex-Date": d.get("date", ""),
+            "Pay Date": d.get("paymentDate", ""),
+            "Record Date": d.get("recordDate", ""),
+            "Declaration": d.get("declarationDate", ""),
+            "Dividend": _fmt_number(d.get("dividend"), 4),
+            "Adj Dividend": _fmt_number(d.get("adjDividend"), 4),
+        }
+        for d in data
     ]
     return _list_table(rows)
 
@@ -565,6 +591,7 @@ TRANSFORMERS: dict[str, Callable[[Any], Any]] = {
     "finnhub:price-target": _transform_price_target,
     "finnhub:insider-transactions": _transform_insider_transactions,
     "finnhub:peers": _transform_peers,
+    "finnhub:dividends": _transform_finnhub_dividends,
     # FMP
     "fmp:profile": _transform_fmp_profile,
     "fmp:income-statement": _transform_income_statement,
@@ -572,6 +599,7 @@ TRANSFORMERS: dict[str, Callable[[Any], Any]] = {
     "fmp:cash-flow": _transform_cash_flow,
     "fmp:key-metrics": _transform_key_metrics,
     "fmp:earnings-calendar": _transform_fmp_earnings,
+    "fmp:dividend-history": _transform_fmp_dividend_history,
     # FRED
     "fred:observations": _transform_observations,
     "fred:series-info": _transform_series_info,
