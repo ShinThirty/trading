@@ -713,6 +713,46 @@ def get_recommendation_trends(ctx: Context, symbol: str) -> list[dict]:
     return _finnhub(ctx).get_recommendation_trends(symbol)
 
 
+@mcp.tool()
+def get_price_target(ctx: Context, symbol: str) -> dict:
+    """Get analyst consensus price target: high, low, mean, and median target prices.
+
+    symbol: ticker symbol (e.g. 'AAPL').
+
+    Note: requires Finnhub premium plan. Free tier returns 403.
+    Rate limit: 60 requests/min (shared across all Finnhub tools).
+    Requires [finnhub] section in ~/.tradingrc.
+    """
+    return _finnhub(ctx).get_price_target(symbol)
+
+
+@mcp.tool()
+def get_insider_transactions(ctx: Context, symbol: str, limit: int = 20) -> list[dict]:
+    """Get recent insider transactions: buys, sells, and grants by company officers
+    and directors. Insider buying is one of the strongest bullish signals.
+
+    symbol: ticker symbol (e.g. 'AAPL').
+    limit: max number of transactions to return (default 20).
+
+    Rate limit: 60 requests/min (shared across all Finnhub tools).
+    Requires [finnhub] section in ~/.tradingrc.
+    """
+    return _finnhub(ctx).get_insider_transactions(symbol, limit)
+
+
+@mcp.tool()
+def get_company_peers(ctx: Context, symbol: str) -> list[str]:
+    """Get a list of peer/competitor symbols for a company, useful for comparative
+    valuation analysis.
+
+    symbol: ticker symbol (e.g. 'AAPL').
+
+    Rate limit: 60 requests/min (shared across all Finnhub tools).
+    Requires [finnhub] section in ~/.tradingrc.
+    """
+    return _finnhub(ctx).get_company_peers(symbol)
+
+
 # ═══════════════════════════════════════════════════════════════
 # FMP — Fundamental Financial Data
 # ═══════════════════════════════════════════════════════════════

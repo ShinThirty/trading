@@ -298,6 +298,45 @@ def _transform_recommendations(data: list[dict]) -> str:
     return _list_table(rows)
 
 
+def _transform_price_target(data: dict) -> str:
+    if not data:
+        return "(no data)"
+    return _kv_table(
+        {
+            "Symbol": data.get("symbol"),
+            "Target High": _fmt_number(data.get("targetHigh")),
+            "Target Low": _fmt_number(data.get("targetLow")),
+            "Target Mean": _fmt_number(data.get("targetMean")),
+            "Target Median": _fmt_number(data.get("targetMedian")),
+            "Last Updated": data.get("lastUpdated", ""),
+        }
+    )
+
+
+def _transform_insider_transactions(data: list[dict]) -> str:
+    if not data:
+        return "(no transactions)"
+    rows = [
+        {
+            "Date": t.get("transactionDate", ""),
+            "Name": t.get("name", ""),
+            "Share": _fmt_number(t.get("share"), 0),
+            "Change": _fmt_number(t.get("change"), 0),
+            "Price": _fmt_number(t.get("transactionPrice")),
+            "Type": t.get("transactionCode", ""),
+        }
+        for t in data
+    ]
+    return _list_table(rows)
+
+
+def _transform_peers(data: list[str]) -> str:
+    if not data:
+        return "(no peers)"
+    rows = [[s] for s in data]
+    return _md_table(["Symbol"], rows)
+
+
 # ── FMP ──
 
 
@@ -523,6 +562,9 @@ TRANSFORMERS: dict[str, Callable[[Any], Any]] = {
     "finnhub:basic-financials": _transform_basic_financials,
     "finnhub:eps-estimates": _transform_eps_estimates,
     "finnhub:recommendations": _transform_recommendations,
+    "finnhub:price-target": _transform_price_target,
+    "finnhub:insider-transactions": _transform_insider_transactions,
+    "finnhub:peers": _transform_peers,
     # FMP
     "fmp:profile": _transform_fmp_profile,
     "fmp:income-statement": _transform_income_statement,

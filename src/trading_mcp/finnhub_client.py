@@ -16,6 +16,9 @@ CACHE_TTLS: dict[str, int] = {
     "basic-financials": 3600,
     "eps-estimates": 3600,
     "recommendations": 3600,
+    "price-target": 3600,
+    "insider-transactions": 3600,
+    "peers": 3600,
 }
 
 
@@ -104,3 +107,18 @@ class FinnhubClient:
     def get_recommendation_trends(self, symbol: str) -> Any:
         data = self._get("/stock/recommendation", {"symbol": symbol}, cache_key="recommendations")
         return process("finnhub:recommendations", data)
+
+    def get_price_target(self, symbol: str) -> Any:
+        data = self._get("/stock/price-target", {"symbol": symbol}, cache_key="price-target")
+        return process("finnhub:price-target", data)
+
+    def get_insider_transactions(self, symbol: str, limit: int = 20) -> Any:
+        data = self._get(
+            "/stock/insider-transactions", {"symbol": symbol}, cache_key="insider-transactions"
+        )
+        txns = data.get("data", [])[:limit]
+        return process("finnhub:insider-transactions", txns)
+
+    def get_company_peers(self, symbol: str) -> Any:
+        data = self._get("/stock/peers", {"symbol": symbol}, cache_key="peers")
+        return process("finnhub:peers", data)
