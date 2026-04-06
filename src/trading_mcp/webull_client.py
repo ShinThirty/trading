@@ -12,6 +12,7 @@ import httpx
 
 from trading_mcp.cache import TTLCache
 from trading_mcp.config import WebullConfig
+from trading_mcp.rate_limit import RateLimiter
 from trading_mcp.response_filters import process
 
 API_HOST = "api.webull.com"
@@ -36,6 +37,38 @@ CACHE_TTLS: dict[str, int] = {
     "/trade/orders/list-today": 30,
     "/trade/order/detail": 30,
 }
+
+# ── Rate limits per endpoint category ────────────────────────
+# (capacity, refill_rate_per_second)
+RATE_LIMITS: dict[str, tuple[int, float]] = {
+    "account": (2, 1.0),  # balance, positions, profile: 2 req/2s
+    "order_read": (2, 1.0),  # open orders, today orders, order detail: 2 req/2s
+    "order_write": (600, 10.0),  # place, replace, cancel: 600 req/60s
+    "instruments": (10, 0.33),  # instrument lookups: 10 req/30s
+    "market": (300, 5.0),  # quotes, bars: 300 req/60s
+}
+
+_RATE_KEY_MAP: dict[str, str] = {
+    "/account/profile": "account",
+    "/account/balance": "account",
+    "/account/positions": "account",
+    "/app/subscriptions/list": "account",
+    "/trade/orders/list-open": "order_read",
+    "/trade/orders/list-today": "order_read",
+    "/trade/order/detail": "order_read",
+    "/trade/order/place": "order_write",
+    "/trade/order/replace": "order_write",
+    "/trade/order/cancel": "order_write",
+    "/trade/calendar": "instruments",
+    "/trade/instrument": "instruments",
+    "/instrument/list": "instruments",
+    "/market-data/snapshot": "market",
+    "/market-data/bars": "market",
+}
+
+
+def _rate_key(path: str) -> str:
+    return _RATE_KEY_MAP.get(path, "market")
 
 
 def _iso8601_now() -> str:
@@ -103,6 +136,7 @@ class WebullClient:
         self._config = config
         self._http = httpx.Client(timeout=15, http2=True)
         self._cache = TTLCache()
+        self._limiter = RateLimiter(RATE_LIMITS)
 
     def _resolve_account_id(self, account_id: str | None) -> str:
         aid = account_id or self._config.account_id
@@ -126,6 +160,7 @@ class WebullClient:
         params: dict[str, str] | None = None,
     ) -> Any:
         """GET without process() — for paginated endpoints that need post-aggregation."""
+        self._limiter.acquire(_rate_key(path))
         headers = _build_signature(
             host=host,
             uri=path,
@@ -152,6 +187,7 @@ class WebullClient:
             if cached is not None:
                 return cached
 
+        self._limiter.acquire(_rate_key(path))
         headers = _build_signature(
             host=host,
             uri=path,
@@ -177,6 +213,7 @@ class WebullClient:
         body: dict[str, Any],
         params: dict[str, str] | None = None,
     ) -> Any:
+        self._limiter.acquire(_rate_key(path))
         headers = _build_signature(
             host=host,
             uri=path,

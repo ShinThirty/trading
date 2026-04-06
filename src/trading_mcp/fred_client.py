@@ -4,6 +4,7 @@ import httpx
 
 from trading_mcp.cache import TTLCache
 from trading_mcp.config import FredConfig
+from trading_mcp.rate_limit import RateLimiter
 from trading_mcp.response_filters import process
 
 BASE_URL = "https://api.stlouisfed.org/fred"
@@ -16,11 +17,17 @@ CACHE_TTLS: dict[str, int] = {
 }
 
 
+RATE_LIMITS: dict[str, tuple[int, float]] = {
+    "default": (120, 2.0),  # 120 req/min
+}
+
+
 class FredClient:
     def __init__(self, config: FredConfig) -> None:
         self._api_key = config.api_key
         self._http = httpx.Client(timeout=15)
         self._cache = TTLCache()
+        self._limiter = RateLimiter(RATE_LIMITS)
 
     def _get(
         self, path: str, params: dict[str, str] | None = None, cache_key: str | None = None
@@ -40,6 +47,7 @@ class FredClient:
             if cached is not None:
                 return cached
 
+        self._limiter.acquire()
         resp = self._http.get(f"{BASE_URL}{path}", params=params)
         resp.raise_for_status()
         result = resp.json()

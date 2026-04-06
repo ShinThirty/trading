@@ -4,6 +4,7 @@ import httpx
 
 from trading_mcp.cache import TTLCache
 from trading_mcp.config import TradierConfig
+from trading_mcp.rate_limit import RateLimiter
 from trading_mcp.response_filters import process
 
 SANDBOX_HOST = "https://sandbox.tradier.com"
@@ -21,6 +22,11 @@ CACHE_TTLS: dict[str, int] = {
 }
 
 
+RATE_LIMITS: dict[str, tuple[int, float]] = {
+    "default": (120, 2.0),  # 120 req/min
+}
+
+
 class TradierClient:
     def __init__(self, config: TradierConfig) -> None:
         self._base = SANDBOX_HOST if config.sandbox else PRODUCTION_HOST
@@ -31,6 +37,7 @@ class TradierClient:
             "Accept": "application/json",
         }
         self._cache = TTLCache()
+        self._limiter = RateLimiter(RATE_LIMITS)
 
     def _resolve_account_id(self, account_id: str | None) -> str:
         aid = account_id or self._account_id
@@ -52,6 +59,7 @@ class TradierClient:
             if cached is not None:
                 return cached
 
+        self._limiter.acquire()
         resp = self._http.get(
             f"{self._base}{path}",
             headers=self._headers,
@@ -174,6 +182,7 @@ class TradierClient:
     # ── HTTP helpers for brokerage endpoints ────────────────────
 
     def _post(self, path: str, data: dict[str, str] | None = None) -> Any:
+        self._limiter.acquire()
         resp = self._http.post(
             f"{self._base}{path}",
             headers=self._headers,
@@ -183,6 +192,7 @@ class TradierClient:
         return resp.json()
 
     def _put(self, path: str, data: dict[str, str] | None = None) -> Any:
+        self._limiter.acquire()
         resp = self._http.put(
             f"{self._base}{path}",
             headers=self._headers,
@@ -192,6 +202,7 @@ class TradierClient:
         return resp.json()
 
     def _delete(self, path: str) -> Any:
+        self._limiter.acquire()
         resp = self._http.delete(
             f"{self._base}{path}",
             headers=self._headers,

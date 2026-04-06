@@ -4,6 +4,7 @@ import httpx
 
 from trading_mcp.cache import TTLCache
 from trading_mcp.config import AlphaVantageConfig
+from trading_mcp.rate_limit import RateLimiter
 from trading_mcp.response_filters import process
 
 BASE_URL = "https://www.alphavantage.co/query"
@@ -14,11 +15,17 @@ CACHE_TTLS: dict[str, int] = {
 }
 
 
+RATE_LIMITS: dict[str, tuple[int, float]] = {
+    "default": (5, 0.0003),  # 25 req/day ≈ 0.0003 req/s, burst up to 5
+}
+
+
 class AlphaVantageClient:
     def __init__(self, config: AlphaVantageConfig) -> None:
         self._api_key = config.api_key
         self._http = httpx.Client(timeout=15)
         self._cache = TTLCache()
+        self._limiter = RateLimiter(RATE_LIMITS)
 
     def _get(self, params: dict[str, str], cache_key: str | None = None) -> Any:
         params["apikey"] = self._api_key
@@ -34,6 +41,7 @@ class AlphaVantageClient:
             if cached is not None:
                 return cached
 
+        self._limiter.acquire()
         resp = self._http.get(BASE_URL, params=params)
         resp.raise_for_status()
         result = resp.json()
