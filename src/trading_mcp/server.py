@@ -27,7 +27,11 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
         ctx["fred"] = FredClient(config.fred)
     if config.alphavantage:
         ctx["alphavantage"] = AlphaVantageClient(config.alphavantage)
-    yield ctx
+    try:
+        yield ctx
+    finally:
+        for client in ctx.values():
+            client._http.close()
 
 
 mcp = FastMCP("trading-mcp", lifespan=lifespan)
