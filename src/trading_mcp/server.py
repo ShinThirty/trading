@@ -89,7 +89,7 @@ def _alphavantage(ctx: Context) -> AlphaVantageClient:
 
 
 @mcp.tool()
-def get_account_profile(ctx: Context, account_id: str | None = None) -> dict:
+def get_account_profile(ctx: Context, account_id: str | None = None) -> str:
     """Get account profile: account number, account type, and registration details.
 
     account_id: Webull account ID. Omit to use the default from ~/.tradingrc.
@@ -99,7 +99,7 @@ def get_account_profile(ctx: Context, account_id: str | None = None) -> dict:
 
 
 @mcp.tool()
-def get_account_balance(ctx: Context, currency: str = "USD", account_id: str | None = None) -> dict:
+def get_account_balance(ctx: Context, currency: str = "USD", account_id: str | None = None) -> str:
     """Get account balance: total assets, cash, buying power, market value, unrealized P&L.
 
     currency: the currency to report total assets in. Defaults to 'USD'.
@@ -109,7 +109,7 @@ def get_account_balance(ctx: Context, currency: str = "USD", account_id: str | N
 
 
 @mcp.tool()
-def get_account_positions(ctx: Context, account_id: str | None = None) -> list[dict]:
+def get_account_positions(ctx: Context, account_id: str | None = None) -> str:
     """Get all current portfolio holdings. Returns each position's symbol, instrument_id,
     quantity, cost basis, market value, and unrealized P&L. Automatically paginates to
     fetch all positions.
@@ -123,7 +123,7 @@ def get_account_positions(ctx: Context, account_id: str | None = None) -> list[d
 
 
 @mcp.tool()
-def get_open_orders(ctx: Context, page_size: int = 100, account_id: str | None = None) -> dict:
+def get_open_orders(ctx: Context, page_size: int = 100, account_id: str | None = None) -> str:
     """Get all currently open/pending orders. Returns each order's client_order_id,
     instrument_id, side, order_type, qty, status, limit_price, and time in force.
 
@@ -133,7 +133,7 @@ def get_open_orders(ctx: Context, page_size: int = 100, account_id: str | None =
 
 
 @mcp.tool()
-def get_today_orders(ctx: Context, page_size: int = 100, account_id: str | None = None) -> dict:
+def get_today_orders(ctx: Context, page_size: int = 100, account_id: str | None = None) -> str:
     """Get all orders placed today, including filled, cancelled, and pending.
     Returns each order's client_order_id, status, side, qty, filled_qty, and price.
 
@@ -143,7 +143,7 @@ def get_today_orders(ctx: Context, page_size: int = 100, account_id: str | None 
 
 
 @mcp.tool()
-def get_order_detail(ctx: Context, client_order_id: str, account_id: str | None = None) -> dict:
+def get_order_detail(ctx: Context, client_order_id: str, account_id: str | None = None) -> str:
     """Get full detail for a specific order including status, fill info, and timestamps.
 
     client_order_id: the unique order ID assigned when the order was placed.
@@ -157,7 +157,7 @@ def get_order_detail(ctx: Context, client_order_id: str, account_id: str | None 
 
 
 @mcp.tool()
-def preview_order(ctx: Context, new_orders: list[dict], account_id: str | None = None) -> dict:
+def preview_order(ctx: Context, new_orders: list[dict], account_id: str | None = None) -> str:
     """Preview a stock order before placing it. Returns estimated cost, margin impact,
     and buying power effect without actually submitting the order.
 
@@ -190,7 +190,7 @@ def place_order(
     stop_price: str | None = None,
     trailing_type: str | None = None,
     trailing_stop_step: str | None = None,
-) -> dict:
+) -> str:
     """Place a stock order.
 
     instrument_id: Webull instrument ID (get from get_instruments).
@@ -238,7 +238,7 @@ def replace_order(
     stop_price: str | None = None,
     trailing_type: str | None = None,
     trailing_stop_step: str | None = None,
-) -> dict:
+) -> str:
     """Modify a pending stock order that has not yet been filled. Provide the existing
     client_order_id of the order to modify, along with the full updated order parameters.
 
@@ -264,7 +264,7 @@ def replace_order(
 
 
 @mcp.tool()
-def cancel_order(ctx: Context, client_order_id: str, account_id: str | None = None) -> dict:
+def cancel_order(ctx: Context, client_order_id: str, account_id: str | None = None) -> str:
     """Cancel a pending stock order. The order must still be open/unfilled.
 
     client_order_id: the unique order ID from when the order was placed.
@@ -278,7 +278,7 @@ def cancel_order(ctx: Context, client_order_id: str, account_id: str | None = No
 
 
 @mcp.tool()
-def preview_option(ctx: Context, new_orders: list[dict], account_id: str | None = None) -> dict:
+def preview_option(ctx: Context, new_orders: list[dict], account_id: str | None = None) -> str:
     """Preview an option order before placing it. Returns estimated cost, margin impact,
     and buying power effect without actually submitting the order.
 
@@ -304,7 +304,7 @@ def preview_option(ctx: Context, new_orders: list[dict], account_id: str | None 
 
 
 @mcp.tool()
-def place_option(ctx: Context, new_orders: list[dict], account_id: str | None = None) -> dict:
+def place_option(ctx: Context, new_orders: list[dict], account_id: str | None = None) -> str:
     """Place an option order (single-leg or multi-leg).
 
     Note: currently available for HK accounts only — US support expected in the future.
@@ -330,7 +330,7 @@ def place_option(ctx: Context, new_orders: list[dict], account_id: str | None = 
 
 
 @mcp.tool()
-def replace_option(ctx: Context, modify_orders: list[dict], account_id: str | None = None) -> dict:
+def replace_option(ctx: Context, modify_orders: list[dict], account_id: str | None = None) -> str:
     """Modify a pending option order that has not yet been filled.
 
     modify_orders: list of modification dicts. Each dict should contain:
@@ -343,7 +343,7 @@ def replace_option(ctx: Context, modify_orders: list[dict], account_id: str | No
 
 
 @mcp.tool()
-def cancel_option(ctx: Context, client_order_id: str, account_id: str | None = None) -> dict:
+def cancel_option(ctx: Context, client_order_id: str, account_id: str | None = None) -> str:
     """Cancel a pending option order. The order must still be open/unfilled.
 
     client_order_id: the unique order ID from when the order was placed.
@@ -357,7 +357,7 @@ def cancel_option(ctx: Context, client_order_id: str, account_id: str | None = N
 
 
 @mcp.tool()
-def get_trade_calendar(ctx: Context, market: str, start: str, end: str) -> dict:
+def get_trade_calendar(ctx: Context, market: str, start: str, end: str) -> str:
     """Get trading calendar showing which days the market is open or closed.
 
     market: market code, e.g. 'US' for US stock exchanges.
@@ -369,7 +369,7 @@ def get_trade_calendar(ctx: Context, market: str, start: str, end: str) -> dict:
 
 
 @mcp.tool()
-def get_trade_instrument_detail(ctx: Context, instrument_id: str) -> dict:
+def get_trade_instrument_detail(ctx: Context, instrument_id: str) -> str:
     """Get detailed instrument metadata by instrument ID, including symbol, exchange,
     currency, instrument type, and trading status.
 
@@ -380,7 +380,7 @@ def get_trade_instrument_detail(ctx: Context, instrument_id: str) -> dict:
 
 
 @mcp.tool()
-def get_app_subscriptions(ctx: Context) -> dict:
+def get_app_subscriptions(ctx: Context) -> str:
     """Get API app subscription details: subscription ID, status, plan type, and
     which market data feeds are active.
     """
@@ -391,7 +391,7 @@ def get_app_subscriptions(ctx: Context) -> dict:
 
 
 @mcp.tool()
-def get_quote(ctx: Context, symbols: str) -> list[dict]:
+def get_quote(ctx: Context, symbols: str) -> str:
     """Get real-time snapshot quotes: last price, bid/ask, volume, day change, and
     52-week high/low.
 
@@ -402,7 +402,7 @@ def get_quote(ctx: Context, symbols: str) -> list[dict]:
 
 
 @mcp.tool()
-def get_instruments(ctx: Context, symbols: str) -> list[dict]:
+def get_instruments(ctx: Context, symbols: str) -> str:
     """Look up instrument IDs, exchange, currency, and instrument type for symbols.
     Use this to resolve ticker symbols to instrument_ids needed by other tools
     (place_order, get_historical_bars, get_eod_bars, etc.).
@@ -421,7 +421,7 @@ def get_historical_bars(
     count: int = 200,
     category: str = "US_STOCK",
     trading_sessions: str | None = None,
-) -> dict:
+) -> str:
     """Get historical OHLCV candlestick bars for a single symbol.
 
     symbol: ticker symbol (e.g. 'AAPL').
@@ -442,7 +442,7 @@ def get_historical_bars(
 
 
 @mcp.tool()
-def get_option_expirations(ctx: Context, symbol: str) -> list[str]:
+def get_option_expirations(ctx: Context, symbol: str) -> str:
     """Get all available option expiration dates for an underlying symbol.
     Use this first to discover which expirations are available before fetching
     the full chain.
@@ -456,7 +456,7 @@ def get_option_expirations(ctx: Context, symbol: str) -> list[str]:
 
 
 @mcp.tool()
-def get_option_strikes(ctx: Context, symbol: str, expiration: str) -> list[float]:
+def get_option_strikes(ctx: Context, symbol: str, expiration: str) -> str:
     """Get all available strike prices for an underlying symbol at a specific expiration.
 
     symbol: underlying ticker symbol (e.g. 'AAPL').
@@ -474,7 +474,7 @@ def get_option_chain(
     symbol: str,
     expiration: str,
     greeks: bool = True,
-) -> list[dict]:
+) -> str:
     """Get the full option chain for an underlying symbol at a specific expiration.
     Returns all calls and puts with bid/ask, last price, volume, open interest,
     and optionally greeks (delta, gamma, theta, vega, rho) and implied volatility.
@@ -494,7 +494,7 @@ def get_option_chain(
 
 
 @mcp.tool()
-def get_option_lookup(ctx: Context, underlying: str) -> list:
+def get_option_lookup(ctx: Context, underlying: str) -> str:
     """Get all option symbols for an underlying, including alternate roots (e.g. SPXW
     for SPX weeklies). Useful for discovering available option contracts before pulling
     historical data with get_tradier_history.
@@ -514,7 +514,7 @@ def get_tradier_history(
     interval: str = "daily",
     start: str | None = None,
     end: str | None = None,
-) -> list[dict]:
+) -> str:
     """Get historical OHLCV pricing data. Works for both stocks AND option contracts.
 
     For option contracts, pass the OCC symbol (e.g. 'AAPL260417C00260000') — use
@@ -531,7 +531,7 @@ def get_tradier_history(
 
 
 @mcp.tool()
-def search_symbols(ctx: Context, query: str, indexes: bool = False) -> list[dict]:
+def search_symbols(ctx: Context, query: str, indexes: bool = False) -> str:
     """Search for stocks and ETFs by company name or partial symbol. Results are sorted
     by average volume (most liquid first). Useful for stock discovery.
 
@@ -544,7 +544,7 @@ def search_symbols(ctx: Context, query: str, indexes: bool = False) -> list[dict
 
 
 @mcp.tool()
-def get_tradier_quote(ctx: Context, symbols: str, greeks: bool = False) -> list[dict]:
+def get_tradier_quote(ctx: Context, symbols: str, greeks: bool = False) -> str:
     """Get real-time quotes for stocks or option contracts. When greeks=True, option
     quotes include delta, gamma, theta, vega, and implied volatility.
 
@@ -564,7 +564,7 @@ def get_timesales(
     interval: str = "5min",
     start: str | None = None,
     end: str | None = None,
-) -> list[dict]:
+) -> str:
     """Get intraday time-and-sales tick data for a stock or option contract.
     Higher granularity than historical bars — useful for intraday analysis and charting.
 
@@ -579,7 +579,7 @@ def get_timesales(
 
 
 @mcp.tool()
-def get_market_clock(ctx: Context) -> dict:
+def get_market_clock(ctx: Context) -> str:
     """Get current market status: whether the market is open, in pre-market, post-market,
     or closed, plus the time of the next state change.
 
@@ -592,7 +592,7 @@ def get_market_clock(ctx: Context) -> dict:
 
 
 @mcp.tool()
-def get_tradier_profile(ctx: Context) -> list[dict]:
+def get_tradier_profile(ctx: Context) -> str:
     """Get Tradier user profile with all linked accounts. Returns account number,
     type, classification, option level, and day trader status for each account.
 
@@ -603,7 +603,7 @@ def get_tradier_profile(ctx: Context) -> list[dict]:
 
 
 @mcp.tool()
-def get_tradier_balances(ctx: Context, account_id: str | None = None) -> dict:
+def get_tradier_balances(ctx: Context, account_id: str | None = None) -> str:
     """Get Tradier account balance: total equity, cash, market value, option value,
     buying power.
 
@@ -614,7 +614,7 @@ def get_tradier_balances(ctx: Context, account_id: str | None = None) -> dict:
 
 
 @mcp.tool()
-def get_tradier_positions(ctx: Context, account_id: str | None = None) -> list[dict]:
+def get_tradier_positions(ctx: Context, account_id: str | None = None) -> str:
     """Get current positions in a Tradier account: symbol, quantity, cost basis,
     and date acquired.
 
@@ -631,7 +631,7 @@ def get_tradier_orders(
     page: int | None = None,
     limit: int | None = None,
     account_id: str | None = None,
-) -> list[dict]:
+) -> str:
     """Get orders in a Tradier account.
 
     status: filter by status — 'pending', 'open', 'partially_filled', 'filled',
@@ -645,7 +645,7 @@ def get_tradier_orders(
 
 
 @mcp.tool()
-def get_tradier_order_detail(ctx: Context, order_id: str, account_id: str | None = None) -> dict:
+def get_tradier_order_detail(ctx: Context, order_id: str, account_id: str | None = None) -> str:
     """Get full detail for a specific Tradier order.
 
     order_id: the numeric order ID (from get_tradier_orders).
@@ -663,7 +663,7 @@ def get_tradier_gainloss(
     sort_by: str | None = None,
     sort: str | None = None,
     account_id: str | None = None,
-) -> list[dict]:
+) -> str:
     """Get realized gain/loss for all closed positions in a Tradier account.
 
     sort_by: 'closedate', 'opendate', 'symbol', or 'gainloss'.
@@ -681,7 +681,7 @@ def get_tradier_account_history(
     limit: int | None = None,
     activity_type: str | None = None,
     account_id: str | None = None,
-) -> list[dict]:
+) -> str:
     """Get account activity history: trades, dividends, fees, transfers, etc.
 
     activity_type: filter by type — 'trade', 'option', 'ach', 'wire', 'dividend',
@@ -696,7 +696,7 @@ def get_tradier_account_history(
 
 
 @mcp.tool()
-def place_tradier_order(ctx: Context, order_params: dict, account_id: str | None = None) -> dict:
+def place_tradier_order(ctx: Context, order_params: dict, account_id: str | None = None) -> str:
     """Place an order on Tradier. Supports equity, option, multileg, combo, and
     advanced order types (OTO, OCO, OTOCO).
 
@@ -739,7 +739,7 @@ def modify_tradier_order(
     order_id: str,
     modifications: dict,
     account_id: str | None = None,
-) -> dict:
+) -> str:
     """Modify a pending Tradier order. Only price, stop, type, and duration can be changed.
 
     order_id: the numeric order ID (from get_tradier_orders).
@@ -752,7 +752,7 @@ def modify_tradier_order(
 
 
 @mcp.tool()
-def cancel_tradier_order(ctx: Context, order_id: str, account_id: str | None = None) -> dict:
+def cancel_tradier_order(ctx: Context, order_id: str, account_id: str | None = None) -> str:
     """Cancel a pending Tradier order.
 
     order_id: the numeric order ID (from get_tradier_orders).
@@ -769,7 +769,7 @@ def cancel_tradier_order(ctx: Context, order_id: str, account_id: str | None = N
 @mcp.tool()
 def get_company_news(
     ctx: Context, symbol: str, from_date: str, to_date: str, limit: int = 20
-) -> list[dict]:
+) -> str:
     """Get recent news articles for a specific company.
 
     symbol: ticker symbol (e.g. 'AAPL').
@@ -785,7 +785,7 @@ def get_company_news(
 
 
 @mcp.tool()
-def get_market_news(ctx: Context, category: str = "general", limit: int = 20) -> list[dict]:
+def get_market_news(ctx: Context, category: str = "general", limit: int = 20) -> str:
     """Get general market news headlines.
 
     category: 'general', 'forex', 'crypto', or 'merger'.
@@ -799,7 +799,7 @@ def get_market_news(ctx: Context, category: str = "general", limit: int = 20) ->
 
 
 @mcp.tool()
-def get_economic_calendar(ctx: Context, from_date: str, to_date: str) -> list[dict]:
+def get_economic_calendar(ctx: Context, from_date: str, to_date: str) -> str:
     """Get upcoming economic events: FOMC meetings, CPI releases, jobs reports, GDP, etc.
 
     from_date: start date (YYYY-MM-DD).
@@ -815,9 +815,7 @@ def get_economic_calendar(ctx: Context, from_date: str, to_date: str) -> list[di
 
 
 @mcp.tool()
-def get_earnings_calendar(
-    ctx: Context, from_date: str, to_date: str, limit: int = 50
-) -> list[dict]:
+def get_earnings_calendar(ctx: Context, from_date: str, to_date: str, limit: int = 50) -> str:
     """Get upcoming and recent earnings reports. Automatically filters out micro-caps
     (companies with no analyst coverage).
 
@@ -834,7 +832,7 @@ def get_earnings_calendar(
 
 
 @mcp.tool()
-def get_basic_financials(ctx: Context, symbol: str) -> dict:
+def get_basic_financials(ctx: Context, symbol: str) -> str:
     """Get key financial metrics: P/E ratio, P/B ratio, EPS, dividend yield, 52-week
     high/low, market cap, beta, ROE, debt/equity, and dozens more.
 
@@ -848,7 +846,7 @@ def get_basic_financials(ctx: Context, symbol: str) -> dict:
 
 
 @mcp.tool()
-def get_eps_estimates(ctx: Context, symbol: str) -> list[dict]:
+def get_eps_estimates(ctx: Context, symbol: str) -> str:
     """Get analyst EPS estimates for upcoming quarters: average, high, low, and number
     of analysts.
 
@@ -862,7 +860,7 @@ def get_eps_estimates(ctx: Context, symbol: str) -> list[dict]:
 
 
 @mcp.tool()
-def get_recommendation_trends(ctx: Context, symbol: str) -> list[dict]:
+def get_recommendation_trends(ctx: Context, symbol: str) -> str:
     """Get analyst recommendation trends: counts of strong buy, buy, hold, sell, and
     strong sell ratings by month.
 
@@ -875,7 +873,7 @@ def get_recommendation_trends(ctx: Context, symbol: str) -> list[dict]:
 
 
 @mcp.tool()
-def get_price_target(ctx: Context, symbol: str) -> dict:
+def get_price_target(ctx: Context, symbol: str) -> str:
     """Get analyst consensus price target: high, low, mean, and median target prices.
 
     symbol: ticker symbol (e.g. 'AAPL').
@@ -888,7 +886,7 @@ def get_price_target(ctx: Context, symbol: str) -> dict:
 
 
 @mcp.tool()
-def get_insider_transactions(ctx: Context, symbol: str, limit: int = 20) -> list[dict]:
+def get_insider_transactions(ctx: Context, symbol: str, limit: int = 20) -> str:
     """Get recent insider transactions: buys, sells, and grants by company officers
     and directors. Insider buying is one of the strongest bullish signals.
 
@@ -902,7 +900,7 @@ def get_insider_transactions(ctx: Context, symbol: str, limit: int = 20) -> list
 
 
 @mcp.tool()
-def get_dividends(ctx: Context, symbol: str, from_date: str, to_date: str) -> list[dict]:
+def get_dividends(ctx: Context, symbol: str, from_date: str, to_date: str) -> str:
     """Get dividend history for a specific company: ex-date, pay date, record date, and amount.
     Essential for covered call strategies — avoid selling calls through ex-dividend dates.
 
@@ -919,7 +917,7 @@ def get_dividends(ctx: Context, symbol: str, from_date: str, to_date: str) -> li
 
 
 @mcp.tool()
-def get_company_peers(ctx: Context, symbol: str) -> list[str]:
+def get_company_peers(ctx: Context, symbol: str) -> str:
     """Get a list of peer/competitor symbols for a company, useful for comparative
     valuation analysis.
 
@@ -937,7 +935,7 @@ def get_company_peers(ctx: Context, symbol: str) -> list[str]:
 
 
 @mcp.tool()
-def get_company_profile(ctx: Context, symbol: str) -> dict:
+def get_company_profile(ctx: Context, symbol: str) -> str:
     """Get company profile: name, price, market cap, beta, avg volume, last dividend,
     52-week range, sector, industry, exchange, and CEO.
 
@@ -955,7 +953,7 @@ def get_income_statement(
     symbol: str,
     period: str = "annual",
     limit: int = 4,
-) -> list[dict]:
+) -> str:
     """Get income statement: revenue, gross profit, operating income, net income, EPS,
     EBITDA, and all line items.
 
@@ -975,7 +973,7 @@ def get_balance_sheet(
     symbol: str,
     period: str = "annual",
     limit: int = 4,
-) -> list[dict]:
+) -> str:
     """Get balance sheet: total assets, liabilities, equity, cash, debt, inventory,
     and all line items.
 
@@ -995,7 +993,7 @@ def get_cash_flow(
     symbol: str,
     period: str = "annual",
     limit: int = 4,
-) -> list[dict]:
+) -> str:
     """Get cash flow statement: operating cash flow, capex, free cash flow, dividends
     paid, share buybacks, and all line items.
 
@@ -1015,7 +1013,7 @@ def get_key_metrics(
     symbol: str,
     period: str = "annual",
     limit: int = 4,
-) -> list[dict]:
+) -> str:
     """Get key financial metrics over time: revenue per share, net income per share,
     P/E, P/B, P/S, EV/EBITDA, debt/equity, ROE, ROA, current ratio, and more.
 
@@ -1030,7 +1028,7 @@ def get_key_metrics(
 
 
 @mcp.tool()
-def get_dividend_history(ctx: Context, symbol: str) -> list[dict]:
+def get_dividend_history(ctx: Context, symbol: str) -> str:
     """Get full dividend payment history for a specific company: ex-date, pay date,
     record date, declaration date, dividend amount, and adjusted dividend.
 
@@ -1047,7 +1045,7 @@ def get_fmp_earnings_calendar(
     ctx: Context,
     symbol: str,
     limit: int = 5,
-) -> list[dict]:
+) -> str:
     """Get earnings history for a specific company from FMP: date, EPS estimate, EPS actual,
     revenue estimate, revenue actual.
 
@@ -1071,7 +1069,7 @@ def get_economic_data(
     series_id: str,
     limit: int = 12,
     sort_order: str = "desc",
-) -> list[dict]:
+) -> str:
     """Get historical values for a FRED economic data series.
 
     series_id: FRED series ID. Common series:
@@ -1094,7 +1092,7 @@ def get_economic_data(
 
 
 @mcp.tool()
-def get_fred_series_info(ctx: Context, series_id: str) -> dict:
+def get_fred_series_info(ctx: Context, series_id: str) -> str:
     """Get metadata for a FRED series: title, frequency, units, seasonal adjustment,
     last updated date, and description.
 
@@ -1106,7 +1104,7 @@ def get_fred_series_info(ctx: Context, series_id: str) -> dict:
 
 
 @mcp.tool()
-def get_upcoming_economic_releases(ctx: Context, limit: int = 20) -> list[dict]:
+def get_upcoming_economic_releases(ctx: Context, limit: int = 20) -> str:
     """Get upcoming FRED data release dates: when the next CPI, GDP, jobs report,
     and other economic data will be published.
 
@@ -1118,7 +1116,7 @@ def get_upcoming_economic_releases(ctx: Context, limit: int = 20) -> list[dict]:
 
 
 @mcp.tool()
-def search_fred_series(ctx: Context, query: str, limit: int = 10) -> list[dict]:
+def search_fred_series(ctx: Context, query: str, limit: int = 10) -> str:
     """Search for FRED economic data series by keyword. Returns series ID, title,
     frequency, units, and description for each match.
 
@@ -1142,7 +1140,7 @@ def get_news_sentiment(
     tickers: str | None = None,
     topics: str | None = None,
     limit: int = 10,
-) -> list[dict]:
+) -> str:
     """Get news articles with AI-generated sentiment scores per ticker.
 
     Each article includes: title, summary, source, url, overall_sentiment_score (-1 to 1),
@@ -1162,7 +1160,7 @@ def get_news_sentiment(
 
 
 @mcp.tool()
-def get_top_movers(ctx: Context) -> dict:
+def get_top_movers(ctx: Context) -> str:
     """Get today's top market movers: top 20 gainers, top 20 losers, and most actively
     traded stocks. Each entry includes ticker, price, change amount, change %, and volume.
 
