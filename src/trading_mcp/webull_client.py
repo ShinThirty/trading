@@ -230,12 +230,12 @@ class WebullClient:
 
     # ── Account ──────────────────────────────────────────────
 
-    def get_account_profile(self, account_id: str | None = None) -> dict:
+    def get_account_profile(self, account_id: str | None = None) -> Any:
         return self._get(
             API_HOST, "/account/profile", {"account_id": self._resolve_account_id(account_id)}
         )
 
-    def get_account_balance(self, currency: str = "USD", account_id: str | None = None) -> dict:
+    def get_account_balance(self, currency: str = "USD", account_id: str | None = None) -> Any:
         return self._get(
             API_HOST,
             "/account/balance",
@@ -295,7 +295,7 @@ class WebullClient:
             params["last_client_order_id"] = last_client_order_id
         return self._get(API_HOST, "/trade/orders/list-today", params)
 
-    def get_order_detail(self, client_order_id: str, account_id: str | None = None) -> dict:
+    def get_order_detail(self, client_order_id: str, account_id: str | None = None) -> Any:
         return self._get(
             API_HOST,
             "/trade/order/detail",
@@ -307,9 +307,7 @@ class WebullClient:
 
     # ── Stock Order Management ───────────────────────────────
 
-    def preview_order(
-        self, new_orders: list[dict[str, Any]], account_id: str | None = None
-    ) -> dict:
+    def preview_order(self, new_orders: list[dict[str, Any]], account_id: str | None = None) -> Any:
         return self._post(
             API_HOST,
             "/openapi/account/orders/preview",
@@ -317,21 +315,21 @@ class WebullClient:
             params={"account_id": self._resolve_account_id(account_id)},
         )
 
-    def place_order(self, stock_order: dict[str, Any], account_id: str | None = None) -> dict:
+    def place_order(self, stock_order: dict[str, Any], account_id: str | None = None) -> Any:
         body: dict[str, Any] = {
             "account_id": self._resolve_account_id(account_id),
             "stock_order": {k: v for k, v in stock_order.items() if v is not None},
         }
         return self._post(API_HOST, "/trade/order/place", body)
 
-    def replace_order(self, stock_order: dict[str, Any], account_id: str | None = None) -> dict:
+    def replace_order(self, stock_order: dict[str, Any], account_id: str | None = None) -> Any:
         body: dict[str, Any] = {
             "account_id": self._resolve_account_id(account_id),
             "stock_order": {k: v for k, v in stock_order.items() if v is not None},
         }
         return self._post(API_HOST, "/trade/order/replace", body)
 
-    def cancel_order(self, client_order_id: str, account_id: str | None = None) -> dict:
+    def cancel_order(self, client_order_id: str, account_id: str | None = None) -> Any:
         return self._post(
             API_HOST,
             "/trade/order/cancel",
@@ -345,7 +343,7 @@ class WebullClient:
 
     def preview_option(
         self, new_orders: list[dict[str, Any]], account_id: str | None = None
-    ) -> dict:
+    ) -> Any:
         return self._post(
             API_HOST,
             "/openapi/account/orders/option/preview",
@@ -353,7 +351,7 @@ class WebullClient:
             params={"account_id": self._resolve_account_id(account_id)},
         )
 
-    def place_option(self, new_orders: list[dict[str, Any]], account_id: str | None = None) -> dict:
+    def place_option(self, new_orders: list[dict[str, Any]], account_id: str | None = None) -> Any:
         return self._post(
             API_HOST,
             "/openapi/account/orders/option/place",
@@ -363,7 +361,7 @@ class WebullClient:
 
     def replace_option(
         self, modify_orders: list[dict[str, Any]], account_id: str | None = None
-    ) -> dict:
+    ) -> Any:
         return self._post(
             API_HOST,
             "/openapi/account/orders/option/replace",
@@ -371,7 +369,7 @@ class WebullClient:
             params={"account_id": self._resolve_account_id(account_id)},
         )
 
-    def cancel_option(self, client_order_id: str, account_id: str | None = None) -> dict:
+    def cancel_option(self, client_order_id: str, account_id: str | None = None) -> Any:
         return self._post(
             API_HOST,
             "/openapi/account/orders/option/cancel",
@@ -388,7 +386,7 @@ class WebullClient:
             {"market": market, "start": start, "end": end},
         )
 
-    def get_trade_instrument_detail(self, instrument_id: str) -> dict:
+    def get_trade_instrument_detail(self, instrument_id: str) -> Any:
         return self._get(API_HOST, "/trade/instrument", {"instrument_id": instrument_id})
 
     def get_app_subscriptions(self, subscription_id: str | None = None) -> Any:
@@ -399,7 +397,7 @@ class WebullClient:
 
     # ── Market Data ──────────────────────────────────────────
 
-    def get_instruments(self, symbols: str, category: str = "US_STOCK") -> list[dict]:
+    def get_instruments(self, symbols: str, category: str = "US_STOCK") -> Any:
         return self._get(
             QUOTES_HOST,
             "/instrument/list",

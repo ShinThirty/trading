@@ -16,6 +16,7 @@ Keys use the API path for Webull endpoints (e.g. "/account/profile") and a
 namespaced logical key for external providers (e.g. "tradier:chain").
 """
 
+import json
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
@@ -1027,7 +1028,7 @@ def _transform_movers(data: dict) -> str:
 
 # ── Transformer registry ────────────────────────────────────
 
-TRANSFORMERS: dict[str, Callable[[Any], Any]] = {
+TRANSFORMERS: dict[str, Callable[[Any], str]] = {
     # Webull
     "/account/profile": _transform_account_profile,
     "/account/balance": _transform_account_balance,
@@ -1106,7 +1107,7 @@ def _apply_field_filter(data: Any, fields: set[str]) -> Any:
     return data
 
 
-def process(path: str, data: Any) -> Any:
+def process(path: str, data: Any) -> str:
     """Filter and transform an API response based on its endpoint path or logical key."""
     # Stage 1: field filtering
     fields = FIELD_FILTERS.get(path)
@@ -1116,6 +1117,6 @@ def process(path: str, data: Any) -> Any:
     # Stage 2: transform to markdown table
     transformer = TRANSFORMERS.get(path)
     if transformer is not None:
-        data = transformer(data)
+        return transformer(data)
 
-    return data
+    return json.dumps(data, indent=2, default=str)
