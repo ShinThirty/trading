@@ -54,7 +54,10 @@ def _list_table(items: list[dict], columns: list[str] | None = None) -> str:
     if not items:
         return "(no data)"
     if columns is None:
-        columns = list(items[0].keys())
+        seen: dict[str, None] = {}
+        for item in items:
+            seen.update(dict.fromkeys(item.keys()))
+        columns = list(seen)
     rows = [[str(item.get(c, "")) for c in columns] for item in items]
     return _md_table(columns, rows)
 
@@ -125,7 +128,6 @@ FIELD_FILTERS: dict[str, set[str] | None] = {
     "/trade/instrument": None,
     "/app/subscriptions/list": None,
     # Market data
-    "/market-data/snapshot": None,
     "/instrument/list": None,
     "/market-data/bars": None,
 }
@@ -177,26 +179,6 @@ def _transform_account_positions(data: list[dict]) -> str:
             "P&L %": _fmt_number(float(p.get("unrealized_profit_loss_rate", 0)) * 100),
         }
         for p in data
-    ]
-    return _list_table(rows)
-
-
-def _transform_snapshot(data: list[dict]) -> str:
-    if not data:
-        return "(no quotes)"
-    rows = [
-        {
-            "Symbol": q.get("symbol", ""),
-            "Price": _fmt_number(q.get("price")),
-            "Open": _fmt_number(q.get("open")),
-            "High": _fmt_number(q.get("high")),
-            "Low": _fmt_number(q.get("low")),
-            "Prev Close": _fmt_number(q.get("pre_close")),
-            "Volume": _fmt_large(q.get("volume")),
-            "Change": _fmt_number(q.get("change")),
-            "Change %": _fmt_number(float(q.get("change_ratio", 0)) * 100),
-        }
-        for q in data
     ]
     return _list_table(rows)
 
@@ -397,24 +379,59 @@ def _transform_tradier_quotes(data: list[dict]) -> str:
         return "(no quotes)"
     rows = []
     for q in data:
-        row: dict[str, str] = {
-            "Symbol": q.get("symbol", ""),
+        is_option = q.get("option_type") is not None
+        row: dict[str, str] = {"Symbol": q.get("symbol", "")}
+        if is_option:
+            row["Type"] = q.get("option_type", "")
+            row["Strike"] = _fmt_number(q.get("strike"))
+            row["Exp"] = q.get("expiration_date", "")
+        row |= {
             "Last": _fmt_number(q.get("last")),
             "Bid": _fmt_number(q.get("bid")),
+            "Bid Sz": _fmt_large(q.get("bidsize")),
             "Ask": _fmt_number(q.get("ask")),
+            "Ask Sz": _fmt_large(q.get("asksize")),
             "Volume": _fmt_large(q.get("volume")),
             "Change": _fmt_number(q.get("change")),
             "Change %": _fmt_number(q.get("change_percentage")),
         }
+        if is_option:
+            row["OI"] = _fmt_large(q.get("open_interest"))
+        else:
+            row |= {
+                "Prev Close": _fmt_number(q.get("prevclose")),
+                "Open": _fmt_number(q.get("open")),
+                "High": _fmt_number(q.get("high")),
+                "Low": _fmt_number(q.get("low")),
+                "Avg Vol": _fmt_large(q.get("average_volume")),
+                "52W High": _fmt_number(q.get("week_52_high")),
+                "52W Low": _fmt_number(q.get("week_52_low")),
+            }
         greeks = q.get("greeks")
         if greeks:
-            row["IV"] = _fmt_number(greeks.get("mid_iv"), 4)
-            row["Delta"] = _fmt_number(greeks.get("delta"), 4)
-            row["Gamma"] = _fmt_number(greeks.get("gamma"), 4)
-            row["Theta"] = _fmt_number(greeks.get("theta"), 4)
-            row["Vega"] = _fmt_number(greeks.get("vega"), 4)
+            row |= {
+                "IV": _fmt_number(greeks.get("mid_iv"), 4),
+                "Delta": _fmt_number(greeks.get("delta"), 4),
+                "Gamma": _fmt_number(greeks.get("gamma"), 4),
+                "Theta": _fmt_number(greeks.get("theta"), 4),
+                "Vega": _fmt_number(greeks.get("vega"), 4),
+                "Rho": _fmt_number(greeks.get("rho"), 4),
+            }
         rows.append(row)
-    return _list_table(rows)
+    has_stocks = any(q.get("option_type") is None for q in data)
+    has_options = any(q.get("option_type") is not None for q in data)
+    has_greeks = any("IV" in r for r in rows)
+    cols = ["Symbol"]
+    if has_options:
+        cols += ["Type", "Strike", "Exp"]
+    cols += ["Last", "Bid", "Bid Sz", "Ask", "Ask Sz", "Volume", "Change", "Change %"]
+    if has_options:
+        cols += ["OI"]
+    if has_stocks:
+        cols += ["Prev Close", "Open", "High", "Low", "Avg Vol", "52W High", "52W Low"]
+    if has_greeks:
+        cols += ["IV", "Delta", "Gamma", "Theta", "Vega", "Rho"]
+    return _list_table(rows, cols)
 
 
 def _transform_tradier_timesales(data: list[dict]) -> str:
@@ -1008,7 +1025,6 @@ TRANSFORMERS: dict[str, Callable[[Any], Any]] = {
     "/account/profile": _transform_account_profile,
     "/account/balance": _transform_account_balance,
     "/account/positions": _transform_account_positions,
-    "/market-data/snapshot": _transform_snapshot,
     "/instrument/list": _transform_instruments,
     "/market-data/bars": _transform_bars,
     "/trade/instrument": _transform_trade_instrument,

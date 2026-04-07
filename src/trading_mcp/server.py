@@ -408,17 +408,6 @@ def get_app_subscriptions(ctx: Context) -> str:
 
 
 @mcp.tool()
-def get_quote(ctx: Context, symbols: str) -> str:
-    """Get real-time snapshot quotes: last price, bid/ask, volume, day change, and
-    52-week high/low.
-
-    symbols: comma-separated ticker symbols (e.g. 'AAPL,TSLA,MSFT').
-    Results are not cached — each call fetches live data.
-    """
-    return _webull(ctx).get_quote(symbols)
-
-
-@mcp.tool()
 def get_instruments(ctx: Context, symbols: str) -> str:
     """Look up instrument IDs, exchange, currency, and instrument type for symbols.
     Use this to resolve ticker symbols to instrument_ids needed by other tools
@@ -561,13 +550,21 @@ def search_symbols(ctx: Context, query: str, indexes: bool = False) -> str:
 
 
 @mcp.tool()
-def get_tradier_quote(ctx: Context, symbols: str, greeks: bool = False) -> str:
-    """Get real-time quotes for stocks or option contracts. When greeks=True, option
-    quotes include delta, gamma, theta, vega, and implied volatility.
+def get_quote(ctx: Context, symbols: str, greeks: bool = False) -> str:
+    """Get real-time quotes for stocks and/or option contracts.
 
-    symbols: comma-separated ticker symbols or OCC option symbols
-      (e.g. 'AAPL,TSLA' or 'AAPL260417C00260000').
-    greeks: include greeks and IV for option symbols (default False).
+    For stocks: last price, bid/ask with sizes, volume, day change/%, prev close,
+    open/high/low, average volume, 52-week high/low.
+    For options: last price, bid/ask with sizes, volume, day change/%, open interest,
+    plus decoded strike/expiration/type from the OCC symbol.
+    When greeks=True, option quotes additionally include: implied volatility (mid IV),
+    delta, gamma, theta, vega, and rho.
+
+    symbols: comma-separated ticker symbols or OCC option symbols. Can mix both in one
+      call (e.g. 'AAPL,TSLA,AAPL260417C00260000'). Use get_option_lookup to find OCC
+      symbols for options.
+    greeks: include greeks and IV for option symbols (default False). Has no effect on
+      stock symbols. Set True when evaluating option positions or comparing contracts.
 
     Requires [tradier] section in ~/.tradingrc.
     """

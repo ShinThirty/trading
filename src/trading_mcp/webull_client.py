@@ -62,7 +62,6 @@ _RATE_KEY_MAP: dict[str, str] = {
     "/trade/calendar": "instruments",
     "/trade/instrument": "instruments",
     "/instrument/list": "instruments",
-    "/market-data/snapshot": "market",
     "/market-data/bars": "market",
 }
 
@@ -399,13 +398,6 @@ class WebullClient:
         return self._get(API_HOST, "/app/subscriptions/list", params)
 
     # ── Market Data ──────────────────────────────────────────
-
-    def get_quote(self, symbols: str, category: str = "US_STOCK") -> list[dict]:
-        return self._get(
-            QUOTES_HOST,
-            "/market-data/snapshot",
-            {"symbols": symbols, "category": category},
-        )
 
     def get_instruments(self, symbols: str, category: str = "US_STOCK") -> list[dict]:
         return self._get(
