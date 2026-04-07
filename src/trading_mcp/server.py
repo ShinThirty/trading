@@ -482,8 +482,9 @@ def get_option_chain(
     greeks: bool = True,
 ) -> str:
     """Get the full option chain for an underlying symbol at a specific expiration.
-    Returns all calls and puts with bid/ask, last price, volume, open interest,
-    and optionally greeks (delta, gamma, theta, vega, rho) and implied volatility.
+
+    Returns all calls and puts with: bid/ask with sizes, last price, day change/%,
+    volume, open interest, and optionally greeks (IV, delta, gamma, theta, vega, rho).
 
     symbol: underlying ticker symbol (e.g. 'AAPL').
     expiration: expiration date (YYYY-MM-DD, from get_option_expirations).
@@ -493,7 +494,6 @@ def get_option_chain(
     1. get_option_expirations('AAPL') → list of dates
     2. get_option_chain('AAPL', '2026-04-17') → full chain with greeks
 
-    Note: Tradier sandbox data is delayed ~15 minutes.
     Requires [tradier] section in ~/.tradingrc.
     """
     return _tradier(ctx).get_option_chain(symbol, expiration, greeks)
@@ -581,6 +581,8 @@ def get_timesales(
 ) -> str:
     """Get intraday time-and-sales tick data for a stock or option contract.
     Higher granularity than historical bars — useful for intraday analysis and charting.
+
+    Returns: timestamp, last trade price, OHLC, and volume per interval.
 
     symbol: ticker or OCC option symbol (e.g. 'AAPL' or 'AAPL260417C00260000').
     interval: tick interval — '1min', '5min', '15min'. Default '5min'.
@@ -681,6 +683,9 @@ def get_tradier_gainloss(
     account_id: str | None = None,
 ) -> str:
     """Get realized gain/loss for all closed positions in a Tradier account.
+
+    Returns: symbol, quantity, open/close dates, term (short/long), cost, proceeds,
+    gain/loss amount and percentage.
 
     sort_by: 'closedate', 'opendate', 'symbol', or 'gainloss'.
     sort: 'asc' or 'desc'.

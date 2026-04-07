@@ -440,6 +440,7 @@ def _transform_tradier_timesales(data: list[dict]) -> str:
     rows = [
         {
             "Time": t.get("time", "")[:19],
+            "Price": _fmt_number(t.get("price")),
             "Open": _fmt_number(t.get("open")),
             "High": _fmt_number(t.get("high")),
             "Low": _fmt_number(t.get("low")),
@@ -553,6 +554,7 @@ def _transform_tradier_gainloss(data: list[dict]) -> str:
             "Qty": _fmt_number(g.get("quantity"), 0),
             "Open Date": (g.get("open_date") or "")[:10],
             "Close Date": (g.get("close_date") or "")[:10],
+            "Term": g.get("term", ""),
             "Cost": _fmt_number(g.get("cost")),
             "Proceeds": _fmt_number(g.get("proceeds")),
             "Gain/Loss": _fmt_number(g.get("gain_loss")),
@@ -608,15 +610,20 @@ def _transform_option_chain(data: list[dict]) -> str:
                 "Type": o.get("option_type", ""),
                 "Strike": _fmt_number(o.get("strike")),
                 "Bid": _fmt_number(o.get("bid")),
+                "Bid Sz": _fmt_large(o.get("bidsize")),
                 "Ask": _fmt_number(o.get("ask")),
+                "Ask Sz": _fmt_large(o.get("asksize")),
                 "Last": _fmt_number(o.get("last")),
-                "Vol": str(o.get("volume", "")),
-                "OI": str(o.get("open_interest", "")),
+                "Change": _fmt_number(o.get("change")),
+                "Change %": _fmt_number(o.get("change_percentage")),
+                "Vol": _fmt_large(o.get("volume")),
+                "OI": _fmt_large(o.get("open_interest")),
                 "IV": _fmt_number(greeks.get("mid_iv"), 4),
                 "Delta": _fmt_number(greeks.get("delta"), 4),
                 "Gamma": _fmt_number(greeks.get("gamma"), 4),
                 "Theta": _fmt_number(greeks.get("theta"), 4),
                 "Vega": _fmt_number(greeks.get("vega"), 4),
+                "Rho": _fmt_number(greeks.get("rho"), 4),
             }
         )
     return _list_table(rows)
