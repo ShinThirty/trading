@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "google-workspace": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": [
+        "workspace-mcp@latest",
+        "--tools",
+        "sheets",
+        "drive",
+        "docs",
+        "calendar"
+      ],
+      "env": {}
+    }
+  }
+}
