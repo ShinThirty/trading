@@ -229,7 +229,7 @@ def preview_order(ctx: Context, new_orders: list[dict], account_id: str | None =
       - entrust_type: 'QTY' (or 'AMOUNT' for fractional/dollar-based)
       - limit_price: str (required for LIMIT orders)
       - stop_price: str (required for STOP_LOSS orders)
-      - support_trading_session: 'CORE' (regular hours), 'ALL' (include extended), 'NIGHT'
+      - trading_session: 'CORE' (regular hours), 'ALL' (include extended), 'NIGHT'
 
     For options, also include:
       - option_strategy: 'SINGLE', 'VERTICAL', 'STRADDLE', 'STRANGLE', 'IRON_CONDOR', etc.
