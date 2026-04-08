@@ -1,19 +1,7 @@
-"""Response processing for API endpoints.
+"""Markdown table helper functions for API response rendering.
 
-Every API response passes through `process()` which applies two stages:
-
-1. **Field filtering** — drop unneeded top-level keys to reduce token usage.
-   Configure via FIELD_FILTERS (set of keys to keep, or None for passthrough).
-
-2. **Transformation** — convert the response to a markdown table string so the
-   model gets clean, structured, unambiguous output. This drastically reduces
-   hallucinations compared to raw JSON. Configure via TRANSFORMERS.
-
-Both stages are optional per endpoint. If neither is configured, the raw
-response passes through unchanged.
-
-Keys use the API path for Webull endpoints (e.g. "/account/profile") and a
-namespaced logical key for external providers (e.g. "tradier:chain").
+These helpers convert structured data into markdown tables for clean,
+unambiguous LLM output. Used by response models in endpoints/*.py.
 """
 
 import json
@@ -24,7 +12,7 @@ from typing import Any
 # ── Markdown table helpers ───────────────────────────────────
 
 
-def _md_table(headers: list[str], rows: list[list[str]]) -> str:
+def md_table(headers: list[str], rows: list[list[str]]) -> str:
     """Build a markdown table from headers and rows."""
     lines = [
         "| " + " | ".join(headers) + " |",
@@ -39,14 +27,14 @@ def _md_table(headers: list[str], rows: list[list[str]]) -> str:
     return "\n".join(lines)
 
 
-def _kv_table(data: dict, key_header: str = "Field", val_header: str = "Value") -> str:
+def kv_table(data: dict, key_header: str = "Field", val_header: str = "Value") -> str:
     """Build a two-column key/value markdown table from a dict."""
     headers = [key_header, val_header]
     rows = [[str(k), str(v)] for k, v in data.items() if v is not None]
-    return _md_table(headers, rows)
+    return md_table(headers, rows)
 
 
-def _list_table(items: list[dict], columns: list[str] | None = None) -> str:
+def list_table(items: list[dict], columns: list[str] | None = None) -> str:
     """Build a markdown table from a list of dicts.
 
     If columns is provided, only those keys are included (in that order).
@@ -60,10 +48,10 @@ def _list_table(items: list[dict], columns: list[str] | None = None) -> str:
             seen.update(dict.fromkeys(item.keys()))
         columns = list(seen)
     rows = [[str(item.get(c, "")) for c in columns] for item in items]
-    return _md_table(columns, rows)
+    return md_table(columns, rows)
 
 
-def _fmt_number(val: Any, decimals: int = 2) -> str:
+def fmt_number(val: Any, decimals: int = 2) -> str:
     """Format a number with commas and fixed decimals, or return '' if None."""
     if val is None:
         return ""
@@ -73,7 +61,7 @@ def _fmt_number(val: Any, decimals: int = 2) -> str:
         return str(val)
 
 
-def _fmt_large(val: Any) -> str:
+def fmt_large(val: Any) -> str:
     """Format large numbers as B/M/K for readability."""
     if val is None:
         return ""
@@ -92,7 +80,7 @@ def _fmt_large(val: Any) -> str:
     return f"{n:.2f}"
 
 
-def _unix_to_date(ts: Any) -> str:
+def unix_to_date(ts: Any) -> str:
     """Convert unix timestamp to YYYY-MM-DD HH:MM."""
     if ts is None:
         return ""
@@ -102,37 +90,6 @@ def _unix_to_date(ts: Any) -> str:
         return str(ts)
 
 
-# ── Per-endpoint top-level field keep-sets ────────────────────
-# Set to None (or omit) to pass through all fields.
-
-FIELD_FILTERS: dict[str, set[str] | None] = {
-    # ── Webull ──
-    # Account
-    "/account/profile": None,
-    "/account/balance": None,
-    "/account/positions": None,
-    # Orders (read)
-    "/trade/orders/list-open": None,
-    "/trade/orders/list-today": None,
-    "/trade/order/detail": None,
-    # Order management
-    "/openapi/account/orders/preview": None,
-    "/trade/order/place": None,
-    "/trade/order/replace": None,
-    "/trade/order/cancel": None,
-    "/openapi/account/orders/option/preview": None,
-    "/openapi/account/orders/option/place": None,
-    "/openapi/account/orders/option/replace": None,
-    "/openapi/account/orders/option/cancel": None,
-    # Trade info
-    "/trade/calendar": None,
-    "/trade/instrument": None,
-    "/app/subscriptions/list": None,
-    # Market data
-    "/instrument/list": None,
-    "/market-data/bars": None,
-}
-
 
 # ── Transformers ─────────────────────────────────────────────
 
@@ -140,48 +97,79 @@ FIELD_FILTERS: dict[str, set[str] | None] = {
 # ── Webull ──
 
 
-def _transform_account_profile(data: dict) -> str:
+def _transform_account_list(data: list[dict]) -> str:
     if not data:
-        return "(no data)"
-    return _kv_table(data)
+        return "(no accounts)"
+    rows = [
+        {
+            "Account ID": a.get("account_id", ""),
+            "Account Number": a.get("account_number", ""),
+            "Type": a.get("account_type", ""),
+            "Label": a.get("account_label", ""),
+        }
+        for a in data
+    ]
+    return list_table(rows)
 
 
 def _transform_account_balance(data: dict) -> str:
     if not data:
         return "(no data)"
-    # Flatten the nested account_currency_assets into top-level
     assets = data.get("account_currency_assets", [])
     usd = assets[0] if assets else {}
     selected = {
-        "Net Liquidation": _fmt_number(usd.get("net_liquidation_value")),
-        "Market Value": _fmt_number(data.get("total_market_value")),
-        "Cash Balance": _fmt_number(data.get("total_cash_balance")),
-        "Cash Power": _fmt_number(usd.get("cash_power")),
-        "Margin Power": _fmt_number(usd.get("margin_power")),
-        "Margin Utilization": data.get("margin_utilization_rate"),
-        "Available Withdrawal": _fmt_number(usd.get("available_withdrawal")),
-        "Pending Incoming": _fmt_number(usd.get("pending_incoming")),
+        "Net Liquidation": fmt_number(data.get("total_net_liquidation_value")),
+        "Market Value": fmt_number(data.get("total_market_value")),
+        "Cash Balance": fmt_number(data.get("total_cash_balance")),
+        "Day P&L": fmt_number(data.get("total_day_profit_loss")),
+        "Unrealized P&L": fmt_number(data.get("total_unrealized_profit_loss")),
+        "Day Trades Left": data.get("day_trades_left"),
+        "Cash Power": fmt_number(usd.get("cash_power")),
+        "Margin Power": fmt_number(usd.get("margin_power")),
+        "Margin Ratio": data.get("margin_ratio"),
+        "Available Withdrawal": fmt_number(usd.get("available_withdrawal")),
     }
-    return _kv_table({k: v for k, v in selected.items() if v and v != "0.00"})
+    return kv_table({k: v for k, v in selected.items() if v and v != "0.00"})
 
 
 def _transform_account_positions(data: list[dict]) -> str:
     if not data:
         return "(no positions)"
-    rows = [
-        {
+    has_options = any(p.get("legs") for p in data)
+    rows = []
+    for p in data:
+        pnl_rate = p.get("unrealized_profit_loss_rate")
+        pnl_pct = fmt_number(float(pnl_rate) * 100) if pnl_rate else ""
+        row: dict[str, str] = {
             "Symbol": p.get("symbol", ""),
-            "Instrument ID": p.get("instrument_id", ""),
-            "Qty": p.get("qty", ""),
-            "Cost": _fmt_number(p.get("unit_cost")),
-            "Last": _fmt_number(p.get("last_price")),
-            "Mkt Value": _fmt_number(p.get("market_value")),
-            "P&L": _fmt_number(p.get("unrealized_profit_loss")),
-            "P&L %": _fmt_number(float(p.get("unrealized_profit_loss_rate", 0)) * 100),
+            "Qty": p.get("quantity", ""),
+            "Cost": fmt_number(p.get("cost_price")),
+            "Last": fmt_number(p.get("last_price")),
+            "Mkt Val": fmt_number(p.get("market_value")),
+            "P&L": fmt_number(p.get("unrealized_profit_loss")),
+            "P&L %": pnl_pct,
         }
-        for p in data
-    ]
-    return _list_table(rows)
+        if has_options:
+            # Find the OPTION leg (covered stocks have both EQUITY + OPTION legs)
+            option_leg = None
+            for leg in p.get("legs", []):
+                if leg.get("instrument_type") == "OPTION":
+                    option_leg = leg
+                    break
+            if option_leg:
+                row["Option"] = option_leg.get("option_type", "")
+                row["Strike"] = fmt_number(option_leg.get("option_exercise_price"))
+                row["Exp"] = option_leg.get("option_expire_date", "")
+            else:
+                row["Option"] = ""
+                row["Strike"] = ""
+                row["Exp"] = ""
+            row["Strategy"] = p.get("option_strategy", "")
+        rows.append(row)
+    cols = ["Symbol", "Qty", "Cost", "Last", "Mkt Val", "P&L", "P&L %"]
+    if has_options:
+        cols += ["Option", "Strike", "Exp", "Strategy"]
+    return list_table(rows, cols)
 
 
 def _transform_instruments(data: list[dict]) -> str:
@@ -194,129 +182,82 @@ def _transform_instruments(data: list[dict]) -> str:
             "Instrument ID": i.get("instrument_id", ""),
             "Exchange": i.get("exchange_code", ""),
             "Currency": i.get("currency", ""),
+            "Shortable": str(i.get("shortable", "")),
+            "Fractionable": str(i.get("fractionable", "")),
         }
         for i in data
     ]
-    return _list_table(rows)
+    return list_table(rows)
 
 
-def _transform_bars(data: list[dict]) -> str:
+def _transform_order_list(data: list[dict]) -> str:
     if not data:
-        return "(no bars)"
-    rows = [
-        {
-            "Date": (b.get("time") or "")[:10],
-            "Open": _fmt_number(b.get("open")),
-            "High": _fmt_number(b.get("high")),
-            "Low": _fmt_number(b.get("low")),
-            "Close": _fmt_number(b.get("close")),
-            "Volume": _fmt_large(b.get("volume")),
-        }
-        for b in data
-    ]
-    return _list_table(rows)
-
-
-def _transform_trade_instrument(data: dict) -> str:
-    if not data:
-        return "(no data)"
-    return _kv_table(data)
-
-
-def _transform_trade_calendar(data: list[dict]) -> str:
-    if not data:
-        return "(no data)"
-    rows = [
-        {
-            "Date": d.get("trade_day", ""),
-            "Type": d.get("trade_date_type", ""),
-        }
-        for d in data
-    ]
-    return _list_table(rows)
-
-
-def _transform_subscriptions(data: list[dict]) -> str:
-    if not data:
-        return "(no subscriptions)"
-    rows = [
-        {
-            "Account Number": s.get("account_number", ""),
-            "Account ID": s.get("account_id", ""),
-        }
-        for s in data
-    ]
-    return _list_table(rows)
-
-
-def _transform_open_orders(data: dict) -> str:
-    orders = data.get("orders", []) if isinstance(data, dict) else []
-    if not orders:
-        return "(no open orders)"
-    return _transform_order_list(orders)
-
-
-def _transform_today_orders(data: dict) -> str:
-    orders = data.get("orders", []) if isinstance(data, dict) else []
-    if not orders:
-        return "(no orders today)"
-    return _transform_order_list(orders)
-
-
-def _transform_order_list(orders: list[dict]) -> str:
+        return "(no orders)"
     rows = []
-    for o in orders:
-        items = o.get("items", [])
-        for item in items:
-            rows.append(
-                {
-                    "Symbol": item.get("symbol", ""),
-                    "Side": item.get("side", ""),
-                    "Type": item.get("order_type", ""),
-                    "Qty": item.get("qty", ""),
-                    "Filled": item.get("filled_qty", ""),
-                    "Price": _fmt_number(item.get("limit_price")),
-                    "Status": item.get("order_status", ""),
-                    "Time": (item.get("place_time") or "")[:19],
-                }
-            )
-    return _list_table(rows) if rows else "(no orders)"
+    for combo in data:
+        orders = combo.get("orders", [])
+        for o in orders:
+            row: dict[str, str] = {
+                "Order ID": o.get("client_order_id", ""),
+                "Symbol": o.get("symbol", ""),
+                "Side": o.get("side", ""),
+                "Type": o.get("order_type", ""),
+                "Instrument": o.get("instrument_type", ""),
+                "Qty": o.get("total_quantity", ""),
+                "Filled": o.get("filled_quantity", ""),
+                "Price": fmt_number(o.get("limit_price")),
+                "Status": o.get("status", ""),
+                "Time": (o.get("place_time_at") or "")[:19],
+            }
+            legs = o.get("legs", [])
+            if legs:
+                leg = legs[0]
+                row["Strike"] = fmt_number(leg.get("strike_price"))
+                row["Exp"] = leg.get("option_expire_date", "")
+                row["Option"] = leg.get("option_type", "")
+            rows.append(row)
+    return list_table(rows) if rows else "(no orders)"
 
 
 def _transform_order_detail(data: dict) -> str:
     if not data:
         return "(no data)"
-    items = data.get("items", [])
-    header = {
-        "Order ID": data.get("client_order_id"),
-        "TIF": data.get("tif"),
-        "Extended Hours": str(data.get("extended_hours_trading", "")),
-    }
-    result = _kv_table({k: v for k, v in header.items() if v})
-    if items:
-        result += "\n\n"
-        rows = [
-            {
-                "Symbol": item.get("symbol", ""),
-                "Side": item.get("side", ""),
-                "Type": item.get("order_type", ""),
-                "Qty": item.get("qty", ""),
-                "Filled": item.get("filled_qty", ""),
-                "Price": _fmt_number(item.get("limit_price")),
-                "Status": item.get("order_status", ""),
-                "Time": (item.get("place_time") or "")[:19],
-                "Commission": _fmt_number(item.get("commission")),
-            }
-            for item in items
-        ]
-        result += _list_table(rows)
-    return result
+    orders = data.get("orders", [])
+    if not orders:
+        return "(no data)"
+    sections = []
+    for o in orders:
+        details: dict[str, str | None] = {
+            "Order ID": o.get("client_order_id"),
+            "Symbol": o.get("symbol"),
+            "Side": o.get("side"),
+            "Type": o.get("order_type"),
+            "Instrument": o.get("instrument_type"),
+            "Qty": o.get("total_quantity"),
+            "Filled": o.get("filled_quantity"),
+            "Fill Price": fmt_number(o.get("filled_price")),
+            "Limit": fmt_number(o.get("limit_price")),
+            "Stop": fmt_number(o.get("stop_price")),
+            "Status": o.get("status"),
+            "TIF": o.get("time_in_force"),
+            "Session": o.get("support_trading_session"),
+            "Placed": (o.get("place_time_at") or "")[:19] or None,
+            "Filled At": (o.get("filled_time_at") or "")[:19] or None,
+        }
+        legs = o.get("legs", [])
+        if legs:
+            leg = legs[0]
+            details["Option"] = leg.get("option_type")
+            details["Strike"] = fmt_number(leg.get("strike_price"))
+            details["Exp"] = leg.get("option_expire_date")
+        sections.append(kv_table({k: v for k, v in details.items() if v}))
+    return "\n\n".join(sections)
 
 
 def _transform_order_result(data: dict) -> str:
     if not data:
         return "(no data)"
-    return _kv_table(data)
+    return kv_table(data)
 
 
 # ── Tradier ──
@@ -326,21 +267,21 @@ def _transform_option_expirations(data: list[str]) -> str:
     if not data:
         return "(no expirations)"
     rows = [[d] for d in data]
-    return _md_table(["Expiration"], rows)
+    return md_table(["Expiration"], rows)
 
 
 def _transform_option_strikes(data: list) -> str:
     if not data:
         return "(no strikes)"
-    rows = [[_fmt_number(s)] for s in data]
-    return _md_table(["Strike"], rows)
+    rows = [[fmt_number(s)] for s in data]
+    return md_table(["Strike"], rows)
 
 
 def _transform_option_lookup(data: list) -> str:
     if not data:
         return "(no options)"
     rows = [[str(o)] for o in data]
-    return _md_table(["Option Symbol"], rows)
+    return md_table(["Option Symbol"], rows)
 
 
 def _transform_tradier_history(data: list[dict]) -> str:
@@ -349,15 +290,15 @@ def _transform_tradier_history(data: list[dict]) -> str:
     rows = [
         {
             "Date": d.get("date", ""),
-            "Open": _fmt_number(d.get("open")),
-            "High": _fmt_number(d.get("high")),
-            "Low": _fmt_number(d.get("low")),
-            "Close": _fmt_number(d.get("close")),
-            "Volume": _fmt_large(d.get("volume")),
+            "Open": fmt_number(d.get("open")),
+            "High": fmt_number(d.get("high")),
+            "Low": fmt_number(d.get("low")),
+            "Close": fmt_number(d.get("close")),
+            "Volume": fmt_large(d.get("volume")),
         }
         for d in data
     ]
-    return _list_table(rows)
+    return list_table(rows)
 
 
 def _transform_tradier_search(data: list[dict]) -> str:
@@ -372,7 +313,7 @@ def _transform_tradier_search(data: list[dict]) -> str:
         }
         for s in data
     ]
-    return _list_table(rows)
+    return list_table(rows)
 
 
 def _transform_tradier_quotes(data: list[dict]) -> str:
@@ -384,39 +325,39 @@ def _transform_tradier_quotes(data: list[dict]) -> str:
         row: dict[str, str] = {"Symbol": q.get("symbol", "")}
         if is_option:
             row["Type"] = q.get("option_type", "")
-            row["Strike"] = _fmt_number(q.get("strike"))
+            row["Strike"] = fmt_number(q.get("strike"))
             row["Exp"] = q.get("expiration_date", "")
         row |= {
-            "Last": _fmt_number(q.get("last")),
-            "Bid": _fmt_number(q.get("bid")),
-            "Bid Sz": _fmt_large(q.get("bidsize")),
-            "Ask": _fmt_number(q.get("ask")),
-            "Ask Sz": _fmt_large(q.get("asksize")),
-            "Volume": _fmt_large(q.get("volume")),
-            "Change": _fmt_number(q.get("change")),
-            "Change %": _fmt_number(q.get("change_percentage")),
+            "Last": fmt_number(q.get("last")),
+            "Bid": fmt_number(q.get("bid")),
+            "Bid Sz": fmt_large(q.get("bidsize")),
+            "Ask": fmt_number(q.get("ask")),
+            "Ask Sz": fmt_large(q.get("asksize")),
+            "Volume": fmt_large(q.get("volume")),
+            "Change": fmt_number(q.get("change")),
+            "Change %": fmt_number(q.get("change_percentage")),
         }
         if is_option:
-            row["OI"] = _fmt_large(q.get("open_interest"))
+            row["OI"] = fmt_large(q.get("open_interest"))
         else:
             row |= {
-                "Prev Close": _fmt_number(q.get("prevclose")),
-                "Open": _fmt_number(q.get("open")),
-                "High": _fmt_number(q.get("high")),
-                "Low": _fmt_number(q.get("low")),
-                "Avg Vol": _fmt_large(q.get("average_volume")),
-                "52W High": _fmt_number(q.get("week_52_high")),
-                "52W Low": _fmt_number(q.get("week_52_low")),
+                "Prev Close": fmt_number(q.get("prevclose")),
+                "Open": fmt_number(q.get("open")),
+                "High": fmt_number(q.get("high")),
+                "Low": fmt_number(q.get("low")),
+                "Avg Vol": fmt_large(q.get("average_volume")),
+                "52W High": fmt_number(q.get("week_52_high")),
+                "52W Low": fmt_number(q.get("week_52_low")),
             }
         greeks = q.get("greeks")
         if greeks:
             row |= {
-                "IV": _fmt_number(greeks.get("mid_iv"), 4),
-                "Delta": _fmt_number(greeks.get("delta"), 4),
-                "Gamma": _fmt_number(greeks.get("gamma"), 4),
-                "Theta": _fmt_number(greeks.get("theta"), 4),
-                "Vega": _fmt_number(greeks.get("vega"), 4),
-                "Rho": _fmt_number(greeks.get("rho"), 4),
+                "IV": fmt_number(greeks.get("mid_iv"), 4),
+                "Delta": fmt_number(greeks.get("delta"), 4),
+                "Gamma": fmt_number(greeks.get("gamma"), 4),
+                "Theta": fmt_number(greeks.get("theta"), 4),
+                "Vega": fmt_number(greeks.get("vega"), 4),
+                "Rho": fmt_number(greeks.get("rho"), 4),
             }
         rows.append(row)
     has_stocks = any(q.get("option_type") is None for q in data)
@@ -432,7 +373,7 @@ def _transform_tradier_quotes(data: list[dict]) -> str:
         cols += ["Prev Close", "Open", "High", "Low", "Avg Vol", "52W High", "52W Low"]
     if has_greeks:
         cols += ["IV", "Delta", "Gamma", "Theta", "Vega", "Rho"]
-    return _list_table(rows, cols)
+    return list_table(rows, cols)
 
 
 def _transform_tradier_timesales(data: list[dict]) -> str:
@@ -441,22 +382,22 @@ def _transform_tradier_timesales(data: list[dict]) -> str:
     rows = [
         {
             "Time": t.get("time", "")[:19],
-            "Price": _fmt_number(t.get("price")),
-            "Open": _fmt_number(t.get("open")),
-            "High": _fmt_number(t.get("high")),
-            "Low": _fmt_number(t.get("low")),
-            "Close": _fmt_number(t.get("close")),
-            "Volume": _fmt_large(t.get("volume")),
+            "Price": fmt_number(t.get("price")),
+            "Open": fmt_number(t.get("open")),
+            "High": fmt_number(t.get("high")),
+            "Low": fmt_number(t.get("low")),
+            "Close": fmt_number(t.get("close")),
+            "Volume": fmt_large(t.get("volume")),
         }
         for t in data
     ]
-    return _list_table(rows)
+    return list_table(rows)
 
 
 def _transform_tradier_clock(data: dict) -> str:
     if not data:
         return "(no data)"
-    return _kv_table(
+    return kv_table(
         {
             "State": data.get("state"),
             "Description": data.get("description"),
@@ -482,7 +423,7 @@ def _transform_tradier_profile(data: list[dict]) -> str:
         }
         for a in data
     ]
-    return _list_table(rows)
+    return list_table(rows)
 
 
 def _transform_tradier_balances(data: dict) -> str:
@@ -491,16 +432,16 @@ def _transform_tradier_balances(data: dict) -> str:
     selected = {
         "Account": data.get("account_number"),
         "Account Type": data.get("account_type"),
-        "Total Equity": _fmt_number(data.get("total_equity")),
-        "Total Cash": _fmt_number(data.get("total_cash")),
-        "Market Value": _fmt_number(data.get("market_value")),
-        "Option Value": _fmt_number(data.get("option_long_value")),
-        "Stock Buying Power": _fmt_number(data.get("stock_buying_power")),
-        "Option Buying Power": _fmt_number(data.get("option_buying_power")),
-        "Pending Cash": _fmt_number(data.get("pending_cash")),
-        "Uncleared Funds": _fmt_number(data.get("uncleared_funds")),
+        "Total Equity": fmt_number(data.get("total_equity")),
+        "Total Cash": fmt_number(data.get("total_cash")),
+        "Market Value": fmt_number(data.get("market_value")),
+        "Option Value": fmt_number(data.get("option_long_value")),
+        "Stock Buying Power": fmt_number(data.get("stock_buying_power")),
+        "Option Buying Power": fmt_number(data.get("option_buying_power")),
+        "Pending Cash": fmt_number(data.get("pending_cash")),
+        "Uncleared Funds": fmt_number(data.get("uncleared_funds")),
     }
-    return _kv_table({k: v for k, v in selected.items() if v})
+    return kv_table({k: v for k, v in selected.items() if v})
 
 
 def _transform_tradier_positions(data: list[dict]) -> str:
@@ -509,13 +450,13 @@ def _transform_tradier_positions(data: list[dict]) -> str:
     rows = [
         {
             "Symbol": p.get("symbol", ""),
-            "Qty": _fmt_number(p.get("quantity"), 0),
-            "Cost Basis": _fmt_number(p.get("cost_basis")),
+            "Qty": fmt_number(p.get("quantity"), 0),
+            "Cost Basis": fmt_number(p.get("cost_basis")),
             "Date Acquired": p.get("date_acquired", ""),
         }
         for p in data
     ]
-    return _list_table(rows)
+    return list_table(rows)
 
 
 def _transform_tradier_orders(data: list[dict]) -> str:
@@ -527,23 +468,23 @@ def _transform_tradier_orders(data: list[dict]) -> str:
             "Class": o.get("class", ""),
             "Symbol": o.get("symbol", ""),
             "Side": o.get("side", ""),
-            "Qty": _fmt_number(o.get("quantity"), 0),
+            "Qty": fmt_number(o.get("quantity"), 0),
             "Type": o.get("type", ""),
-            "Price": _fmt_number(o.get("price")),
-            "Stop": _fmt_number(o.get("stop_price")),
+            "Price": fmt_number(o.get("price")),
+            "Stop": fmt_number(o.get("stop_price")),
             "Status": o.get("status", ""),
             "Duration": o.get("duration", ""),
             "Created": (o.get("create_date") or "")[:10],
         }
         for o in data
     ]
-    return _list_table(rows)
+    return list_table(rows)
 
 
 def _transform_tradier_order_detail(data: dict) -> str:
     if not data:
         return "(no data)"
-    return _kv_table(data)
+    return kv_table(data)
 
 
 def _transform_tradier_gainloss(data: list[dict]) -> str:
@@ -552,18 +493,18 @@ def _transform_tradier_gainloss(data: list[dict]) -> str:
     rows = [
         {
             "Symbol": g.get("symbol", ""),
-            "Qty": _fmt_number(g.get("quantity"), 0),
+            "Qty": fmt_number(g.get("quantity"), 0),
             "Open Date": (g.get("open_date") or "")[:10],
             "Close Date": (g.get("close_date") or "")[:10],
             "Term": g.get("term", ""),
-            "Cost": _fmt_number(g.get("cost")),
-            "Proceeds": _fmt_number(g.get("proceeds")),
-            "Gain/Loss": _fmt_number(g.get("gain_loss")),
-            "G/L %": _fmt_number(g.get("gain_loss_percent")),
+            "Cost": fmt_number(g.get("cost")),
+            "Proceeds": fmt_number(g.get("proceeds")),
+            "Gain/Loss": fmt_number(g.get("gain_loss")),
+            "G/L %": fmt_number(g.get("gain_loss_percent")),
         }
         for g in data
     ]
-    return _list_table(rows)
+    return list_table(rows)
 
 
 def _transform_tradier_account_history(data: list[dict]) -> str:
@@ -573,30 +514,30 @@ def _transform_tradier_account_history(data: list[dict]) -> str:
         {
             "Date": (e.get("date") or "")[:10],
             "Type": e.get("type", ""),
-            "Amount": _fmt_number(e.get("amount")),
+            "Amount": fmt_number(e.get("amount")),
             "Description": e.get("description", ""),
         }
         for e in data
     ]
-    return _list_table(rows)
+    return list_table(rows)
 
 
 def _transform_tradier_place_order(data: dict) -> str:
     if not data:
         return "(no data)"
-    return _kv_table(data)
+    return kv_table(data)
 
 
 def _transform_tradier_modify_order(data: dict) -> str:
     if not data:
         return "(no data)"
-    return _kv_table(data)
+    return kv_table(data)
 
 
 def _transform_tradier_cancel_order(data: dict) -> str:
     if not data:
         return "(no data)"
-    return _kv_table(data)
+    return kv_table(data)
 
 
 def _transform_option_chain(data: list[dict]) -> str:
@@ -609,25 +550,25 @@ def _transform_option_chain(data: list[dict]) -> str:
             {
                 "Symbol": o.get("symbol", ""),
                 "Type": o.get("option_type", ""),
-                "Strike": _fmt_number(o.get("strike")),
-                "Bid": _fmt_number(o.get("bid")),
-                "Bid Sz": _fmt_large(o.get("bidsize")),
-                "Ask": _fmt_number(o.get("ask")),
-                "Ask Sz": _fmt_large(o.get("asksize")),
-                "Last": _fmt_number(o.get("last")),
-                "Change": _fmt_number(o.get("change")),
-                "Change %": _fmt_number(o.get("change_percentage")),
-                "Vol": _fmt_large(o.get("volume")),
-                "OI": _fmt_large(o.get("open_interest")),
-                "IV": _fmt_number(greeks.get("mid_iv"), 4),
-                "Delta": _fmt_number(greeks.get("delta"), 4),
-                "Gamma": _fmt_number(greeks.get("gamma"), 4),
-                "Theta": _fmt_number(greeks.get("theta"), 4),
-                "Vega": _fmt_number(greeks.get("vega"), 4),
-                "Rho": _fmt_number(greeks.get("rho"), 4),
+                "Strike": fmt_number(o.get("strike")),
+                "Bid": fmt_number(o.get("bid")),
+                "Bid Sz": fmt_large(o.get("bidsize")),
+                "Ask": fmt_number(o.get("ask")),
+                "Ask Sz": fmt_large(o.get("asksize")),
+                "Last": fmt_number(o.get("last")),
+                "Change": fmt_number(o.get("change")),
+                "Change %": fmt_number(o.get("change_percentage")),
+                "Vol": fmt_large(o.get("volume")),
+                "OI": fmt_large(o.get("open_interest")),
+                "IV": fmt_number(greeks.get("mid_iv"), 4),
+                "Delta": fmt_number(greeks.get("delta"), 4),
+                "Gamma": fmt_number(greeks.get("gamma"), 4),
+                "Theta": fmt_number(greeks.get("theta"), 4),
+                "Vega": fmt_number(greeks.get("vega"), 4),
+                "Rho": fmt_number(greeks.get("rho"), 4),
             }
         )
-    return _list_table(rows)
+    return list_table(rows)
 
 
 # ── Finnhub ──
@@ -638,13 +579,13 @@ def _transform_company_news(data: list[dict]) -> str:
         return "(no news)"
     rows = [
         {
-            "Date": _unix_to_date(a.get("datetime")),
+            "Date": unix_to_date(a.get("datetime")),
             "Headline": a.get("headline", ""),
             "Source": a.get("source", ""),
         }
         for a in data
     ]
-    return _list_table(rows)
+    return list_table(rows)
 
 
 def _transform_market_news(data: list[dict]) -> str:
@@ -666,7 +607,7 @@ def _transform_economic_calendar(data: list[dict]) -> str:
         }
         for e in data
     ]
-    return _list_table(rows)
+    return list_table(rows)
 
 
 def _transform_earnings_calendar(data: list[dict]) -> str:
@@ -677,14 +618,14 @@ def _transform_earnings_calendar(data: list[dict]) -> str:
             "Date": e.get("date", ""),
             "Symbol": e.get("symbol", ""),
             "Hour": e.get("hour", ""),
-            "EPS Est": _fmt_number(e.get("epsEstimate")),
-            "EPS Act": _fmt_number(e.get("epsActual")),
-            "Rev Est": _fmt_large(e.get("revenueEstimate")),
-            "Rev Act": _fmt_large(e.get("revenueActual")),
+            "EPS Est": fmt_number(e.get("epsEstimate")),
+            "EPS Act": fmt_number(e.get("epsActual")),
+            "Rev Est": fmt_large(e.get("revenueEstimate")),
+            "Rev Act": fmt_large(e.get("revenueActual")),
         }
         for e in data
     ]
-    return _list_table(rows)
+    return list_table(rows)
 
 
 def _transform_basic_financials(data: dict) -> str:
@@ -694,21 +635,21 @@ def _transform_basic_financials(data: dict) -> str:
     if not metric:
         return "(no metrics)"
     selected = {
-        "P/E (TTM)": _fmt_number(metric.get("peNormalizedAnnual")),
-        "P/B": _fmt_number(metric.get("pbAnnual")),
-        "EPS (TTM)": _fmt_number(metric.get("epsNormalizedAnnual")),
-        "Dividend Yield %": _fmt_number(metric.get("dividendYieldIndicatedAnnual")),
-        "Beta": _fmt_number(metric.get("beta")),
-        "52W High": _fmt_number(metric.get("52WeekHigh")),
-        "52W Low": _fmt_number(metric.get("52WeekLow")),
+        "P/E (TTM)": fmt_number(metric.get("peNormalizedAnnual")),
+        "P/B": fmt_number(metric.get("pbAnnual")),
+        "EPS (TTM)": fmt_number(metric.get("epsNormalizedAnnual")),
+        "Dividend Yield %": fmt_number(metric.get("dividendYieldIndicatedAnnual")),
+        "Beta": fmt_number(metric.get("beta")),
+        "52W High": fmt_number(metric.get("52WeekHigh")),
+        "52W Low": fmt_number(metric.get("52WeekLow")),
         # Finnhub reports market cap in millions
-        "Market Cap": _fmt_large(mc * 1e6) if (mc := metric.get("marketCapitalization")) else "",
-        "ROE (TTM)": _fmt_number(metric.get("roeTTM")),
-        "Debt/Equity": _fmt_number(metric.get("totalDebt/totalEquityAnnual")),
-        "Current Ratio": _fmt_number(metric.get("currentRatioAnnual")),
-        "Revenue/Share (TTM)": _fmt_number(metric.get("revenuePerShareTTM")),
+        "Market Cap": fmt_large(mc * 1e6) if (mc := metric.get("marketCapitalization")) else "",
+        "ROE (TTM)": fmt_number(metric.get("roeTTM")),
+        "Debt/Equity": fmt_number(metric.get("totalDebt/totalEquityAnnual")),
+        "Current Ratio": fmt_number(metric.get("currentRatioAnnual")),
+        "Revenue/Share (TTM)": fmt_number(metric.get("revenuePerShareTTM")),
     }
-    return _kv_table({k: v for k, v in selected.items() if v})
+    return kv_table({k: v for k, v in selected.items() if v})
 
 
 def _transform_eps_estimates(data: list[dict]) -> str:
@@ -717,14 +658,14 @@ def _transform_eps_estimates(data: list[dict]) -> str:
     rows = [
         {
             "Period": e.get("period", ""),
-            "Avg": _fmt_number(e.get("epsAvg")),
-            "High": _fmt_number(e.get("epsHigh")),
-            "Low": _fmt_number(e.get("epsLow")),
+            "Avg": fmt_number(e.get("epsAvg")),
+            "High": fmt_number(e.get("epsHigh")),
+            "Low": fmt_number(e.get("epsLow")),
             "# Analysts": str(e.get("numberAnalysts", "")),
         }
         for e in data
     ]
-    return _list_table(rows)
+    return list_table(rows)
 
 
 def _transform_recommendations(data: list[dict]) -> str:
@@ -741,19 +682,19 @@ def _transform_recommendations(data: list[dict]) -> str:
         }
         for r in data
     ]
-    return _list_table(rows)
+    return list_table(rows)
 
 
 def _transform_price_target(data: dict) -> str:
     if not data:
         return "(no data)"
-    return _kv_table(
+    return kv_table(
         {
             "Symbol": data.get("symbol"),
-            "Target High": _fmt_number(data.get("targetHigh")),
-            "Target Low": _fmt_number(data.get("targetLow")),
-            "Target Mean": _fmt_number(data.get("targetMean")),
-            "Target Median": _fmt_number(data.get("targetMedian")),
+            "Target High": fmt_number(data.get("targetHigh")),
+            "Target Low": fmt_number(data.get("targetLow")),
+            "Target Mean": fmt_number(data.get("targetMean")),
+            "Target Median": fmt_number(data.get("targetMedian")),
             "Last Updated": data.get("lastUpdated", ""),
         }
     )
@@ -766,21 +707,21 @@ def _transform_insider_transactions(data: list[dict]) -> str:
         {
             "Date": t.get("transactionDate", ""),
             "Name": t.get("name", ""),
-            "Share": _fmt_number(t.get("share"), 0),
-            "Change": _fmt_number(t.get("change"), 0),
-            "Price": _fmt_number(t.get("transactionPrice")),
+            "Share": fmt_number(t.get("share"), 0),
+            "Change": fmt_number(t.get("change"), 0),
+            "Price": fmt_number(t.get("transactionPrice")),
             "Type": t.get("transactionCode", ""),
         }
         for t in data
     ]
-    return _list_table(rows)
+    return list_table(rows)
 
 
 def _transform_peers(data: list[str]) -> str:
     if not data:
         return "(no peers)"
     rows = [[s] for s in data]
-    return _md_table(["Symbol"], rows)
+    return md_table(["Symbol"], rows)
 
 
 def _transform_finnhub_dividends(data: list[dict]) -> str:
@@ -791,12 +732,12 @@ def _transform_finnhub_dividends(data: list[dict]) -> str:
             "Ex-Date": d.get("date", ""),
             "Pay Date": d.get("payDate", ""),
             "Record Date": d.get("recordDate", ""),
-            "Amount": _fmt_number(d.get("amount"), 4),
+            "Amount": fmt_number(d.get("amount"), 4),
             "Currency": d.get("currency", ""),
         }
         for d in data
     ]
-    return _list_table(rows)
+    return list_table(rows)
 
 
 # ── FMP ──
@@ -805,15 +746,15 @@ def _transform_finnhub_dividends(data: list[dict]) -> str:
 def _transform_fmp_profile(data: dict) -> str:
     if not data:
         return "(no data)"
-    return _kv_table(
+    return kv_table(
         {
             "Name": data.get("companyName"),
             "Symbol": data.get("symbol"),
-            "Price": _fmt_number(data.get("price")),
-            "Market Cap": _fmt_large(data.get("marketCap")),
-            "Beta": _fmt_number(data.get("beta")),
-            "Vol Avg": _fmt_large(data.get("averageVolume")),
-            "Last Dividend": _fmt_number(data.get("lastDividend")),
+            "Price": fmt_number(data.get("price")),
+            "Market Cap": fmt_large(data.get("marketCap")),
+            "Beta": fmt_number(data.get("beta")),
+            "Vol Avg": fmt_large(data.get("averageVolume")),
+            "Last Dividend": fmt_number(data.get("lastDividend")),
             "52W Range": data.get("range", ""),
             "Sector": data.get("sector"),
             "Industry": data.get("industry"),
@@ -829,16 +770,16 @@ def _transform_income_statement(data: list[dict]) -> str:
     rows = [
         {
             "Date": s.get("date", ""),
-            "Revenue": _fmt_large(s.get("revenue")),
-            "Gross Profit": _fmt_large(s.get("grossProfit")),
-            "Op Income": _fmt_large(s.get("operatingIncome")),
-            "Net Income": _fmt_large(s.get("netIncome")),
-            "EPS": _fmt_number(s.get("eps")),
-            "EBITDA": _fmt_large(s.get("ebitda")),
+            "Revenue": fmt_large(s.get("revenue")),
+            "Gross Profit": fmt_large(s.get("grossProfit")),
+            "Op Income": fmt_large(s.get("operatingIncome")),
+            "Net Income": fmt_large(s.get("netIncome")),
+            "EPS": fmt_number(s.get("eps")),
+            "EBITDA": fmt_large(s.get("ebitda")),
         }
         for s in data
     ]
-    return _list_table(rows)
+    return list_table(rows)
 
 
 def _transform_balance_sheet(data: list[dict]) -> str:
@@ -847,15 +788,15 @@ def _transform_balance_sheet(data: list[dict]) -> str:
     rows = [
         {
             "Date": s.get("date", ""),
-            "Total Assets": _fmt_large(s.get("totalAssets")),
-            "Total Liab": _fmt_large(s.get("totalLiabilities")),
-            "Total Equity": _fmt_large(s.get("totalStockholdersEquity")),
-            "Cash": _fmt_large(s.get("cashAndCashEquivalents")),
-            "Total Debt": _fmt_large(s.get("totalDebt")),
+            "Total Assets": fmt_large(s.get("totalAssets")),
+            "Total Liab": fmt_large(s.get("totalLiabilities")),
+            "Total Equity": fmt_large(s.get("totalStockholdersEquity")),
+            "Cash": fmt_large(s.get("cashAndCashEquivalents")),
+            "Total Debt": fmt_large(s.get("totalDebt")),
         }
         for s in data
     ]
-    return _list_table(rows)
+    return list_table(rows)
 
 
 def _transform_cash_flow(data: list[dict]) -> str:
@@ -864,15 +805,15 @@ def _transform_cash_flow(data: list[dict]) -> str:
     rows = [
         {
             "Date": s.get("date", ""),
-            "Operating CF": _fmt_large(s.get("operatingCashFlow")),
-            "Capex": _fmt_large(s.get("capitalExpenditure")),
-            "Free CF": _fmt_large(s.get("freeCashFlow")),
-            "Dividends": _fmt_large(s.get("commonDividendsPaid")),
-            "Buybacks": _fmt_large(s.get("commonStockRepurchased")),
+            "Operating CF": fmt_large(s.get("operatingCashFlow")),
+            "Capex": fmt_large(s.get("capitalExpenditure")),
+            "Free CF": fmt_large(s.get("freeCashFlow")),
+            "Dividends": fmt_large(s.get("commonDividendsPaid")),
+            "Buybacks": fmt_large(s.get("commonStockRepurchased")),
         }
         for s in data
     ]
-    return _list_table(rows)
+    return list_table(rows)
 
 
 def _transform_key_metrics(data: list[dict]) -> str:
@@ -881,17 +822,17 @@ def _transform_key_metrics(data: list[dict]) -> str:
     rows = [
         {
             "Date": m.get("date", ""),
-            "EV/EBITDA": _fmt_number(m.get("evToEBITDA")),
-            "EV/Sales": _fmt_number(m.get("evToSales")),
-            "ROE": _fmt_number(m.get("returnOnEquity")),
-            "ROA": _fmt_number(m.get("returnOnAssets")),
-            "Curr Ratio": _fmt_number(m.get("currentRatio")),
-            "Net Debt/EBITDA": _fmt_number(m.get("netDebtToEBITDA")),
-            "FCF Yield": _fmt_number(m.get("freeCashFlowYield"), 4),
+            "EV/EBITDA": fmt_number(m.get("evToEBITDA")),
+            "EV/Sales": fmt_number(m.get("evToSales")),
+            "ROE": fmt_number(m.get("returnOnEquity")),
+            "ROA": fmt_number(m.get("returnOnAssets")),
+            "Curr Ratio": fmt_number(m.get("currentRatio")),
+            "Net Debt/EBITDA": fmt_number(m.get("netDebtToEBITDA")),
+            "FCF Yield": fmt_number(m.get("freeCashFlowYield"), 4),
         }
         for m in data
     ]
-    return _list_table(rows)
+    return list_table(rows)
 
 
 def _transform_fmp_dividend_history(data: list[dict]) -> str:
@@ -903,12 +844,12 @@ def _transform_fmp_dividend_history(data: list[dict]) -> str:
             "Pay Date": d.get("paymentDate", ""),
             "Record Date": d.get("recordDate", ""),
             "Declaration": d.get("declarationDate", ""),
-            "Dividend": _fmt_number(d.get("dividend"), 4),
-            "Adj Dividend": _fmt_number(d.get("adjDividend"), 4),
+            "Dividend": fmt_number(d.get("dividend"), 4),
+            "Adj Dividend": fmt_number(d.get("adjDividend"), 4),
         }
         for d in data
     ]
-    return _list_table(rows)
+    return list_table(rows)
 
 
 def _transform_fmp_earnings(data: list[dict]) -> str:
@@ -918,14 +859,14 @@ def _transform_fmp_earnings(data: list[dict]) -> str:
         {
             "Date": e.get("date", ""),
             "Symbol": e.get("symbol", ""),
-            "EPS Est": _fmt_number(e.get("epsEstimated")),
-            "EPS Act": _fmt_number(e.get("epsActual")),
-            "Rev Est": _fmt_large(e.get("revenueEstimated")),
-            "Rev Act": _fmt_large(e.get("revenueActual")),
+            "EPS Est": fmt_number(e.get("epsEstimated")),
+            "EPS Act": fmt_number(e.get("epsActual")),
+            "Rev Est": fmt_large(e.get("revenueEstimated")),
+            "Rev Act": fmt_large(e.get("revenueActual")),
         }
         for e in data
     ]
-    return _list_table(rows)
+    return list_table(rows)
 
 
 # ── FRED ──
@@ -935,13 +876,13 @@ def _transform_observations(data: list[dict]) -> str:
     if not data:
         return "(no data)"
     rows = [{"Date": o.get("date", ""), "Value": o.get("value", "")} for o in data]
-    return _list_table(rows)
+    return list_table(rows)
 
 
 def _transform_series_info(data: dict) -> str:
     if not data:
         return "(no data)"
-    return _kv_table(
+    return kv_table(
         {
             "ID": data.get("id"),
             "Title": data.get("title"),
@@ -964,7 +905,7 @@ def _transform_releases(data: list[dict]) -> str:
         }
         for r in data
     ]
-    return _list_table(rows)
+    return list_table(rows)
 
 
 def _transform_fred_search(data: list[dict]) -> str:
@@ -979,7 +920,7 @@ def _transform_fred_search(data: list[dict]) -> str:
         }
         for s in data
     ]
-    return _list_table(rows)
+    return list_table(rows)
 
 
 # ── Alpha Vantage ──
@@ -993,12 +934,12 @@ def _transform_sentiment(data: list[dict]) -> str:
             "Date": a.get("time_published", "")[:16],
             "Title": (a.get("title", "") or "")[:80],
             "Source": a.get("source", ""),
-            "Sentiment": _fmt_number(a.get("overall_sentiment_score"), 3),
+            "Sentiment": fmt_number(a.get("overall_sentiment_score"), 3),
             "Label": a.get("overall_sentiment_label", ""),
         }
         for a in data
     ]
-    return _list_table(rows)
+    return list_table(rows)
 
 
 def _transform_movers(data: dict) -> str:
@@ -1018,11 +959,11 @@ def _transform_movers(data: dict) -> str:
                     "Price": m.get("price", ""),
                     "Change": m.get("change_amount", ""),
                     "Change %": m.get("change_percentage", ""),
-                    "Volume": _fmt_large(m.get("volume")),
+                    "Volume": fmt_large(m.get("volume")),
                 }
                 for m in items[:10]
             ]
-            sections.append(f"### {title}\n\n{_list_table(rows)}")
+            sections.append(f"### {title}\n\n{list_table(rows)}")
     return "\n\n".join(sections) if sections else "(no data)"
 
 
@@ -1030,20 +971,17 @@ def _transform_movers(data: dict) -> str:
 
 TRANSFORMERS: dict[str, Callable[[Any], str]] = {
     # Webull
-    "/account/profile": _transform_account_profile,
-    "/account/balance": _transform_account_balance,
-    "/account/positions": _transform_account_positions,
-    "/instrument/list": _transform_instruments,
-    "/market-data/bars": _transform_bars,
-    "/trade/instrument": _transform_trade_instrument,
-    "/trade/calendar": _transform_trade_calendar,
-    "/app/subscriptions/list": _transform_subscriptions,
-    "/trade/orders/list-open": _transform_open_orders,
-    "/trade/orders/list-today": _transform_today_orders,
-    "/trade/order/detail": _transform_order_detail,
-    "/trade/order/place": _transform_order_result,
-    "/trade/order/replace": _transform_order_result,
-    "/trade/order/cancel": _transform_order_result,
+    "/openapi/account/list": _transform_account_list,
+    "/openapi/assets/balance": _transform_account_balance,
+    "/openapi/assets/positions": _transform_account_positions,
+    "/openapi/instrument/stock/list": _transform_instruments,
+    "/openapi/trade/order/open": _transform_order_list,
+    "/openapi/trade/order/history": _transform_order_list,
+    "/openapi/trade/order/detail": _transform_order_detail,
+    "/openapi/trade/order/preview": _transform_order_result,
+    "/openapi/trade/order/place": _transform_order_result,
+    "/openapi/trade/order/replace": _transform_order_result,
+    "/openapi/trade/order/cancel": _transform_order_result,
     # Tradier
     "tradier:expirations": _transform_option_expirations,
     "tradier:strikes": _transform_option_strikes,
@@ -1095,26 +1033,8 @@ TRANSFORMERS: dict[str, Callable[[Any], str]] = {
 }
 
 
-def _apply_field_filter(data: Any, fields: set[str]) -> Any:
-    if isinstance(data, dict):
-        return {k: v for k, v in data.items() if k in fields}
-    if isinstance(data, list):
-        return [
-            {k: v for k, v in item.items() if k in fields}
-            for item in data
-            if isinstance(item, dict)
-        ]
-    return data
-
-
 def process(path: str, data: Any) -> str:
-    """Filter and transform an API response based on its endpoint path or logical key."""
-    # Stage 1: field filtering
-    fields = FIELD_FILTERS.get(path)
-    if fields is not None:
-        data = _apply_field_filter(data, fields)
-
-    # Stage 2: transform to markdown table
+    """Transform an API response based on its endpoint path or logical key."""
     transformer = TRANSFORMERS.get(path)
     if transformer is not None:
         return transformer(data)

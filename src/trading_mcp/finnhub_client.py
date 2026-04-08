@@ -5,7 +5,7 @@ import httpx
 from trading_mcp.cache import TTLCache
 from trading_mcp.config import FinnhubConfig
 from trading_mcp.rate_limit import RateLimiter
-from trading_mcp.response_filters import process
+from trading_mcp.table_helpers import process
 
 BASE_URL = "https://finnhub.io/api/v1"
 

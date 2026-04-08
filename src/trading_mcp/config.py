@@ -11,6 +11,7 @@ class WebullConfig:
     app_secret: str
     region_id: str
     account_id: str | None = None
+    token: str | None = None
 
 
 @dataclass(frozen=True)
@@ -73,6 +74,7 @@ def load_config(path: Path = RC_PATH) -> AppConfig:
         app_secret=cfg["app_secret"],
         region_id=cfg["region_id"],
         account_id=cfg.get("account_id") or None,
+        token=cfg.get("token") or None,
     )
 
     # Tradier (optional)
@@ -112,3 +114,14 @@ def load_config(path: Path = RC_PATH) -> AppConfig:
         fred=fred,
         alphavantage=alphavantage,
     )
+
+
+def save_webull_token(token: str, path: Path = RC_PATH) -> None:
+    """Save a new Webull access token to ~/.tradingrc."""
+    parser = configparser.ConfigParser()
+    parser.read(path)
+    if not parser.has_section("webull"):
+        raise KeyError("[webull] section missing in " + str(path))
+    parser.set("webull", "token", token)
+    with open(path, "w") as f:
+        parser.write(f)

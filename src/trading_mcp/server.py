@@ -87,12 +87,10 @@ def _check_market(ctx: Context, order_type: str, extended_hours: bool) -> None:
     if tradier is None:
         return  # skip check if Tradier not configured
     state = tradier.get_clock().get("state", "closed")
-    if state == "closed":
-        raise RuntimeError(f"Market is closed. Cannot place orders. Current state: {state}")
     if order_type == "MARKET" and state != "open" and not extended_hours:
         raise RuntimeError(
             f"MARKET orders require regular hours (state: {state}). "
-            "Use a LIMIT order with extended_hours_trading=True, or wait for market open."
+            "Use a LIMIT order, or wait for market open."
         )
 
 
@@ -104,30 +102,20 @@ def _check_market(ctx: Context, order_type: str, extended_hours: bool) -> None:
 
 
 @mcp.tool()
-def get_account_profile(ctx: Context, account_id: str | None = None) -> str:
-    """Get account profile: account number, account type, and registration details.
+def get_account_balance(ctx: Context, account_id: str | None = None) -> str:
+    """Get account balance: net liquidation, cash, buying power, market value, day P&L,
+    unrealized P&L, margin info.
 
     account_id: Webull account ID. Omit to use the default from ~/.tradingrc.
-    Use get_app_subscriptions to list all accounts and their IDs.
     """
-    return _webull(ctx).get_account_profile(account_id)
-
-
-@mcp.tool()
-def get_account_balance(ctx: Context, currency: str = "USD", account_id: str | None = None) -> str:
-    """Get account balance: total assets, cash, buying power, market value, unrealized P&L.
-
-    currency: the currency to report total assets in. Defaults to 'USD'.
-    account_id: Webull account ID. Omit to use the default from ~/.tradingrc.
-    """
-    return _webull(ctx).get_account_balance(currency, account_id)
+    return _webull(ctx).get_account_balance(account_id)
 
 
 @mcp.tool()
 def get_account_positions(ctx: Context, account_id: str | None = None) -> str:
-    """Get all current portfolio holdings. Returns each position's symbol, instrument_id,
-    quantity, cost basis, market value, and unrealized P&L. Automatically paginates to
-    fetch all positions.
+    """Get all current portfolio holdings including option positions with full leg details
+    (strike, expiration, option type, strategy). Returns each position's symbol, type,
+    quantity, cost, last price, and unrealized P&L.
 
     account_id: Webull account ID. Omit to use the default from ~/.tradingrc.
     """
@@ -138,9 +126,10 @@ def get_account_positions(ctx: Context, account_id: str | None = None) -> str:
 
 
 @mcp.tool()
-def get_open_orders(ctx: Context, page_size: int = 100, account_id: str | None = None) -> str:
-    """Get all currently open/pending orders. Returns each order's client_order_id,
-    instrument_id, side, order_type, qty, status, limit_price, and time in force.
+def get_open_orders(ctx: Context, page_size: int = 50, account_id: str | None = None) -> str:
+    """Get all currently open/pending orders (stocks, options, futures, crypto).
+    Returns symbol, side, order_type, quantity, filled_quantity, price, status,
+    and option leg details if applicable.
 
     account_id: Webull account ID. Omit to use the default from ~/.tradingrc.
     """
@@ -148,18 +137,26 @@ def get_open_orders(ctx: Context, page_size: int = 100, account_id: str | None =
 
 
 @mcp.tool()
-def get_today_orders(ctx: Context, page_size: int = 100, account_id: str | None = None) -> str:
-    """Get all orders placed today, including filled, cancelled, and pending.
-    Returns each order's client_order_id, status, side, qty, filled_qty, and price.
+def get_today_orders(
+    ctx: Context,
+    page_size: int = 50,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    account_id: str | None = None,
+) -> str:
+    """Get order history including filled, cancelled, and pending orders.
 
+    start_date: start date (YYYY-MM-DD). Defaults to today.
+    end_date: end date (YYYY-MM-DD). Defaults to today.
     account_id: Webull account ID. Omit to use the default from ~/.tradingrc.
     """
-    return _webull(ctx).get_today_orders(page_size, account_id=account_id)
+    return _webull(ctx).get_order_history(page_size, start_date, end_date, account_id=account_id)
 
 
 @mcp.tool()
 def get_order_detail(ctx: Context, client_order_id: str, account_id: str | None = None) -> str:
-    """Get full detail for a specific order including status, fill info, and timestamps.
+    """Get full detail for a specific order including status, fill info, timestamps,
+    and option leg details.
 
     client_order_id: the unique order ID assigned when the order was placed.
     Use get_open_orders or get_today_orders to find client_order_ids.
@@ -168,24 +165,37 @@ def get_order_detail(ctx: Context, client_order_id: str, account_id: str | None 
     return _webull(ctx).get_order_detail(client_order_id, account_id)
 
 
-# ── Stock Order Management ───────────────────────────────────
+# ── Order Management (unified for stocks + options) ─────────
 
 
 @mcp.tool()
 def preview_order(ctx: Context, new_orders: list[dict], account_id: str | None = None) -> str:
-    """Preview a stock order before placing it. Returns estimated cost, margin impact,
-    and buying power effect without actually submitting the order.
-
-    Note: currently available for JP/HK accounts only — US support expected in the future.
+    """Preview an order before placing it. Returns estimated cost and transaction fees.
+    Supports stocks, options (single-leg and multi-leg), futures, and crypto.
 
     new_orders: list of order dicts. Each dict should contain:
-      - instrument_id: str (get from get_instruments)
+      - client_order_id: str (unique ID, max 32 chars)
+      - combo_type: 'NORMAL' (or 'OTO', 'OCO', 'OTOCO' for combo orders)
+      - symbol: ticker symbol (e.g. 'AAPL')
+      - instrument_type: 'EQUITY', 'OPTION', 'FUTURES', or 'CRYPTO'
+      - market: 'US'
       - side: 'BUY' or 'SELL'
-      - order_type: 'MARKET', 'LIMIT', 'STOP', or 'STOP_LIMIT'
-      - qty: int
-      - tif: 'DAY', 'GTC', 'IOC', or 'FOK'
-      - limit_price: str (required for LIMIT and STOP_LIMIT)
-      - stop_price: str (required for STOP and STOP_LIMIT)
+      - order_type: 'MARKET', 'LIMIT', 'STOP_LOSS', or 'STOP_LOSS_LIMIT'
+      - quantity: str (e.g. '10', supports fractional shares)
+      - time_in_force: 'DAY', 'GTC', or 'IOC'
+      - entrust_type: 'QTY' (or 'AMOUNT' for fractional/dollar-based)
+      - limit_price: str (required for LIMIT orders)
+      - stop_price: str (required for STOP_LOSS orders)
+      - support_trading_session: 'CORE' (regular hours), 'ALL' (include extended), 'NIGHT'
+
+    For options, also include:
+      - option_strategy: 'SINGLE', 'VERTICAL', 'STRADDLE', 'STRANGLE', 'IRON_CONDOR', etc.
+      - position_intent: 'BUY_TO_OPEN', 'BUY_TO_CLOSE', 'SELL_TO_OPEN', 'SELL_TO_CLOSE'
+      - legs: list of leg dicts with: symbol, side, quantity, strike_price,
+        option_expire_date (YYYY-MM-DD), option_type ('CALL' or 'PUT'),
+        instrument_type ('OPTION'), market ('US')
+
+    account_id: Webull account ID. Omit to use the default from ~/.tradingrc.
     """
     return _webull(ctx).preview_order(new_orders, account_id)
 
@@ -193,96 +203,110 @@ def preview_order(ctx: Context, new_orders: list[dict], account_id: str | None =
 @mcp.tool()
 def place_order(
     ctx: Context,
-    instrument_id: str,
+    symbol: str,
     side: str,
     order_type: str,
-    qty: int,
+    quantity: str,
     client_order_id: str,
-    tif: str,
+    time_in_force: str,
+    instrument_type: str = "EQUITY",
     account_id: str | None = None,
-    extended_hours_trading: bool = False,
+    trading_session: str = "CORE",
     limit_price: str | None = None,
     stop_price: str | None = None,
     trailing_type: str | None = None,
     trailing_stop_step: str | None = None,
+    option_strategy: str | None = None,
+    position_intent: str | None = None,
+    legs: list[dict] | None = None,
 ) -> str:
-    """Place a stock order.
+    """Place an order for stocks or options.
 
-    instrument_id: Webull instrument ID (get from get_instruments).
+    symbol: ticker symbol (e.g. 'AAPL'). No instrument_id lookup needed.
     side: 'BUY' or 'SELL'.
-    order_type: 'MARKET', 'LIMIT', 'STOP', or 'STOP_LIMIT'.
-    qty: number of shares.
-    client_order_id: unique ID you generate for this order (use a UUID).
-    tif: time in force — 'DAY', 'GTC' (good til cancelled), 'IOC', or 'FOK'.
-    extended_hours_trading: set True to allow pre/post-market execution.
-    limit_price: required for LIMIT and STOP_LIMIT orders (e.g. '150.50').
-    stop_price: required for STOP and STOP_LIMIT orders (e.g. '148.00').
+    order_type: 'MARKET', 'LIMIT', 'STOP_LOSS', or 'STOP_LOSS_LIMIT'.
+    quantity: number of shares/contracts as string (e.g. '10', supports fractional).
+    client_order_id: unique ID you generate (use a UUID, max 32 chars).
+    time_in_force: 'DAY', 'GTC' (good til cancelled), or 'IOC'.
+    instrument_type: 'EQUITY' (default) or 'OPTION'.
+    trading_session: 'CORE' (regular hours, default), 'ALL' (include extended), 'NIGHT'.
+    limit_price: required for LIMIT and STOP_LOSS_LIMIT orders (e.g. '150.50').
+    stop_price: required for STOP_LOSS and STOP_LOSS_LIMIT orders (e.g. '148.00').
     trailing_type: 'AMOUNT' or 'PERCENTAGE' for trailing stop orders.
-    trailing_stop_step: the trailing amount or percentage (e.g. '1.00' or '2.5').
+    trailing_stop_step: the trailing amount or percentage (e.g. '1.00').
+
+    For options (instrument_type='OPTION'), also provide:
+      option_strategy: 'SINGLE', 'VERTICAL', 'STRADDLE', 'STRANGLE', 'IRON_CONDOR', etc.
+      position_intent: 'BUY_TO_OPEN', 'BUY_TO_CLOSE', 'SELL_TO_OPEN', 'SELL_TO_CLOSE'.
+      legs: list of leg dicts, each with: symbol, side ('BUY'/'SELL'), quantity,
+        strike_price, option_expire_date ('YYYY-MM-DD'), option_type ('CALL'/'PUT'),
+        instrument_type ('OPTION'), market ('US').
+
+    account_id: Webull account ID. Omit to use the default from ~/.tradingrc.
     """
-    _check_market(ctx, order_type, extended_hours_trading)
-    return _webull(ctx).place_order(
-        {
-            "client_order_id": client_order_id,
-            "instrument_id": instrument_id,
-            "qty": qty,
-            "side": side,
-            "tif": tif,
-            "extended_hours_trading": extended_hours_trading,
-            "order_type": order_type,
-            "limit_price": limit_price,
-            "stop_price": stop_price,
-            "trailing_type": trailing_type,
-            "trailing_stop_step": trailing_stop_step,
-        },
-        account_id,
-    )
+    _check_market(ctx, order_type, trading_session == "ALL")
+    order: dict = {
+        "client_order_id": client_order_id,
+        "combo_type": "NORMAL",
+        "symbol": symbol,
+        "instrument_type": instrument_type,
+        "market": "US",
+        "side": side,
+        "order_type": order_type,
+        "quantity": quantity,
+        "time_in_force": time_in_force,
+        "entrust_type": "QTY",
+        "support_trading_session": trading_session,
+        "limit_price": limit_price,
+        "stop_price": stop_price,
+        "trailing_type": trailing_type,
+        "trailing_stop_step": trailing_stop_step,
+        "option_strategy": option_strategy,
+        "position_intent": position_intent,
+        "legs": legs,
+    }
+    return _webull(ctx).place_order([order], account_id)
 
 
 @mcp.tool()
 def replace_order(
     ctx: Context,
     client_order_id: str,
-    instrument_id: str,
-    side: str,
-    order_type: str,
-    qty: int,
-    tif: str,
-    account_id: str | None = None,
-    extended_hours_trading: bool = False,
+    quantity: str | None = None,
+    order_type: str | None = None,
+    time_in_force: str | None = None,
     limit_price: str | None = None,
     stop_price: str | None = None,
     trailing_type: str | None = None,
     trailing_stop_step: str | None = None,
+    account_id: str | None = None,
 ) -> str:
-    """Modify a pending stock order that has not yet been filled. Provide the existing
-    client_order_id of the order to modify, along with the full updated order parameters.
+    """Modify a pending order. Only price, quantity, type, and time_in_force can be changed.
 
-    All fields from place_order apply. You must re-specify all order parameters, not just
-    the ones you want to change. The order must still be in a pending/open state.
+    client_order_id: the unique order ID of the order to modify.
+    quantity: new quantity (optional).
+    order_type: new order type (optional).
+    time_in_force: new TIF (optional).
+    limit_price: new limit price (optional).
+    stop_price: new stop price (optional).
+    account_id: Webull account ID. Omit to use the default from ~/.tradingrc.
     """
-    _check_market(ctx, order_type, extended_hours_trading)
-    return _webull(ctx).replace_order(
-        {
-            "client_order_id": client_order_id,
-            "instrument_id": instrument_id,
-            "qty": qty,
-            "side": side,
-            "tif": tif,
-            "extended_hours_trading": extended_hours_trading,
-            "order_type": order_type,
-            "limit_price": limit_price,
-            "stop_price": stop_price,
-            "trailing_type": trailing_type,
-            "trailing_stop_step": trailing_stop_step,
-        },
-        account_id,
-    )
+    modify: dict = {
+        "client_order_id": client_order_id,
+        "quantity": quantity,
+        "order_type": order_type,
+        "time_in_force": time_in_force,
+        "limit_price": limit_price,
+        "stop_price": stop_price,
+        "trailing_type": trailing_type,
+        "trailing_stop_step": trailing_stop_step,
+    }
+    return _webull(ctx).replace_order([modify], account_id)
 
 
 @mcp.tool()
 def cancel_order(ctx: Context, client_order_id: str, account_id: str | None = None) -> str:
-    """Cancel a pending stock order. The order must still be open/unfilled.
+    """Cancel a pending order (stock or option). The order must still be open/unfilled.
 
     client_order_id: the unique order ID from when the order was placed.
     Use get_open_orders to find cancellable orders.
@@ -291,155 +315,28 @@ def cancel_order(ctx: Context, client_order_id: str, account_id: str | None = No
     return _webull(ctx).cancel_order(client_order_id, account_id)
 
 
-# ── Option Order Management ──────────────────────────────────
-
-
-@mcp.tool()
-def preview_option(ctx: Context, new_orders: list[dict], account_id: str | None = None) -> str:
-    """Preview an option order before placing it. Returns estimated cost, margin impact,
-    and buying power effect without actually submitting the order.
-
-    Note: currently available for HK accounts only — US support expected in the future.
-
-    new_orders: list of order groups. Each group is a dict containing:
-      - orders: list of leg dicts, each with:
-          - instrument_id: str (resolve via get_security_detail with instrument_super_type
-            ='OPTION', instrument_type='CALL_OPTION' or 'PUT_OPTION', strike_price,
-            and init_exp_date)
-          - side: 'BUY' or 'SELL'
-          - order_type: 'MARKET' or 'LIMIT'
-          - qty: int (number of contracts)
-          - limit_price: str (required for LIMIT orders, price per contract)
-      - tif: 'DAY' or 'GTC'
-
-    Single-leg example: [{"orders": [{"instrument_id": "...", "side": "BUY",
-      "order_type": "LIMIT", "qty": 1, "limit_price": "3.50"}], "tif": "DAY"}]
-
-    Multi-leg (e.g. vertical spread): one group with multiple legs at different strikes.
-    """
-    return _webull(ctx).preview_option(new_orders, account_id)
-
-
-@mcp.tool()
-def place_option(ctx: Context, new_orders: list[dict], account_id: str | None = None) -> str:
-    """Place an option order (single-leg or multi-leg).
-
-    Note: currently available for HK accounts only — US support expected in the future.
-
-    new_orders: list of order groups. Each group is a dict containing:
-      - orders: list of leg dicts, each with:
-          - instrument_id: str (resolve via get_security_detail with instrument_super_type
-            ='OPTION', instrument_type='CALL_OPTION' or 'PUT_OPTION', strike_price,
-            and init_exp_date)
-          - side: 'BUY' or 'SELL'
-          - order_type: 'MARKET' or 'LIMIT'
-          - qty: int (number of contracts)
-          - limit_price: str (required for LIMIT orders, price per contract)
-      - tif: 'DAY' or 'GTC'
-
-    Single-leg example: [{"orders": [{"instrument_id": "...", "side": "BUY",
-      "order_type": "LIMIT", "qty": 1, "limit_price": "3.50"}], "tif": "DAY"}]
-
-    Multi-leg (e.g. bull call spread): use one group with two legs — buy the lower
-    strike call and sell the higher strike call, same expiration.
-    """
-    return _webull(ctx).place_option(new_orders, account_id)
-
-
-@mcp.tool()
-def replace_option(ctx: Context, modify_orders: list[dict], account_id: str | None = None) -> str:
-    """Modify a pending option order that has not yet been filled.
-
-    modify_orders: list of modification dicts. Each dict should contain:
-      - client_order_id: str (the ID of the existing order to modify)
-      - orders: list of updated leg dicts (same structure as place_option)
-      - tif: 'DAY' or 'GTC'
-    All order parameters must be re-specified, not just the changed ones.
-    """
-    return _webull(ctx).replace_option(modify_orders, account_id)
-
-
-@mcp.tool()
-def cancel_option(ctx: Context, client_order_id: str, account_id: str | None = None) -> str:
-    """Cancel a pending option order. The order must still be open/unfilled.
-
-    client_order_id: the unique order ID from when the order was placed.
-    Use get_open_orders to find cancellable option orders.
-    account_id: Webull account ID. Omit to use the default from ~/.tradingrc.
-    """
-    return _webull(ctx).cancel_option(client_order_id, account_id)
-
-
-# ── Trade Info ───────────────────────────────────────────────
-
-
-@mcp.tool()
-def get_trade_calendar(ctx: Context, market: str, start: str, end: str) -> str:
-    """Get trading calendar showing which days the market is open or closed.
-
-    market: market code, e.g. 'US' for US stock exchanges.
-    start: start date (YYYY-MM-DD).
-    end: end date (YYYY-MM-DD).
-    Returns a list of dates with their open/closed status.
-    """
-    return _webull(ctx).get_trade_calendar(market, start, end)
-
-
-@mcp.tool()
-def get_trade_instrument_detail(ctx: Context, instrument_id: str) -> str:
-    """Get detailed instrument metadata by instrument ID, including symbol, exchange,
-    currency, instrument type, and trading status.
-
-    instrument_id: the Webull instrument ID (get from get_instruments, get_security_detail,
-    or get_account_positions).
-    """
-    return _webull(ctx).get_trade_instrument_detail(instrument_id)
-
 
 @mcp.tool()
 def get_app_subscriptions(ctx: Context) -> str:
-    """Get API app subscription details: subscription ID, status, plan type, and
-    which market data feeds are active.
+    """Get all Webull accounts linked to this API key: account ID, account number,
+    type (MARGIN/CASH), and label (Individual Cash, Roth IRA, etc.).
     """
-    return _webull(ctx).get_app_subscriptions()
+    return _webull(ctx).get_account_list()
 
 
 # ── Webull Market Data ──────────────────────────────────────
 
 
 @mcp.tool()
-def get_instruments(ctx: Context, symbols: str) -> str:
-    """Look up instrument IDs, exchange, currency, and instrument type for symbols.
-    Use this to resolve ticker symbols to instrument_ids needed by other tools
-    (place_order, get_historical_bars, get_eod_bars, etc.).
+def get_instruments(ctx: Context, symbols: str, category: str = "US_STOCK") -> str:
+    """Look up instrument details for symbols: instrument_id, exchange, currency,
+    and trading attributes (shortable, fractionable, marginable).
 
-    symbols: comma-separated ticker symbols (e.g. 'AAPL,TSLA').
-    category: 'US_STOCK' (default), 'US_OPTION', 'HK_STOCK', etc.
+    symbols: comma-separated ticker symbols (e.g. 'AAPL,TSLA'). Max 100.
+    category: 'US_STOCK' (default) or 'US_ETF'.
     """
-    return _webull(ctx).get_instruments(symbols)
+    return _webull(ctx).get_instruments(symbols, category)
 
-
-@mcp.tool()
-def get_historical_bars(
-    ctx: Context,
-    symbol: str,
-    timespan: str,
-    count: int = 200,
-    category: str = "US_STOCK",
-    trading_sessions: str | None = None,
-) -> str:
-    """Get historical OHLCV candlestick bars for a single symbol.
-
-    symbol: ticker symbol (e.g. 'AAPL').
-    timespan: bar interval — 'M1' (1 min), 'M5', 'M15', 'M30', 'M60' (1 hour),
-      'M120' (2 hours), 'M240' (4 hours), 'D' (daily), 'W' (weekly), 'M' (monthly),
-      'Y' (yearly).
-    count: number of bars to return (default 200, max varies by timespan).
-    category: 'US_STOCK' (default), 'US_OPTION', 'HK_STOCK', etc.
-    trading_sessions: set to 'pre_market', 'after_hours', or 'pre_market,after_hours'
-      to include extended hours data. Omit for regular hours only.
-    """
-    return _webull(ctx).get_historical_bars(symbol, timespan, count, category, trading_sessions)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -601,7 +498,7 @@ def get_market_clock(ctx: Context) -> str:
 
     Requires [tradier] section in ~/.tradingrc.
     """
-    from trading_mcp.response_filters import process
+    from trading_mcp.table_helpers import process
 
     return process("tradier:clock", _tradier(ctx).get_clock())
 

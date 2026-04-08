@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+@.claude/webull-api-docs.md
+
 ## Project Overview
 
 MCP server for trading stocks and options on Webull, with integrated market analysis data from multiple providers. Exposes brokerage operations, option chains with greeks, fundamentals, news, economic data, and sentiment as MCP tools for use with Claude.
@@ -41,7 +43,7 @@ All clients are created once during server lifespan startup. Only Webull is requ
 
 | Provider | Role | Auth |
 |---|---|---|
-| **Webull** (required) | Brokerage: account, orders, positions, quotes, bars | HMAC-SHA1 |
+| **Webull** (required) | Brokerage: account, orders, positions, quotes, bars | HMAC-SHA1 + token |
 | **Tradier** | Option chains with greeks + IV | Bearer token |
 | **Finnhub** | News, earnings calendar, economic calendar, key metrics | API key |
 | **FMP** | Financial statements, company profiles, valuation metrics | API key |
@@ -62,6 +64,7 @@ app_key = <your_app_key>
 app_secret = <your_app_secret>
 account_id = <optional_default_account_id>
 region_id = us
+token = <auto-managed, created on first use>
 
 [tradier]
 api_token = <your_sandbox_or_production_token>
@@ -80,15 +83,18 @@ api_key = <your_api_key>
 api_key = <your_api_key>
 ```
 
-## Webull API
+## Webull API (v2)
+
+All Webull endpoints use the v2 API (`x-version: v2` header). Stock and option orders are unified into a single endpoint.
 
 - **Trade/Account host:** `api.webull.com`
-- **Market data host:** `usquotes-api.webullfintech.com`
-- **Option order endpoints** use different paths (`/openapi/account/orders/option/*`) and pass `account_id` as a query param (not in body). Stock order endpoints (`/trade/order/*`) pass `account_id` in the POST body.
-- **Auth:** HMAC-SHA1 signature over sorted headers + URI + query params + MD5(body). Headers: `x-app-key`, `x-timestamp`, `x-signature-version`, `x-signature-algorithm`, `x-signature-nonce`, `x-signature`.
-- **Option API regional availability:** The option order endpoints (`/openapi/account/orders/option/*`) are documented as **HK-only** in the Webull SDK docs (v0.1.18, Sep 2025). Stock order endpoints (`/trade/order/*`) have no region restriction and work for US. The `new_orders` body structure supports both single-leg and multi-leg strategies (nested `orders` list per entry). When US API access is available, test the option endpoints — US support may have been added since the docs were last updated. Do not remove the option tools; they're ready for when US support lands.
+- **Market data host:** `data-api.webull.com`
+- **Auth:** HMAC-SHA1 signature over sorted headers + URI + query params + MD5(body). Headers: `x-app-key`, `x-timestamp`, `x-signature-version`, `x-signature-algorithm`, `x-signature-nonce`, `x-signature`. Plus `x-version: v2` and `x-access-token` (not in signing).
+- **Token lifecycle:** Tokens are created via `POST /openapi/auth/token/create`. Default expiry: 15 days of inactivity. New tokens have `PENDING` status and must be verified in the Webull App (Menu > Messages > OpenAPI Notifications). On 401, the client auto-creates a new token, saves to `~/.tradingrc`, and raises with verification instructions.
+- **Unified order endpoint:** Stock and option orders both use `/openapi/trade/order/place`. Options use `instrument_type: "OPTION"` + `legs[]` array. Orders use `symbol` directly (no `instrument_id` lookup needed).
+- **v2 endpoint paths:** All endpoints use `/openapi/` prefix: `/openapi/account/list`, `/openapi/assets/balance`, `/openapi/assets/positions`, `/openapi/trade/order/*`, `/openapi/instrument/stock/list`, `/openapi/market-data/stock/bars`, `/openapi/market-data/stock/snapshot`.
 - **Timespan format:** Historical bars use `M1` (1 min), `M5`, `M15`, `M30`, `M60` (1 hour), `M120`, `M240`, `D` (daily), `W` (weekly), `M` (monthly), `Y` (yearly).
-- **HTTP/2 required:** The quotes host (`usquotes-api.webullfintech.com`) requires HTTP/2 via ALPN negotiation. The httpx client is configured with `http2=True`.
+- **HTTP/2:** The httpx client is configured with `http2=True`.
 - **Multi-account:** All account-specific methods accept an optional `account_id` parameter. Resolution order: explicit param > config default > error with instructions. Use `get_app_subscriptions()` to list all accounts.
 - **Caching:** GET requests are cached in-memory with per-endpoint TTLs configured in `CACHE_TTLS` (webull_client.py). Static metadata: 1 hour. Historical bars: 5 min. Account state: 60s. Orders: 30s. Live quotes: not cached.
 
@@ -99,7 +105,7 @@ All API responses pass through `process(key, data)` in `response_filters.py`, wh
 1. **Field filtering (`FIELD_FILTERS`)** — maps key to a set of top-level keys to keep. `None` means passthrough. Only used for Webull endpoints currently.
 2. **Transformation (`TRANSFORMERS`)** — maps key to a function that converts data into a **markdown table string**. This is critical for reducing hallucinations — the model parses tables far more reliably than nested JSON.
 
-Keys use the API path for Webull endpoints (e.g. `"/account/profile"`) and a namespaced logical key for external providers (e.g. `"tradier:chain"`, `"finnhub:company-news"`).
+Keys use the API path for Webull endpoints (e.g. `"/openapi/assets/balance"`) and a namespaced logical key for external providers (e.g. `"tradier:chain"`, `"finnhub:company-news"`).
 
 Helper functions in `response_filters.py`:
 - `_kv_table(data)` — for single-object responses (e.g. company profile → two-column Field/Value table)
