@@ -6,6 +6,29 @@ from mcp.server.fastmcp import Context, FastMCP
 
 from trading_mcp.alphavantage_client import AlphaVantageClient
 from trading_mcp.config import load_config
+from trading_mcp.endpoints.webull import (
+    ACCOUNT_LIST,
+    BALANCE,
+    CANCEL_ORDER,
+    INSTRUMENTS,
+    OPEN_ORDERS,
+    ORDER_DETAIL,
+    ORDER_HISTORY,
+    PLACE_ORDER,
+    POSITIONS,
+    PREVIEW_ORDER,
+    REPLACE_ORDER,
+    AccountRequest,
+    CancelOrderRequest,
+    EmptyRequest,
+    GetInstrumentsRequest,
+    GetOpenOrdersRequest,
+    GetOrderDetailRequest,
+    GetOrderHistoryRequest,
+    PlaceOrderRequest,
+    PreviewOrderRequest,
+    ReplaceOrderRequest,
+)
 from trading_mcp.finnhub_client import FinnhubClient
 from trading_mcp.fmp_client import FmpClient
 from trading_mcp.fred_client import FredClient
@@ -108,7 +131,8 @@ def get_account_balance(ctx: Context, account_id: str | None = None) -> str:
 
     account_id: Webull account ID. Omit to use the default from ~/.tradingrc.
     """
-    return _webull(ctx).get_account_balance(account_id)
+    client = _webull(ctx)
+    return client.get(BALANCE, AccountRequest(client.resolve_account_id(account_id)))
 
 
 @mcp.tool()
@@ -119,7 +143,8 @@ def get_account_positions(ctx: Context, account_id: str | None = None) -> str:
 
     account_id: Webull account ID. Omit to use the default from ~/.tradingrc.
     """
-    return _webull(ctx).get_account_positions(account_id)
+    client = _webull(ctx)
+    return client.get(POSITIONS, AccountRequest(client.resolve_account_id(account_id)))
 
 
 # ── Orders ───────────────────────────────────────────────────
@@ -133,7 +158,11 @@ def get_open_orders(ctx: Context, page_size: int = 50, account_id: str | None = 
 
     account_id: Webull account ID. Omit to use the default from ~/.tradingrc.
     """
-    return _webull(ctx).get_open_orders(page_size, account_id=account_id)
+    client = _webull(ctx)
+    return client.get(
+        OPEN_ORDERS,
+        GetOpenOrdersRequest(client.resolve_account_id(account_id), page_size),
+    )
 
 
 @mcp.tool()
@@ -150,7 +179,13 @@ def get_today_orders(
     end_date: end date (YYYY-MM-DD). Defaults to today.
     account_id: Webull account ID. Omit to use the default from ~/.tradingrc.
     """
-    return _webull(ctx).get_order_history(page_size, start_date, end_date, account_id=account_id)
+    client = _webull(ctx)
+    return client.get(
+        ORDER_HISTORY,
+        GetOrderHistoryRequest(
+            client.resolve_account_id(account_id), page_size, start_date, end_date
+        ),
+    )
 
 
 @mcp.tool()
@@ -162,7 +197,11 @@ def get_order_detail(ctx: Context, client_order_id: str, account_id: str | None 
     Use get_open_orders or get_today_orders to find client_order_ids.
     account_id: Webull account ID. Omit to use the default from ~/.tradingrc.
     """
-    return _webull(ctx).get_order_detail(client_order_id, account_id)
+    client = _webull(ctx)
+    return client.get(
+        ORDER_DETAIL,
+        GetOrderDetailRequest(client.resolve_account_id(account_id), client_order_id),
+    )
 
 
 # ── Order Management (unified for stocks + options) ─────────
@@ -197,7 +236,12 @@ def preview_order(ctx: Context, new_orders: list[dict], account_id: str | None =
 
     account_id: Webull account ID. Omit to use the default from ~/.tradingrc.
     """
-    return _webull(ctx).preview_order(new_orders, account_id)
+    client = _webull(ctx)
+    # Preview uses the same request structure as place_order but via preview endpoint
+    req = PreviewOrderRequest(
+        account_id=client.resolve_account_id(account_id), **new_orders[0]
+    )
+    return client.post(PREVIEW_ORDER, req)
 
 
 @mcp.tool()
@@ -245,27 +289,26 @@ def place_order(
     account_id: Webull account ID. Omit to use the default from ~/.tradingrc.
     """
     _check_market(ctx, order_type, trading_session == "ALL")
-    order: dict = {
-        "client_order_id": client_order_id,
-        "combo_type": "NORMAL",
-        "symbol": symbol,
-        "instrument_type": instrument_type,
-        "market": "US",
-        "side": side,
-        "order_type": order_type,
-        "quantity": quantity,
-        "time_in_force": time_in_force,
-        "entrust_type": "QTY",
-        "support_trading_session": trading_session,
-        "limit_price": limit_price,
-        "stop_price": stop_price,
-        "trailing_type": trailing_type,
-        "trailing_stop_step": trailing_stop_step,
-        "option_strategy": option_strategy,
-        "position_intent": position_intent,
-        "legs": legs,
-    }
-    return _webull(ctx).place_order([order], account_id)
+    client = _webull(ctx)
+    req = PlaceOrderRequest(
+        account_id=client.resolve_account_id(account_id),
+        symbol=symbol,
+        side=side,
+        order_type=order_type,
+        quantity=quantity,
+        client_order_id=client_order_id,
+        time_in_force=time_in_force,
+        instrument_type=instrument_type,
+        trading_session=trading_session,
+        limit_price=limit_price,
+        stop_price=stop_price,
+        trailing_type=trailing_type,
+        trailing_stop_step=trailing_stop_step,
+        option_strategy=option_strategy,
+        position_intent=position_intent,
+        legs=legs,
+    )
+    return client.post(PLACE_ORDER, req)
 
 
 @mcp.tool()
@@ -291,17 +334,19 @@ def replace_order(
     stop_price: new stop price (optional).
     account_id: Webull account ID. Omit to use the default from ~/.tradingrc.
     """
-    modify: dict = {
-        "client_order_id": client_order_id,
-        "quantity": quantity,
-        "order_type": order_type,
-        "time_in_force": time_in_force,
-        "limit_price": limit_price,
-        "stop_price": stop_price,
-        "trailing_type": trailing_type,
-        "trailing_stop_step": trailing_stop_step,
-    }
-    return _webull(ctx).replace_order([modify], account_id)
+    client = _webull(ctx)
+    req = ReplaceOrderRequest(
+        account_id=client.resolve_account_id(account_id),
+        client_order_id=client_order_id,
+        quantity=quantity,
+        order_type=order_type,
+        time_in_force=time_in_force,
+        limit_price=limit_price,
+        stop_price=stop_price,
+        trailing_type=trailing_type,
+        trailing_stop_step=trailing_stop_step,
+    )
+    return client.post(REPLACE_ORDER, req)
 
 
 @mcp.tool()
@@ -312,8 +357,9 @@ def cancel_order(ctx: Context, client_order_id: str, account_id: str | None = No
     Use get_open_orders to find cancellable orders.
     account_id: Webull account ID. Omit to use the default from ~/.tradingrc.
     """
-    return _webull(ctx).cancel_order(client_order_id, account_id)
-
+    client = _webull(ctx)
+    req = CancelOrderRequest(client.resolve_account_id(account_id), client_order_id)
+    return client.post(CANCEL_ORDER, req)
 
 
 @mcp.tool()
@@ -321,7 +367,7 @@ def get_app_subscriptions(ctx: Context) -> str:
     """Get all Webull accounts linked to this API key: account ID, account number,
     type (MARGIN/CASH), and label (Individual Cash, Roth IRA, etc.).
     """
-    return _webull(ctx).get_account_list()
+    return _webull(ctx).get(ACCOUNT_LIST, EmptyRequest())
 
 
 # ── Webull Market Data ──────────────────────────────────────
@@ -335,7 +381,7 @@ def get_instruments(ctx: Context, symbols: str, category: str = "US_STOCK") -> s
     symbols: comma-separated ticker symbols (e.g. 'AAPL,TSLA'). Max 100.
     category: 'US_STOCK' (default) or 'US_ETF'.
     """
-    return _webull(ctx).get_instruments(symbols, category)
+    return _webull(ctx).get(INSTRUMENTS, GetInstrumentsRequest(symbols, category))
 
 
 
