@@ -6,6 +6,7 @@ from mcp.server.fastmcp import Context, FastMCP
 
 from trading_mcp.alphavantage_client import AlphaVantageClient
 from trading_mcp.config import load_config
+from trading_mcp.endpoints import tradier as t
 from trading_mcp.endpoints.webull import (
     ACCOUNT_LIST,
     BALANCE,
@@ -401,7 +402,7 @@ def get_option_expirations(ctx: Context, symbol: str) -> str:
 
     Requires [tradier] section in ~/.tradingrc.
     """
-    return _tradier(ctx).get_option_expirations(symbol)
+    return _tradier(ctx).get(t.EXPIRATIONS, t.GetExpirationsRequest(symbol))
 
 
 @mcp.tool()
@@ -414,7 +415,7 @@ def get_option_strikes(ctx: Context, symbol: str, expiration: str) -> str:
 
     Requires [tradier] section in ~/.tradingrc.
     """
-    return _tradier(ctx).get_option_strikes(symbol, expiration)
+    return _tradier(ctx).get(t.STRIKES, t.GetStrikesRequest(symbol, expiration))
 
 
 @mcp.tool()
@@ -439,7 +440,7 @@ def get_option_chain(
 
     Requires [tradier] section in ~/.tradingrc.
     """
-    return _tradier(ctx).get_option_chain(symbol, expiration, greeks)
+    return _tradier(ctx).get(t.CHAIN, t.GetChainRequest(symbol, expiration, greeks))
 
 
 @mcp.tool()
@@ -453,7 +454,7 @@ def get_option_lookup(ctx: Context, underlying: str) -> str:
 
     Requires [tradier] section in ~/.tradingrc.
     """
-    return _tradier(ctx).get_option_lookup(underlying)
+    return _tradier(ctx).get(t.OPTION_LOOKUP, t.GetLookupRequest(underlying))
 
 
 @mcp.tool()
@@ -476,7 +477,7 @@ def get_tradier_history(
 
     Requires [tradier] section in ~/.tradingrc.
     """
-    return _tradier(ctx).get_history(symbol, interval, start, end)
+    return _tradier(ctx).get(t.HISTORY, t.GetHistoryRequest(symbol, interval, start, end))
 
 
 @mcp.tool()
@@ -489,7 +490,7 @@ def search_symbols(ctx: Context, query: str, indexes: bool = False) -> str:
 
     Requires [tradier] section in ~/.tradingrc.
     """
-    return _tradier(ctx).search_symbols(query, indexes)
+    return _tradier(ctx).get(t.SEARCH, t.SearchRequest(query, indexes))
 
 
 @mcp.tool()
@@ -511,7 +512,7 @@ def get_quote(ctx: Context, symbols: str, greeks: bool = False) -> str:
 
     Requires [tradier] section in ~/.tradingrc.
     """
-    return _tradier(ctx).get_quotes(symbols, greeks)
+    return _tradier(ctx).get(t.QUOTES, t.GetQuotesRequest(symbols, greeks))
 
 
 @mcp.tool()
@@ -534,7 +535,7 @@ def get_timesales(
 
     Requires [tradier] section in ~/.tradingrc.
     """
-    return _tradier(ctx).get_timesales(symbol, interval, start, end)
+    return _tradier(ctx).get(t.TIMESALES, t.GetTimesalesRequest(symbol, interval, start, end))
 
 
 @mcp.tool()
@@ -544,9 +545,7 @@ def get_market_clock(ctx: Context) -> str:
 
     Requires [tradier] section in ~/.tradingrc.
     """
-    from trading_mcp.table_helpers import process
-
-    return process("tradier:clock", _tradier(ctx).get_clock())
+    return _tradier(ctx).get(t.CLOCK, t.EmptyRequest())
 
 
 # ── Tradier Account ─────────────────────────────────────────
@@ -560,7 +559,7 @@ def get_tradier_profile(ctx: Context) -> str:
     Use this to find your Tradier account_id.
     Requires [tradier] section in ~/.tradingrc.
     """
-    return _tradier(ctx).get_user_profile()
+    return _tradier(ctx).get(t.PROFILE, t.EmptyRequest())
 
 
 @mcp.tool()
@@ -571,7 +570,8 @@ def get_tradier_balances(ctx: Context, account_id: str | None = None) -> str:
     account_id: Tradier account number. Omit to use the default from ~/.tradingrc.
     Requires [tradier] section in ~/.tradingrc.
     """
-    return _tradier(ctx).get_tradier_balances(account_id)
+    client = _tradier(ctx)
+    return client.get(t.BALANCES, t.AccountIdRequest(client.resolve_account_id(account_id)))
 
 
 @mcp.tool()
@@ -582,7 +582,8 @@ def get_tradier_positions(ctx: Context, account_id: str | None = None) -> str:
     account_id: Tradier account number. Omit to use the default from ~/.tradingrc.
     Requires [tradier] section in ~/.tradingrc.
     """
-    return _tradier(ctx).get_tradier_positions(account_id)
+    client = _tradier(ctx)
+    return client.get(t.POSITIONS, t.AccountIdRequest(client.resolve_account_id(account_id)))
 
 
 @mcp.tool()
@@ -602,7 +603,11 @@ def get_tradier_orders(
     account_id: Tradier account number. Omit to use the default from ~/.tradingrc.
     Requires [tradier] section in ~/.tradingrc.
     """
-    return _tradier(ctx).get_tradier_orders(status, page, limit, account_id)
+    client = _tradier(ctx)
+    return client.get(
+        t.ORDERS,
+        t.GetOrdersRequest(client.resolve_account_id(account_id), status, page, limit),
+    )
 
 
 @mcp.tool()
@@ -613,7 +618,11 @@ def get_tradier_order_detail(ctx: Context, order_id: str, account_id: str | None
     account_id: Tradier account number. Omit to use the default from ~/.tradingrc.
     Requires [tradier] section in ~/.tradingrc.
     """
-    return _tradier(ctx).get_tradier_order_detail(order_id, account_id)
+    client = _tradier(ctx)
+    return client.get(
+        t.ORDER_DETAIL,
+        t.GetOrderDetailRequest(client.resolve_account_id(account_id), order_id),
+    )
 
 
 @mcp.tool()
@@ -635,7 +644,11 @@ def get_tradier_gainloss(
     account_id: Tradier account number. Omit to use the default from ~/.tradingrc.
     Requires [tradier] section in ~/.tradingrc.
     """
-    return _tradier(ctx).get_tradier_gainloss(page, limit, sort_by, sort, account_id)
+    client = _tradier(ctx)
+    return client.get(
+        t.GAINLOSS,
+        t.GetGainLossRequest(client.resolve_account_id(account_id), page, limit, sort_by, sort),
+    )
 
 
 @mcp.tool()
@@ -653,7 +666,13 @@ def get_tradier_account_history(
     account_id: Tradier account number. Omit to use the default from ~/.tradingrc.
     Requires [tradier] section in ~/.tradingrc.
     """
-    return _tradier(ctx).get_tradier_history(page, limit, activity_type, account_id)
+    client = _tradier(ctx)
+    return client.get(
+        t.ACCOUNT_HISTORY,
+        t.GetAccountHistoryRequest(
+            client.resolve_account_id(account_id), page, limit, activity_type
+        ),
+    )
 
 
 # ── Tradier Order Management ───────────────────────────────
@@ -693,8 +712,12 @@ def place_tradier_order(ctx: Context, order_params: dict, account_id: str | None
     duration: 'day', 'gtc', 'pre' (pre-market), 'post' (after-hours)
     account_id: Tradier account number. Omit to use the default from ~/.tradingrc.
     """
+    client = _tradier(ctx)
     params = {k: str(v) for k, v in order_params.items()}
-    return _tradier(ctx).place_tradier_order(params, account_id)
+    return client.post(
+        t.PLACE_ORDER,
+        t.PlaceOrderRequest(client.resolve_account_id(account_id), params),
+    )
 
 
 @mcp.tool()
@@ -711,8 +734,12 @@ def modify_tradier_order(
       {"type": "limit", "price": "255.00", "duration": "gtc"}
     account_id: Tradier account number. Omit to use the default from ~/.tradingrc.
     """
+    client = _tradier(ctx)
     params = {k: str(v) for k, v in modifications.items()}
-    return _tradier(ctx).modify_tradier_order(order_id, params, account_id)
+    return client.put(
+        t.MODIFY_ORDER,
+        t.ModifyOrderRequest(client.resolve_account_id(account_id), order_id, params),
+    )
 
 
 @mcp.tool()
@@ -722,7 +749,11 @@ def cancel_tradier_order(ctx: Context, order_id: str, account_id: str | None = N
     order_id: the numeric order ID (from get_tradier_orders).
     account_id: Tradier account number. Omit to use the default from ~/.tradingrc.
     """
-    return _tradier(ctx).cancel_tradier_order(order_id, account_id)
+    client = _tradier(ctx)
+    return client.delete(
+        t.CANCEL_ORDER,
+        t.CancelOrderRequest(client.resolve_account_id(account_id), order_id),
+    )
 
 
 # ═══════════════════════════════════════════════════════════════

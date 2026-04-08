@@ -64,7 +64,14 @@ class BaseClient(ABC):
 
     def post(self, endpoint: Endpoint, request: PostRequest) -> str:
         """Send a POST request and return the decoded markdown response."""
-        data = self._request("POST", endpoint, body=request.to_body())
+        params = request.to_params() if isinstance(request, GetRequest) else None
+        data = self._request("POST", endpoint, params=params, body=request.to_body())
+        return self._decode(endpoint, data)
+
+    def put(self, endpoint: Endpoint, request: PostRequest) -> str:
+        """Send a PUT request and return the decoded markdown response."""
+        params = request.to_params() if isinstance(request, GetRequest) else None
+        data = self._request("PUT", endpoint, params=params, body=request.to_body())
         return self._decode(endpoint, data)
 
     def delete(self, endpoint: Endpoint, request: GetRequest) -> str:
