@@ -1,29 +1,46 @@
 """Endpoint and BaseClient abstractions for typed API operations.
 
 Each API endpoint is defined as an Endpoint with its path, caching, rate limiting,
-and response model. BaseClient provides get/post/delete methods that handle
+and response model. BaseClient provides get/post/put/delete methods that handle
 encoding requests, making HTTP calls, and decoding responses to markdown.
+
+Request mixins define the three ways data is sent in HTTP:
+  - PathRequest: URL path template params (e.g. /accounts/{account_id})
+  - ParamsRequest: URL query params (e.g. ?symbol=AAPL)
+  - BodyRequest: JSON or form-encoded request body
 """
 
 import json
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Protocol
+
+# ── Request mixins ──────────────────────────────────────────
 
 
-@runtime_checkable
-class GetRequest(Protocol):
-    """Protocol for GET request models — must produce query params."""
+class PathRequest:
+    """Mixin for requests with URL path template parameters."""
 
-    def to_params(self) -> dict[str, str]: ...
+    def to_path_params(self) -> dict[str, str]:
+        raise NotImplementedError
 
 
-@runtime_checkable
-class PostRequest(Protocol):
-    """Protocol for POST request models — must produce a JSON body."""
+class ParamsRequest:
+    """Mixin for requests with URL query parameters."""
 
-    def to_body(self) -> dict[str, Any]: ...
+    def to_params(self) -> dict[str, str]:
+        raise NotImplementedError
+
+
+class BodyRequest:
+    """Mixin for requests with a JSON or form-encoded body."""
+
+    def to_body(self) -> dict[str, Any]:
+        raise NotImplementedError
+
+
+# ── Response protocol ───────────────────────────────────────
 
 
 class ResponseModel(Protocol):
@@ -35,11 +52,14 @@ class ResponseModel(Protocol):
     def to_markdown(self) -> str: ...
 
 
+# ── Endpoint ────────────────────────────────────────────────
+
+
 @dataclass(frozen=True)
 class Endpoint:
     """Definition of a single API endpoint.
 
-    path: HTTP path (e.g. '/openapi/assets/balance').
+    path: HTTP path, may contain {templates} for PathRequest substitution.
     cache_ttl: cache duration in seconds (0 = no cache).
     rate_key: rate limiter bucket name (default = 'default').
     response_model: class with from_response(data) and to_markdown() methods.
@@ -53,31 +73,44 @@ class Endpoint:
     extract: Callable[[Any], Any] | None = None
 
 
+# ── BaseClient ──────────────────────────────────────────────
+
+
 class BaseClient(ABC):
     """Base class for API clients. Subclasses implement _request() with provider-specific
     auth, HTTP transport, caching, and rate limiting."""
 
-    def get(self, endpoint: Endpoint, request: GetRequest) -> str:
+    def get(self, endpoint: Endpoint, request: ParamsRequest) -> str:
         """Send a GET request and return the decoded markdown response."""
-        data = self._request("GET", endpoint, params=request.to_params())
+        path = self._resolve_path(endpoint, request)
+        data = self._request("GET", endpoint, path=path, params=request.to_params())
         return self._decode(endpoint, data)
 
-    def post(self, endpoint: Endpoint, request: PostRequest) -> str:
+    def post(self, endpoint: Endpoint, request: BodyRequest) -> str:
         """Send a POST request and return the decoded markdown response."""
-        params = request.to_params() if isinstance(request, GetRequest) else None
-        data = self._request("POST", endpoint, params=params, body=request.to_body())
+        path = self._resolve_path(endpoint, request)
+        data = self._request("POST", endpoint, path=path, body=request.to_body())
         return self._decode(endpoint, data)
 
-    def put(self, endpoint: Endpoint, request: PostRequest) -> str:
+    def put(self, endpoint: Endpoint, request: BodyRequest) -> str:
         """Send a PUT request and return the decoded markdown response."""
-        params = request.to_params() if isinstance(request, GetRequest) else None
-        data = self._request("PUT", endpoint, params=params, body=request.to_body())
+        path = self._resolve_path(endpoint, request)
+        data = self._request("PUT", endpoint, path=path, body=request.to_body())
         return self._decode(endpoint, data)
 
-    def delete(self, endpoint: Endpoint, request: GetRequest) -> str:
+    def delete(self, endpoint: Endpoint, request: ParamsRequest) -> str:
         """Send a DELETE request and return the decoded markdown response."""
-        data = self._request("DELETE", endpoint, params=request.to_params())
+        path = self._resolve_path(endpoint, request)
+        data = self._request("DELETE", endpoint, path=path, params=request.to_params())
         return self._decode(endpoint, data)
+
+    @staticmethod
+    def _resolve_path(endpoint: Endpoint, request: object) -> str:
+        """Resolve path templates using PathRequest.to_path_params() if available."""
+        path = endpoint.path
+        if isinstance(request, PathRequest) and "{" in path:
+            path = path.format_map(request.to_path_params())
+        return path
 
     def _decode(self, endpoint: Endpoint, data: Any) -> str:
         """Extract and transform raw API response to markdown."""
@@ -92,8 +125,10 @@ class BaseClient(ABC):
         self,
         method: str,
         endpoint: Endpoint,
+        path: str | None = None,
         params: dict[str, str] | None = None,
         body: dict[str, Any] | None = None,
     ) -> Any:
         """Execute HTTP request with provider-specific auth, caching, and rate limiting.
+        path is the resolved URL path (with templates substituted).
         Returns raw JSON response data."""

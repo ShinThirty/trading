@@ -180,11 +180,12 @@ class WebullClient(BaseClient):
         self,
         method: str,
         endpoint: Endpoint,
+        path: str | None = None,
         params: dict[str, str] | None = None,
         body: dict[str, Any] | None = None,
     ) -> Any:
         """Execute HTTP request with HMAC auth, caching, rate limiting, and 401 handling."""
-        path = endpoint.path
+        path = path or endpoint.path
 
         # Cache check (GET only)
         if method == "GET" and endpoint.cache_ttl > 0:

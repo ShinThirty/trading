@@ -45,41 +45,29 @@ class TradierClient(BaseClient):
             parts.extend(f"{k}={v}" for k, v in sorted(params.items()))
         return "&".join(parts)
 
-    def _resolve_path(
-        self, endpoint: Endpoint, params: dict[str, str] | None
-    ) -> tuple[str, dict[str, str] | None]:
-        """Resolve path templates like /v1/accounts/{account_id}/orders.
-        Returns (resolved_path, remaining_query_params)."""
-        path = endpoint.path
-        if params and "{" in path:
-            path = path.format_map(params)
-            params = {k: v for k, v in params.items() if f"{{{k}}}" not in endpoint.path}
-            if not params:
-                params = None
-        return path, params
-
     def _request(
         self,
         method: str,
         endpoint: Endpoint,
+        path: str | None = None,
         params: dict[str, str] | None = None,
         body: dict[str, Any] | None = None,
     ) -> Any:
         """Execute HTTP request with Bearer auth, caching, and rate limiting."""
-        path, query_params = self._resolve_path(endpoint, params)
+        resolved = path or endpoint.path
 
         # Cache check (GET only)
         if method == "GET" and endpoint.cache_ttl > 0:
-            key = self._cache_key(path, query_params)
+            key = self._cache_key(resolved, params)
             cached = self._cache.get(key, endpoint.cache_ttl)
             if cached is not None:
                 return cached
 
         self._limiter.acquire()
-        url = f"{self._base}{path}"
+        url = f"{self._base}{resolved}"
 
         if method == "GET":
-            resp = self._http.get(url, headers=self._headers, params=query_params)
+            resp = self._http.get(url, headers=self._headers, params=params)
         elif method == "POST":
             resp = self._http.post(url, headers=self._headers, data=body)
         elif method == "PUT":
@@ -100,8 +88,8 @@ class TradierClient(BaseClient):
 
     def get_clock(self) -> dict:
         """Return raw market clock data for _check_market in server.py."""
-        from trading_mcp.endpoints.tradier import CLOCK, EmptyRequest
+        from trading_mcp.endpoints.tradier import CLOCK
 
-        data = self._request("GET", CLOCK, params=EmptyRequest().to_params())
+        data = self._request("GET", CLOCK, path=CLOCK.path)
         extract = CLOCK.extract
         return extract(data) if extract else data

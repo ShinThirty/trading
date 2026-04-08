@@ -3,7 +3,7 @@
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from trading_mcp.endpoint import Endpoint
+from trading_mcp.endpoint import BodyRequest, Endpoint, ParamsRequest
 from trading_mcp.table_helpers import fmt_number, kv_table, list_table
 
 # ═══════════════════════════════════════════════════════════════
@@ -12,7 +12,7 @@ from trading_mcp.table_helpers import fmt_number, kv_table, list_table
 
 
 @dataclass
-class EmptyRequest:
+class EmptyRequest(ParamsRequest):
     """GET request with no parameters."""
 
     def to_params(self) -> dict[str, str]:
@@ -20,7 +20,7 @@ class EmptyRequest:
 
 
 @dataclass
-class AccountRequest:
+class AccountRequest(ParamsRequest):
     """GET request scoped to a single account."""
 
     account_id: str
@@ -30,7 +30,7 @@ class AccountRequest:
 
 
 @dataclass
-class GetOpenOrdersRequest:
+class GetOpenOrdersRequest(ParamsRequest):
     account_id: str
     page_size: int = 50
     last_client_order_id: str | None = None
@@ -46,7 +46,7 @@ class GetOpenOrdersRequest:
 
 
 @dataclass
-class GetOrderHistoryRequest:
+class GetOrderHistoryRequest(ParamsRequest):
     account_id: str
     page_size: int = 50
     start_date: str | None = None
@@ -68,7 +68,7 @@ class GetOrderHistoryRequest:
 
 
 @dataclass
-class GetOrderDetailRequest:
+class GetOrderDetailRequest(ParamsRequest):
     account_id: str
     client_order_id: str
 
@@ -77,7 +77,7 @@ class GetOrderDetailRequest:
 
 
 @dataclass
-class GetInstrumentsRequest:
+class GetInstrumentsRequest(ParamsRequest):
     symbols: str
     category: str = "US_STOCK"
 
@@ -86,7 +86,7 @@ class GetInstrumentsRequest:
 
 
 @dataclass
-class PlaceOrderRequest:
+class PlaceOrderRequest(BodyRequest):
     account_id: str
     symbol: str
     side: str
@@ -121,7 +121,7 @@ class PreviewOrderRequest(PlaceOrderRequest):
 
 
 @dataclass
-class ReplaceOrderRequest:
+class ReplaceOrderRequest(BodyRequest):
     account_id: str
     client_order_id: str
     quantity: str | None = None
@@ -138,7 +138,7 @@ class ReplaceOrderRequest:
 
 
 @dataclass
-class CancelOrderRequest:
+class CancelOrderRequest(BodyRequest):
     account_id: str
     client_order_id: str
 

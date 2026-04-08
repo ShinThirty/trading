@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from typing import Any
 
-from trading_mcp.endpoint import Endpoint
+from trading_mcp.endpoint import BodyRequest, Endpoint, ParamsRequest, PathRequest
 from trading_mcp.table_helpers import (
     fmt_large,
     fmt_number,
@@ -30,13 +30,13 @@ def _ensure_list(val: Any) -> list:
 
 
 @dataclass
-class EmptyRequest:
+class EmptyRequest(ParamsRequest):
     def to_params(self) -> dict[str, str]:
         return {}
 
 
 @dataclass
-class SymbolRequest:
+class SymbolRequest(ParamsRequest):
     symbol: str
 
     def to_params(self) -> dict[str, str]:
@@ -44,7 +44,7 @@ class SymbolRequest:
 
 
 @dataclass
-class GetExpirationsRequest:
+class GetExpirationsRequest(ParamsRequest):
     symbol: str
 
     def to_params(self) -> dict[str, str]:
@@ -52,7 +52,7 @@ class GetExpirationsRequest:
 
 
 @dataclass
-class GetStrikesRequest:
+class GetStrikesRequest(ParamsRequest):
     symbol: str
     expiration: str
 
@@ -61,7 +61,7 @@ class GetStrikesRequest:
 
 
 @dataclass
-class GetChainRequest:
+class GetChainRequest(ParamsRequest):
     symbol: str
     expiration: str
     greeks: bool = True
@@ -75,7 +75,7 @@ class GetChainRequest:
 
 
 @dataclass
-class GetLookupRequest:
+class GetLookupRequest(ParamsRequest):
     underlying: str
 
     def to_params(self) -> dict[str, str]:
@@ -83,7 +83,7 @@ class GetLookupRequest:
 
 
 @dataclass
-class GetHistoryRequest:
+class GetHistoryRequest(ParamsRequest):
     symbol: str
     interval: str = "daily"
     start: str | None = None
@@ -99,7 +99,7 @@ class GetHistoryRequest:
 
 
 @dataclass
-class SearchRequest:
+class SearchRequest(ParamsRequest):
     q: str
     indexes: bool = False
 
@@ -108,7 +108,7 @@ class SearchRequest:
 
 
 @dataclass
-class GetQuotesRequest:
+class GetQuotesRequest(ParamsRequest):
     symbols: str
     greeks: bool = False
 
@@ -117,7 +117,7 @@ class GetQuotesRequest:
 
 
 @dataclass
-class GetTimesalesRequest:
+class GetTimesalesRequest(ParamsRequest):
     symbol: str
     interval: str = "5min"
     start: str | None = None
@@ -133,22 +133,28 @@ class GetTimesalesRequest:
 
 
 @dataclass
-class AccountIdRequest:
+class AccountIdRequest(PathRequest, ParamsRequest):
     account_id: str
 
-    def to_params(self) -> dict[str, str]:
+    def to_path_params(self) -> dict[str, str]:
         return {"account_id": self.account_id}
+
+    def to_params(self) -> dict[str, str]:
+        return {}
 
 
 @dataclass
-class GetOrdersRequest:
+class GetOrdersRequest(PathRequest, ParamsRequest):
     account_id: str
     status: str | None = None
     page: int | None = None
     limit: int | None = None
 
+    def to_path_params(self) -> dict[str, str]:
+        return {"account_id": self.account_id}
+
     def to_params(self) -> dict[str, str]:
-        params: dict[str, str] = {"account_id": self.account_id}
+        params: dict[str, str] = {}
         if self.status:
             params["status"] = self.status
         if self.page:
@@ -159,24 +165,30 @@ class GetOrdersRequest:
 
 
 @dataclass
-class GetOrderDetailRequest:
+class GetOrderDetailRequest(PathRequest, ParamsRequest):
     account_id: str
     order_id: str
 
-    def to_params(self) -> dict[str, str]:
+    def to_path_params(self) -> dict[str, str]:
         return {"account_id": self.account_id, "order_id": self.order_id}
+
+    def to_params(self) -> dict[str, str]:
+        return {}
 
 
 @dataclass
-class GetGainLossRequest:
+class GetGainLossRequest(PathRequest, ParamsRequest):
     account_id: str
     page: int | None = None
     limit: int | None = None
     sort_by: str | None = None
     sort: str | None = None
 
+    def to_path_params(self) -> dict[str, str]:
+        return {"account_id": self.account_id}
+
     def to_params(self) -> dict[str, str]:
-        params: dict[str, str] = {"account_id": self.account_id}
+        params: dict[str, str] = {}
         if self.page:
             params["page"] = str(self.page)
         if self.limit:
@@ -189,14 +201,17 @@ class GetGainLossRequest:
 
 
 @dataclass
-class GetAccountHistoryRequest:
+class GetAccountHistoryRequest(PathRequest, ParamsRequest):
     account_id: str
     page: int | None = None
     limit: int | None = None
     activity_type: str | None = None
 
+    def to_path_params(self) -> dict[str, str]:
+        return {"account_id": self.account_id}
+
     def to_params(self) -> dict[str, str]:
-        params: dict[str, str] = {"account_id": self.account_id}
+        params: dict[str, str] = {}
         if self.page:
             params["page"] = str(self.page)
         if self.limit:
@@ -207,11 +222,11 @@ class GetAccountHistoryRequest:
 
 
 @dataclass
-class PlaceOrderRequest:
+class PlaceOrderRequest(PathRequest, BodyRequest):
     account_id: str
     order_params: dict[str, str]
 
-    def to_params(self) -> dict[str, str]:
+    def to_path_params(self) -> dict[str, str]:
         return {"account_id": self.account_id}
 
     def to_body(self) -> dict[str, Any]:
@@ -219,12 +234,12 @@ class PlaceOrderRequest:
 
 
 @dataclass
-class ModifyOrderRequest:
+class ModifyOrderRequest(PathRequest, BodyRequest):
     account_id: str
     order_id: str
     modifications: dict[str, str]
 
-    def to_params(self) -> dict[str, str]:
+    def to_path_params(self) -> dict[str, str]:
         return {"account_id": self.account_id, "order_id": self.order_id}
 
     def to_body(self) -> dict[str, Any]:
@@ -232,12 +247,15 @@ class ModifyOrderRequest:
 
 
 @dataclass
-class CancelOrderRequest:
+class CancelOrderRequest(PathRequest, ParamsRequest):
     account_id: str
     order_id: str
 
-    def to_params(self) -> dict[str, str]:
+    def to_path_params(self) -> dict[str, str]:
         return {"account_id": self.account_id, "order_id": self.order_id}
+
+    def to_params(self) -> dict[str, str]:
+        return {}
 
 
 # ═══════════════════════════════════════════════════════════════
