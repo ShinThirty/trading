@@ -6,6 +6,9 @@ from mcp.server.fastmcp import Context, FastMCP
 
 from trading_mcp.alphavantage_client import AlphaVantageClient
 from trading_mcp.config import load_config
+from trading_mcp.endpoints import alphavantage as av
+from trading_mcp.endpoints import finnhub as fh
+from trading_mcp.endpoints import fmp, fred
 from trading_mcp.endpoints import tradier as t
 from trading_mcp.endpoints.webull import (
     ACCOUNT_LIST,
@@ -771,12 +774,10 @@ def get_company_news(
     from_date: start date (YYYY-MM-DD).
     to_date: end date (YYYY-MM-DD).
     limit: max number of articles to return (default 20).
-    Returns a list of articles with headline, source, and datetime.
 
-    Rate limit: 60 requests/min (shared across all Finnhub tools).
     Requires [finnhub] section in ~/.tradingrc.
     """
-    return _finnhub(ctx).get_company_news(symbol, from_date, to_date, limit)
+    return _finnhub(ctx).get(fh.COMPANY_NEWS, fh.CompanyNewsRequest(symbol, from_date, to_date))
 
 
 @mcp.tool()
@@ -785,12 +786,10 @@ def get_market_news(ctx: Context, category: str = "general", limit: int = 20) ->
 
     category: 'general', 'forex', 'crypto', or 'merger'.
     limit: max number of articles to return (default 20).
-    Returns a list of articles with headline, source, and datetime.
 
-    Rate limit: 60 requests/min (shared across all Finnhub tools).
     Requires [finnhub] section in ~/.tradingrc.
     """
-    return _finnhub(ctx).get_market_news(category, limit)
+    return _finnhub(ctx).get(fh.MARKET_NEWS, fh.MarketNewsRequest(category))
 
 
 @mcp.tool()
@@ -799,45 +798,36 @@ def get_economic_calendar(ctx: Context, from_date: str, to_date: str) -> str:
 
     from_date: start date (YYYY-MM-DD).
     to_date: end date (YYYY-MM-DD).
-    Returns events with: event name, country, date/time, actual value, estimate,
-    previous value, and impact level (low/medium/high).
 
     Note: requires Finnhub premium plan. Free tier returns 403.
-    Rate limit: 60 requests/min (shared across all Finnhub tools).
     Requires [finnhub] section in ~/.tradingrc.
     """
-    return _finnhub(ctx).get_economic_calendar(from_date, to_date)
+    return _finnhub(ctx).get(fh.ECONOMIC_CALENDAR, fh.DateRangeRequest(from_date, to_date))
 
 
 @mcp.tool()
 def get_earnings_calendar(ctx: Context, from_date: str, to_date: str, limit: int = 50) -> str:
-    """Get upcoming and recent earnings reports. Automatically filters out micro-caps
-    (companies with no analyst coverage).
+    """Get upcoming and recent earnings reports. Automatically filters out micro-caps.
 
     from_date: start date (YYYY-MM-DD).
     to_date: end date (YYYY-MM-DD).
     limit: max number of entries to return (default 50).
-    Returns each report's symbol, date, EPS actual, EPS estimate, revenue actual,
-    revenue estimate, and reporting time (bmo=before market open, amc=after market close).
 
-    Rate limit: 60 requests/min (shared across all Finnhub tools).
     Requires [finnhub] section in ~/.tradingrc.
     """
-    return _finnhub(ctx).get_earnings_calendar(from_date, to_date, limit)
+    return _finnhub(ctx).get(fh.EARNINGS_CALENDAR, fh.DateRangeRequest(from_date, to_date))
 
 
 @mcp.tool()
 def get_basic_financials(ctx: Context, symbol: str) -> str:
-    """Get key financial metrics: P/E ratio, P/B ratio, EPS, dividend yield, 52-week
-    high/low, market cap, beta, ROE, debt/equity, and dozens more.
+    """Get key financial metrics: P/E, P/B, EPS, dividend yield, 52-week high/low,
+    market cap, beta, ROE, debt/equity.
 
     symbol: ticker symbol (e.g. 'AAPL').
-    Returns a dict with 'metric' (current values) and 'series' (quarterly/annual history).
 
-    Rate limit: 60 requests/min (shared across all Finnhub tools).
     Requires [finnhub] section in ~/.tradingrc.
     """
-    return _finnhub(ctx).get_basic_financials(symbol)
+    return _finnhub(ctx).get(fh.BASIC_FINANCIALS, fh.BasicFinancialsRequest(symbol))
 
 
 @mcp.tool()
@@ -848,10 +838,9 @@ def get_eps_estimates(ctx: Context, symbol: str) -> str:
     symbol: ticker symbol (e.g. 'AAPL').
 
     Note: requires Finnhub premium plan. Free tier returns 403.
-    Rate limit: 60 requests/min (shared across all Finnhub tools).
     Requires [finnhub] section in ~/.tradingrc.
     """
-    return _finnhub(ctx).get_eps_estimates(symbol)
+    return _finnhub(ctx).get(fh.EPS_ESTIMATES, fh.SymbolRequest(symbol))
 
 
 @mcp.tool()
@@ -861,10 +850,9 @@ def get_recommendation_trends(ctx: Context, symbol: str) -> str:
 
     symbol: ticker symbol (e.g. 'AAPL').
 
-    Rate limit: 60 requests/min (shared across all Finnhub tools).
     Requires [finnhub] section in ~/.tradingrc.
     """
-    return _finnhub(ctx).get_recommendation_trends(symbol)
+    return _finnhub(ctx).get(fh.RECOMMENDATIONS, fh.SymbolRequest(symbol))
 
 
 @mcp.tool()
@@ -874,54 +862,47 @@ def get_price_target(ctx: Context, symbol: str) -> str:
     symbol: ticker symbol (e.g. 'AAPL').
 
     Note: requires Finnhub premium plan. Free tier returns 403.
-    Rate limit: 60 requests/min (shared across all Finnhub tools).
     Requires [finnhub] section in ~/.tradingrc.
     """
-    return _finnhub(ctx).get_price_target(symbol)
+    return _finnhub(ctx).get(fh.PRICE_TARGET, fh.SymbolRequest(symbol))
 
 
 @mcp.tool()
 def get_insider_transactions(ctx: Context, symbol: str, limit: int = 20) -> str:
     """Get recent insider transactions: buys, sells, and grants by company officers
-    and directors. Insider buying is one of the strongest bullish signals.
+    and directors.
 
     symbol: ticker symbol (e.g. 'AAPL').
     limit: max number of transactions to return (default 20).
 
-    Rate limit: 60 requests/min (shared across all Finnhub tools).
     Requires [finnhub] section in ~/.tradingrc.
     """
-    return _finnhub(ctx).get_insider_transactions(symbol, limit)
+    return _finnhub(ctx).get(fh.INSIDER_TRANSACTIONS, fh.SymbolRequest(symbol))
 
 
 @mcp.tool()
 def get_dividends(ctx: Context, symbol: str, from_date: str, to_date: str) -> str:
-    """Get dividend history for a specific company: ex-date, pay date, record date, and amount.
-    Essential for covered call strategies — avoid selling calls through ex-dividend dates.
+    """Get dividend history: ex-date, pay date, record date, and amount.
 
     symbol: ticker symbol (e.g. 'AAPL').
     from_date: start date (YYYY-MM-DD).
     to_date: end date (YYYY-MM-DD).
 
-    Note: requires Finnhub premium plan. Free tier returns 403.
-    Use get_dividend_history (FMP) as a free alternative.
-    Rate limit: 60 requests/min (shared across all Finnhub tools).
+    Note: requires Finnhub premium plan. Use get_dividend_history (FMP) as free alternative.
     Requires [finnhub] section in ~/.tradingrc.
     """
-    return _finnhub(ctx).get_dividends(symbol, from_date, to_date)
+    return _finnhub(ctx).get(fh.DIVIDENDS, fh.DividendsRequest(symbol, from_date, to_date))
 
 
 @mcp.tool()
 def get_company_peers(ctx: Context, symbol: str) -> str:
-    """Get a list of peer/competitor symbols for a company, useful for comparative
-    valuation analysis.
+    """Get a list of peer/competitor symbols for a company.
 
     symbol: ticker symbol (e.g. 'AAPL').
 
-    Rate limit: 60 requests/min (shared across all Finnhub tools).
     Requires [finnhub] section in ~/.tradingrc.
     """
-    return _finnhub(ctx).get_company_peers(symbol)
+    return _finnhub(ctx).get(fh.PEERS, fh.SymbolRequest(symbol))
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -935,122 +916,86 @@ def get_company_profile(ctx: Context, symbol: str) -> str:
     52-week range, sector, industry, exchange, and CEO.
 
     symbol: ticker symbol (e.g. 'AAPL').
-
-    Rate limit: 250 requests/day (shared across all FMP tools).
     Requires [fmp] section in ~/.tradingrc.
     """
-    return _fmp(ctx).get_company_profile(symbol)
+    return _fmp(ctx).get(fmp.PROFILE, fmp.SymbolRequest(symbol))
 
 
 @mcp.tool()
 def get_income_statement(
-    ctx: Context,
-    symbol: str,
-    period: str = "annual",
-    limit: int = 4,
+    ctx: Context, symbol: str, period: str = "annual", limit: int = 4
 ) -> str:
-    """Get income statement: revenue, gross profit, operating income, net income, EPS,
-    EBITDA, and all line items.
+    """Get income statement: revenue, gross profit, operating income, net income, EPS, EBITDA.
 
     symbol: ticker symbol (e.g. 'AAPL').
     period: 'annual' or 'quarter'.
     limit: number of periods to return (default 4).
-
-    Rate limit: 250 requests/day (shared across all FMP tools).
     Requires [fmp] section in ~/.tradingrc.
     """
-    return _fmp(ctx).get_income_statement(symbol, period, limit)
+    return _fmp(ctx).get(fmp.INCOME_STATEMENT, fmp.FinancialRequest(symbol, period, limit))
 
 
 @mcp.tool()
 def get_balance_sheet(
-    ctx: Context,
-    symbol: str,
-    period: str = "annual",
-    limit: int = 4,
+    ctx: Context, symbol: str, period: str = "annual", limit: int = 4
 ) -> str:
-    """Get balance sheet: total assets, liabilities, equity, cash, debt, inventory,
-    and all line items.
+    """Get balance sheet: total assets, liabilities, equity, cash, debt.
 
     symbol: ticker symbol (e.g. 'AAPL').
     period: 'annual' or 'quarter'.
     limit: number of periods to return (default 4).
-
-    Rate limit: 250 requests/day (shared across all FMP tools).
     Requires [fmp] section in ~/.tradingrc.
     """
-    return _fmp(ctx).get_balance_sheet(symbol, period, limit)
+    return _fmp(ctx).get(fmp.BALANCE_SHEET, fmp.FinancialRequest(symbol, period, limit))
 
 
 @mcp.tool()
 def get_cash_flow(
-    ctx: Context,
-    symbol: str,
-    period: str = "annual",
-    limit: int = 4,
+    ctx: Context, symbol: str, period: str = "annual", limit: int = 4
 ) -> str:
-    """Get cash flow statement: operating cash flow, capex, free cash flow, dividends
-    paid, share buybacks, and all line items.
+    """Get cash flow statement: operating cash flow, capex, free cash flow, dividends, buybacks.
 
     symbol: ticker symbol (e.g. 'AAPL').
     period: 'annual' or 'quarter'.
     limit: number of periods to return (default 4).
-
-    Rate limit: 250 requests/day (shared across all FMP tools).
     Requires [fmp] section in ~/.tradingrc.
     """
-    return _fmp(ctx).get_cash_flow(symbol, period, limit)
+    return _fmp(ctx).get(fmp.CASH_FLOW, fmp.FinancialRequest(symbol, period, limit))
 
 
 @mcp.tool()
 def get_key_metrics(
-    ctx: Context,
-    symbol: str,
-    period: str = "annual",
-    limit: int = 4,
+    ctx: Context, symbol: str, period: str = "annual", limit: int = 4
 ) -> str:
-    """Get key financial metrics over time: revenue per share, net income per share,
-    P/E, P/B, P/S, EV/EBITDA, debt/equity, ROE, ROA, current ratio, and more.
+    """Get key financial metrics: EV/EBITDA, ROE, ROA, current ratio, debt/equity, FCF yield.
 
     symbol: ticker symbol (e.g. 'AAPL').
     period: 'annual' or 'quarter'.
     limit: number of periods to return (default 4).
-
-    Rate limit: 250 requests/day (shared across all FMP tools).
     Requires [fmp] section in ~/.tradingrc.
     """
-    return _fmp(ctx).get_key_metrics(symbol, period, limit)
+    return _fmp(ctx).get(fmp.KEY_METRICS, fmp.FinancialRequest(symbol, period, limit))
 
 
 @mcp.tool()
 def get_dividend_history(ctx: Context, symbol: str) -> str:
-    """Get full dividend payment history for a specific company: ex-date, pay date,
-    record date, declaration date, dividend amount, and adjusted dividend.
+    """Get full dividend payment history: ex-date, pay date, record date, amount.
 
     symbol: ticker symbol (e.g. 'AAPL').
-
-    Rate limit: 250 requests/day (shared across all FMP tools).
     Requires [fmp] section in ~/.tradingrc.
     """
-    return _fmp(ctx).get_dividend_history(symbol)
+    return _fmp(ctx).get(fmp.DIVIDEND_HISTORY, fmp.SymbolRequest(symbol))
 
 
 @mcp.tool()
-def get_fmp_earnings_calendar(
-    ctx: Context,
-    symbol: str,
-    limit: int = 5,
-) -> str:
-    """Get earnings history for a specific company from FMP: date, EPS estimate, EPS actual,
-    revenue estimate, revenue actual.
+def get_fmp_earnings_calendar(ctx: Context, symbol: str, limit: int = 5) -> str:
+    """Get earnings history: date, EPS estimate/actual, revenue estimate/actual.
 
     symbol: ticker symbol (e.g. 'AAPL').
-    limit: number of recent earnings to return (default 5, max 5 on free tier).
-
-    Rate limit: 250 requests/day (shared across all FMP tools).
+    limit: number of recent earnings to return (default 5).
     Requires [fmp] section in ~/.tradingrc.
     """
-    return _fmp(ctx).get_earnings_calendar(symbol, limit)
+    return _fmp(ctx).get(fmp.EARNINGS, fmp.EarningsRequest(symbol, limit))
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1060,60 +1005,45 @@ def get_fmp_earnings_calendar(
 
 @mcp.tool()
 def get_economic_data(
-    ctx: Context,
-    series_id: str,
-    limit: int = 12,
-    sort_order: str = "desc",
+    ctx: Context, series_id: str, limit: int = 12, sort_order: str = "desc"
 ) -> str:
     """Get historical values for a FRED economic data series.
 
-    series_id: FRED series ID. Common series:
-      - 'CPIAUCSL' — Consumer Price Index (CPI, monthly)
-      - 'GDP' — Gross Domestic Product (quarterly)
-      - 'UNRATE' — Unemployment Rate (monthly)
-      - 'FEDFUNDS' — Federal Funds Rate (monthly)
-      - 'T10Y2Y' — 10Y-2Y Treasury Yield Spread (daily, yield curve)
-      - 'VIXCLS' — CBOE VIX Volatility Index (daily)
-      - 'PAYEMS' — Nonfarm Payrolls (monthly)
-      - 'UMCSENT' — Consumer Sentiment (monthly)
-      - 'DGS10' — 10-Year Treasury Yield (daily)
-    limit: number of most recent observations to return (default 12).
-    sort_order: 'desc' (newest first) or 'asc' (oldest first).
+    series_id: FRED series ID. Common: 'CPIAUCSL' (CPI), 'GDP', 'UNRATE',
+      'FEDFUNDS', 'T10Y2Y' (yield curve), 'VIXCLS' (VIX), 'PAYEMS' (payrolls),
+      'UMCSENT' (sentiment), 'DGS10' (10Y yield).
+    limit: number of most recent observations (default 12).
+    sort_order: 'desc' (newest first) or 'asc'.
 
-    Use search_fred_series to find other series by keyword.
     Requires [fred] section in ~/.tradingrc.
     """
-    return _fred(ctx).get_series_observations(series_id, limit, sort_order)
+    req = fred.GetObservationsRequest(series_id, limit, sort_order)
+    return _fred(ctx).get(fred.OBSERVATIONS, req)
 
 
 @mcp.tool()
 def get_fred_series_info(ctx: Context, series_id: str) -> str:
-    """Get metadata for a FRED series: title, frequency, units, seasonal adjustment,
-    last updated date, and description.
+    """Get metadata for a FRED series: title, frequency, units, seasonal adjustment.
 
     series_id: FRED series ID (e.g. 'CPIAUCSL', 'GDP', 'VIXCLS').
-
     Requires [fred] section in ~/.tradingrc.
     """
-    return _fred(ctx).get_series_info(series_id)
+    return _fred(ctx).get(fred.SERIES_INFO, fred.SeriesIdRequest(series_id))
 
 
 @mcp.tool()
 def get_upcoming_economic_releases(ctx: Context, limit: int = 20) -> str:
-    """Get upcoming FRED data release dates: when the next CPI, GDP, jobs report,
-    and other economic data will be published.
+    """Get upcoming FRED data release dates: when CPI, GDP, jobs report will be published.
 
     limit: number of upcoming releases to return (default 20).
-
     Requires [fred] section in ~/.tradingrc.
     """
-    return _fred(ctx).get_upcoming_releases(limit)
+    return _fred(ctx).get(fred.RELEASES, fred.GetReleasesRequest(limit))
 
 
 @mcp.tool()
 def search_fred_series(ctx: Context, query: str, limit: int = 10) -> str:
-    """Search for FRED economic data series by keyword. Returns series ID, title,
-    frequency, units, and description for each match.
+    """Search for FRED economic data series by keyword.
 
     query: search terms (e.g. 'inflation', 'housing starts', 'consumer credit').
     limit: max results to return (default 10).
@@ -1121,7 +1051,7 @@ def search_fred_series(ctx: Context, query: str, limit: int = 10) -> str:
     Use the returned series_id with get_economic_data to fetch actual values.
     Requires [fred] section in ~/.tradingrc.
     """
-    return _fred(ctx).search_series(query, limit)
+    return _fred(ctx).get(fred.SEARCH, fred.SearchRequest(query, limit))
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1138,31 +1068,26 @@ def get_news_sentiment(
 ) -> str:
     """Get news articles with AI-generated sentiment scores per ticker.
 
-    Each article includes: title, summary, source, url, overall_sentiment_score (-1 to 1),
-    overall_sentiment_label (Bearish/Somewhat-Bearish/Neutral/Somewhat-Bullish/Bullish),
-    and per-ticker sentiment with relevance scores.
-
     tickers: comma-separated symbols to filter by (e.g. 'AAPL,TSLA'). Omit for broad news.
     topics: comma-separated topic filters — 'earnings', 'ipo', 'mergers_and_acquisitions',
-      'financial_markets', 'economy_fiscal', 'economy_monetary', 'economy_macro',
-      'energy_transportation', 'finance', 'technology', etc. Omit for all topics.
+      'financial_markets', 'technology', etc. Omit for all topics.
     limit: max articles to return (default 10, max 50).
 
-    Rate limit: 25 requests/day (shared across all Alpha Vantage tools). Use sparingly.
+    Rate limit: 25 requests/day. Use sparingly.
     Requires [alphavantage] section in ~/.tradingrc.
     """
-    return _alphavantage(ctx).get_news_sentiment(tickers, topics, limit=limit)
+    return _alphavantage(ctx).get(av.SENTIMENT, av.SentimentRequest(tickers, topics, limit=limit))
 
 
 @mcp.tool()
 def get_top_movers(ctx: Context) -> str:
     """Get today's top market movers: top 20 gainers, top 20 losers, and most actively
-    traded stocks. Each entry includes ticker, price, change amount, change %, and volume.
+    traded stocks.
 
-    Rate limit: 25 requests/day (shared across all Alpha Vantage tools). Use sparingly.
+    Rate limit: 25 requests/day. Use sparingly.
     Requires [alphavantage] section in ~/.tradingrc.
     """
-    return _alphavantage(ctx).get_top_gainers_losers()
+    return _alphavantage(ctx).get(av.MOVERS, av.MoversRequest())
 
 
 # ═══════════════════════════════════════════════════════════════
