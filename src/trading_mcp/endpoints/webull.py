@@ -182,8 +182,8 @@ class AccountBalanceResponse:
     day_pnl: str
     unrealized_pnl: str
     day_trades_left: str
-    cash_power: str
-    margin_power: str
+    buying_power: str
+    option_buying_power: str
     margin_ratio: str
     available_withdrawal: str
 
@@ -200,8 +200,8 @@ class AccountBalanceResponse:
             day_pnl=data.get("total_day_profit_loss", ""),
             unrealized_pnl=data.get("total_unrealized_profit_loss", ""),
             day_trades_left=data.get("day_trades_left", ""),
-            cash_power=usd.get("cash_power", ""),
-            margin_power=usd.get("margin_power", ""),
+            buying_power=usd.get("buying_power", ""),
+            option_buying_power=usd.get("option_buying_power", ""),
             margin_ratio=data.get("margin_ratio", ""),
             available_withdrawal=usd.get("available_withdrawal", ""),
         )
@@ -214,8 +214,8 @@ class AccountBalanceResponse:
             "Day P&L": fmt_number(self.day_pnl),
             "Unrealized P&L": fmt_number(self.unrealized_pnl),
             "Day Trades Left": self.day_trades_left,
-            "Cash Power": fmt_number(self.cash_power),
-            "Margin Power": fmt_number(self.margin_power),
+            "Buying Power": fmt_number(self.buying_power),
+            "Option Buying Power": fmt_number(self.option_buying_power),
             "Margin Ratio": self.margin_ratio,
             "Available Withdrawal": fmt_number(self.available_withdrawal),
         }
