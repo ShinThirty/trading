@@ -6,16 +6,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-MCP server for trading stocks and options on Webull, with integrated market analysis data from multiple providers. Exposes brokerage operations, option chains with greeks, fundamentals, news, economic data, and sentiment as MCP tools for use with Claude.
+uv workspace monorepo with three packages:
+
+1. **trading-clients** — Shared API clients and endpoint definitions for Webull, Tradier, Finnhub, FMP, FRED, and Alpha Vantage. Pure library — no server or Lambda dependencies.
+2. **trading-mcp** — MCP server that exposes brokerage operations, option chains, fundamentals, news, economic data, and sentiment as MCP tools. Depends on trading-clients + mcp[cli].
+3. **option-monitor** — AWS Lambda service that monitors ~19 short option positions across 5 Webull accounts, evaluates DTE-adjusted strike proximity thresholds, and sends Discord alerts. Depends on trading-clients + boto3 (no MCP dependency).
 
 ## Commands
 
 ```bash
-uv sync                        # Install/sync all dependencies
-uv run trading-mcp             # Start the MCP server (stdio transport)
-uv run ruff check src/         # Lint
-uv run ruff format src/        # Format
-uv run ty check src/           # Type check
+uv sync --all-packages             # Install/sync all workspace packages
+uv run trading-mcp                 # Start the MCP server (stdio transport)
+uv run ruff check packages/        # Lint all packages
+uv run ruff format packages/       # Format all packages
+uv run ty check packages/trading-clients/src/    # Type check trading-clients
+uv run ty check packages/trading-mcp/src/        # Type check trading-mcp
+uv run ty check packages/option-monitor/src/     # Type check option-monitor
+uv run python packages/option-monitor/scripts/invoke_local.py --skip-clock  # Test monitor locally
 ```
 
 To add to Claude Code: `claude mcp add trading-mcp -- uv run trading-mcp`
@@ -23,29 +30,59 @@ To add to Claude Code: `claude mcp add trading-mcp -- uv run trading-mcp`
 ## Architecture
 
 ```
-src/trading_mcp/
-├── endpoint.py              # Endpoint dataclass + BaseClient (get/post/put/delete)
-├── table_helpers.py         # Markdown table builders (md_table, kv_table, list_table, fmt_*)
-├── config.py                # Loads credentials from ~/.tradingrc (all providers)
-├── cache.py                 # In-memory TTL cache
-├── rate_limit.py            # Token bucket rate limiter
-├── endpoints/               # Typed request/response models + Endpoint definitions
-│   ├── webull.py            # 11 endpoints (account, orders, instruments)
-│   ├── tradier.py           # 19 endpoints (options, quotes, account, orders)
-│   ├── finnhub.py           # 11 endpoints (news, earnings, financials)
-│   ├── fmp.py               # 7 endpoints (financial statements, profiles)
-│   ├── fred.py              # 4 endpoints (economic data series)
-│   └── alphavantage.py      # 2 endpoints (sentiment, movers)
-├── webull_client.py         # HTTP transport: HMAC-SHA1 auth, token mgmt
-├── tradier_client.py        # HTTP transport: Bearer token auth
-├── finnhub_client.py        # HTTP transport: API key auth
-├── fmp_client.py            # HTTP transport: API key auth
-├── fred_client.py           # HTTP transport: API key auth
-├── alphavantage_client.py   # HTTP transport: API key auth
-└── server.py                # FastMCP server, tool registration, lifespan
+trading-mcp/                             # monorepo root (uv workspace)
+├── pyproject.toml                       # workspace definition + shared ruff config
+├── CLAUDE.md
+├── packages/
+│   ├── trading-clients/                 # shared API client library
+│   │   ├── pyproject.toml               # depends on: httpx[http2]
+│   │   └── src/trading_clients/
+│   │       ├── endpoint.py              # Endpoint dataclass + BaseClient (get/post/raw_get)
+│   │       ├── table_helpers.py         # Markdown table builders
+│   │       ├── config.py               # Loads credentials from ~/.tradingrc
+│   │       ├── cache.py                 # In-memory TTL cache
+│   │       ├── rate_limit.py            # Token bucket rate limiter
+│   │       ├── webull_client.py         # HMAC-SHA1 auth, token mgmt
+│   │       ├── tradier_client.py        # Bearer token auth
+│   │       ├── finnhub_client.py        # API key auth
+│   │       ├── fmp_client.py            # API key auth
+│   │       ├── fred_client.py           # API key auth
+│   │       ├── alphavantage_client.py   # API key auth
+│   │       └── endpoints/               # Typed request/response models + Endpoint defs
+│   │           ├── webull.py            # 11 endpoints (account, orders, instruments)
+│   │           ├── tradier.py           # 19 endpoints (options, quotes, account, orders)
+│   │           ├── finnhub.py           # 11 endpoints (news, earnings, financials)
+│   │           ├── fmp.py               # 7 endpoints (financial statements, profiles)
+│   │           ├── fred.py              # 4 endpoints (economic data series)
+│   │           └── alphavantage.py      # 2 endpoints (sentiment, movers)
+│   ├── trading-mcp/                     # MCP server (thin shell)
+│   │   ├── pyproject.toml               # depends on: trading-clients + mcp[cli]
+│   │   └── src/trading_mcp/
+│   │       └── server.py                # FastMCP server, tool registration, lifespan
+│   └── option-monitor/                  # Lambda monitoring service
+│       ├── pyproject.toml               # depends on: trading-clients + boto3
+│       ├── scripts/
+│       │   └── invoke_local.py          # Local testing with ~/.tradingrc
+│       └── src/option_monitor/
+│           ├── handler.py               # Lambda entry point
+│           ├── config.py                # MonitorConfig (Secrets Manager or ~/.tradingrc)
+│           ├── discord.py               # Webhook notifications with rich embeds
+│           └── monitor/
+│               ├── positions.py         # Parse Webull positions → ShortOptionLeg
+│               └── thresholds.py        # DTE-based proximity evaluation
+├── terraform/                           # AWS infrastructure (Phase 2)
+└── tests/                               # Test suite (Phase 2)
 ```
 
-### Data Flow
+### Dependency Graph
+
+```
+trading-clients (httpx[http2])
+  ├── trading-mcp (+ mcp[cli])
+  └── option-monitor (+ boto3)
+```
+
+### Data Flow — MCP Server
 
 ```
 MCP tool call (server.py)
@@ -56,6 +93,26 @@ MCP tool call (server.py)
     → BaseClient._decode() extracts + transforms via response model
   → returns markdown string to FastMCP
 ```
+
+### Data Flow — Option Monitor
+
+```
+EventBridge (cron, Mon-Fri 13:30-20:00 UTC)
+  → Lambda handler
+    → TradierClient.raw_get(CLOCK) — market open check
+    → WebullClient.raw_get(ACCOUNT_LIST) — discover accounts
+    → WebullClient.raw_get(POSITIONS) — short option legs per account
+    → TradierClient.raw_get(QUOTES) — batch underlying prices
+    → Threshold evaluation (DTE-adjusted proximity)
+    → Discord webhook (warning/critical embeds)
+```
+
+### BaseClient Methods
+
+- `get(endpoint, request) -> str` — returns markdown (MCP tools)
+- `raw_get(endpoint, request) -> Any` — returns extracted JSON (option-monitor)
+- `post/put/delete(endpoint, request) -> str` — returns markdown
+- `close()` — closes the underlying HTTP client
 
 ### Layered Design (inspired by Sarama)
 
@@ -106,6 +163,9 @@ api_key = <your_api_key>
 
 [alphavantage]
 api_key = <your_api_key>
+
+[discord]
+webhook_url = <discord_webhook_url_for_option_monitor>
 ```
 
 ## Webull API (v2)
@@ -123,24 +183,25 @@ All Webull endpoints use the v2 API (`x-version: v2` header). Stock and option o
 ## Conventions
 
 - All MCP tools are defined in `server.py` and delegate to `client.get/post(ENDPOINT, request)`
-- Each provider has its own client file (thin transport) and endpoint file (typed models)
+- Each provider has its own client file (thin transport) and endpoint file (typed models) in trading-clients
 - Client helper functions in server.py (`_webull()`, `_tradier()`, etc.) extract the client from lifespan context and raise a clear error if the provider isn't configured
+- Option-monitor uses `client.raw_get(ENDPOINT, request)` for raw JSON instead of markdown
 - Ruff rules: E, F, I (isort), UP (pyupgrade). Line length: 100.
 
 ### Adding a New API Provider
 
-1. **Config** (`config.py`): Add a frozen dataclass for the provider's credentials. Add it as an optional field on `AppConfig`. Parse it from `~/.tradingrc` in `load_config()`.
+1. **Config** (`trading-clients/config.py`): Add a frozen dataclass for the provider's credentials. Add it as an optional field on `AppConfig`. Parse it from `~/.tradingrc` in `load_config()`.
 
-2. **Endpoints** (`endpoints/newprovider.py`): Define for each endpoint:
+2. **Endpoints** (`trading-clients/endpoints/newprovider.py`): Define for each endpoint:
    - A **request model** (dataclass extending `ParamsRequest`, `BodyRequest`, and/or `PathRequest`)
    - A **response model** (dataclass with `from_response(data)` classmethod and `to_markdown()` method)
    - An **Endpoint** constant with path, cache_ttl, rate_key, response_model, and optional extract function
 
-3. **Client** (`newprovider_client.py`): Create a class extending `BaseClient` with:
+3. **Client** (`trading-clients/newprovider_client.py`): Create a class extending `BaseClient` with:
    - `__init__` taking the config, creating `httpx.Client`, `TTLCache`, `RateLimiter`
    - `_request()` method handling auth (API key in params/headers), caching, rate limiting
 
-4. **Server** (`server.py`):
+4. **Server** (`trading-mcp/server.py`):
    - Import endpoints and add `_newprovider(ctx)` helper
    - In `lifespan()`, create the client if config section exists
    - Add `@mcp.tool()` functions that create typed requests and call `client.get(ENDPOINT, request)`

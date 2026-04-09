@@ -3,14 +3,13 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
-
-from trading_mcp.alphavantage_client import AlphaVantageClient
-from trading_mcp.config import load_config
-from trading_mcp.endpoints import alphavantage as av
-from trading_mcp.endpoints import finnhub as fh
-from trading_mcp.endpoints import fmp, fred
-from trading_mcp.endpoints import tradier as t
-from trading_mcp.endpoints.webull import (
+from trading_clients.alphavantage_client import AlphaVantageClient
+from trading_clients.config import load_config
+from trading_clients.endpoints import alphavantage as av
+from trading_clients.endpoints import finnhub as fh
+from trading_clients.endpoints import fmp, fred
+from trading_clients.endpoints import tradier as t
+from trading_clients.endpoints.webull import (
     ACCOUNT_LIST,
     BALANCE,
     CANCEL_ORDER,
@@ -33,11 +32,11 @@ from trading_mcp.endpoints.webull import (
     PreviewOrderRequest,
     ReplaceOrderRequest,
 )
-from trading_mcp.finnhub_client import FinnhubClient
-from trading_mcp.fmp_client import FmpClient
-from trading_mcp.fred_client import FredClient
-from trading_mcp.tradier_client import TradierClient
-from trading_mcp.webull_client import WebullClient
+from trading_clients.finnhub_client import FinnhubClient
+from trading_clients.fmp_client import FmpClient
+from trading_clients.fred_client import FredClient
+from trading_clients.tradier_client import TradierClient
+from trading_clients.webull_client import WebullClient
 
 
 @asynccontextmanager
@@ -58,7 +57,7 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
         yield ctx
     finally:
         for client in ctx.values():
-            client._http.close()
+            client.close()
 
 
 mcp = FastMCP("trading-mcp", lifespan=lifespan)

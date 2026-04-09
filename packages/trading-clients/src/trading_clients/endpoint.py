@@ -80,6 +80,20 @@ class BaseClient(ABC):
     """Base class for API clients. Subclasses implement _request() with provider-specific
     auth, HTTP transport, caching, and rate limiting."""
 
+    _http: Any  # httpx.Client — declared here so close() works generically
+
+    def close(self) -> None:
+        """Close the underlying HTTP client."""
+        self._http.close()
+
+    def raw_get(self, endpoint: Endpoint, request: ParamsRequest) -> Any:
+        """Send a GET request and return extracted JSON data (no markdown conversion)."""
+        path = self._resolve_path(endpoint, request)
+        data = self._request("GET", endpoint, path=path, params=request.to_params())
+        if endpoint.extract:
+            data = endpoint.extract(data)
+        return data
+
     def get(self, endpoint: Endpoint, request: ParamsRequest) -> str:
         """Send a GET request and return the decoded markdown response."""
         path = self._resolve_path(endpoint, request)

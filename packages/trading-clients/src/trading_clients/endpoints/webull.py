@@ -3,8 +3,8 @@
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from trading_mcp.endpoint import BodyRequest, Endpoint, ParamsRequest
-from trading_mcp.table_helpers import fmt_number, kv_table, list_table
+from trading_clients.endpoint import BodyRequest, Endpoint, ParamsRequest
+from trading_clients.table_helpers import fmt_number, kv_table, list_table
 
 # ═══════════════════════════════════════════════════════════════
 # Request Models

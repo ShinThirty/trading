@@ -4,10 +4,10 @@ from typing import Any
 
 import httpx
 
-from trading_mcp.cache import TTLCache
-from trading_mcp.config import TradierConfig
-from trading_mcp.endpoint import BaseClient, Endpoint
-from trading_mcp.rate_limit import RateLimiter
+from trading_clients.cache import TTLCache
+from trading_clients.config import TradierConfig
+from trading_clients.endpoint import BaseClient, Endpoint
+from trading_clients.rate_limit import RateLimiter
 
 SANDBOX_HOST = "https://sandbox.tradier.com"
 PRODUCTION_HOST = "https://api.tradier.com"
@@ -88,7 +88,7 @@ class TradierClient(BaseClient):
 
     def get_clock(self) -> dict:
         """Return raw market clock data for _check_market in server.py."""
-        from trading_mcp.endpoints.tradier import CLOCK
+        from trading_clients.endpoints.tradier import CLOCK
 
         data = self._request("GET", CLOCK, path=CLOCK.path)
         extract = CLOCK.extract

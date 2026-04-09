@@ -1,23 +1,23 @@
-"""Finnhub API HTTP transport with API key authentication."""
+"""FRED API HTTP transport with API key authentication."""
 
 from typing import Any
 
 import httpx
 
-from trading_mcp.cache import TTLCache
-from trading_mcp.config import FinnhubConfig
-from trading_mcp.endpoint import BaseClient, Endpoint
-from trading_mcp.rate_limit import RateLimiter
+from trading_clients.cache import TTLCache
+from trading_clients.config import FredConfig
+from trading_clients.endpoint import BaseClient, Endpoint
+from trading_clients.rate_limit import RateLimiter
 
-BASE_URL = "https://finnhub.io/api/v1"
+BASE_URL = "https://api.stlouisfed.org/fred"
 
 RATE_LIMITS: dict[str, tuple[int, float]] = {
-    "default": (5, 1.0),  # 60 req/min — conservative burst
+    "default": (5, 2.0),  # 120 req/min — conservative burst
 }
 
 
-class FinnhubClient(BaseClient):
-    def __init__(self, config: FinnhubConfig) -> None:
+class FredClient(BaseClient):
+    def __init__(self, config: FredConfig) -> None:
         self._api_key = config.api_key
         self._http = httpx.Client(timeout=15)
         self._cache = TTLCache()
@@ -26,7 +26,7 @@ class FinnhubClient(BaseClient):
     def _cache_key(self, path: str, params: dict[str, str] | None) -> str:
         parts = [path]
         if params:
-            parts.extend(f"{k}={v}" for k, v in sorted(params.items()) if k != "token")
+            parts.extend(f"{k}={v}" for k, v in sorted(params.items()) if k != "api_key")
         return "&".join(parts)
 
     def _request(
@@ -40,7 +40,8 @@ class FinnhubClient(BaseClient):
         """Execute HTTP request with API key auth, caching, and rate limiting."""
         resolved = path or endpoint.path
         params = dict(params) if params else {}
-        params["token"] = self._api_key
+        params["api_key"] = self._api_key
+        params["file_type"] = "json"
 
         if method == "GET" and endpoint.cache_ttl > 0:
             key = self._cache_key(resolved, params)

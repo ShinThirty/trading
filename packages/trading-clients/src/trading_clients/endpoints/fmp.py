@@ -2,8 +2,8 @@
 
 from dataclasses import dataclass
 
-from trading_mcp.endpoint import Endpoint, ParamsRequest
-from trading_mcp.table_helpers import fmt_large, fmt_number, kv_table, list_table
+from trading_clients.endpoint import Endpoint, ParamsRequest
+from trading_clients.table_helpers import fmt_large, fmt_number, kv_table, list_table
 
 # ═══════════════════════════════════════════════════════════════
 # Request Models

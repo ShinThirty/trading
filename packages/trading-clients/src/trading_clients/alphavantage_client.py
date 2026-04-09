@@ -4,10 +4,10 @@ from typing import Any
 
 import httpx
 
-from trading_mcp.cache import TTLCache
-from trading_mcp.config import AlphaVantageConfig
-from trading_mcp.endpoint import BaseClient, Endpoint
-from trading_mcp.rate_limit import RateLimiter
+from trading_clients.cache import TTLCache
+from trading_clients.config import AlphaVantageConfig
+from trading_clients.endpoint import BaseClient, Endpoint
+from trading_clients.rate_limit import RateLimiter
 
 BASE_URL = "https://www.alphavantage.co/query"
 

@@ -12,10 +12,10 @@ from urllib.parse import quote
 
 import httpx
 
-from trading_mcp.cache import TTLCache
-from trading_mcp.config import WebullConfig, save_webull_token
-from trading_mcp.endpoint import BaseClient, Endpoint
-from trading_mcp.rate_limit import RateLimiter
+from trading_clients.cache import TTLCache
+from trading_clients.config import WebullConfig, save_webull_token
+from trading_clients.endpoint import BaseClient, Endpoint
+from trading_clients.rate_limit import RateLimiter
 
 API_HOST = "api.webull.com"
 
