@@ -16,6 +16,7 @@ class MonitorConfig:
     webull: WebullConfig
     tradier: TradierConfig
     discord_webhook_url: str
+    dynamodb_table: str | None = None  # None = in-memory store (local dev)
 
 
 def load_from_rc(path: Path = RC_PATH) -> MonitorConfig:
@@ -67,6 +68,7 @@ def load_from_secrets_manager(secret_name: str | None = None) -> MonitorConfig:
             sandbox=data.get("tradier_sandbox", "false").lower() == "true",
         ),
         discord_webhook_url=data["discord_webhook_url"],
+        dynamodb_table=os.environ.get("DYNAMODB_TABLE", "option-monitor-alerts"),
     )
 
 
