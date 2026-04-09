@@ -10,7 +10,7 @@ uv workspace monorepo with three packages:
 
 1. **trading-clients** — Shared API clients and endpoint definitions for Webull, Tradier, Finnhub, FMP, FRED, and Alpha Vantage. Pure library — no server or Lambda dependencies.
 2. **trading-mcp** — MCP server that exposes brokerage operations, option chains, fundamentals, news, economic data, and sentiment as MCP tools. Depends on trading-clients + mcp[cli].
-3. **option-monitor** — AWS Lambda service that monitors ~19 short option positions across 5 Webull accounts, evaluates DTE-adjusted strike proximity thresholds, and sends Discord alerts. Depends on trading-clients + boto3 (no MCP dependency).
+3. **option-monitor** — AWS Lambda service that monitors short option positions across Webull accounts, evaluates DTE-adjusted strike proximity thresholds, and sends Discord alerts. Depends on trading-clients + boto3 (no MCP dependency).
 
 ## Commands
 
