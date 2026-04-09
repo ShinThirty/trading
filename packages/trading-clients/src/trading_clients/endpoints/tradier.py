@@ -780,9 +780,7 @@ ORDERS = Endpoint(
     "/v1/accounts/{account_id}/orders",
     response_model=OrdersResponse,
     extract=lambda d: _ensure_list(
-        (d.get("orders") or {}).get("order", [])
-        if d.get("orders") not in ("null", None)
-        else []
+        (d.get("orders") or {}).get("order", []) if d.get("orders") not in ("null", None) else []
     ),
 )
 
@@ -806,9 +804,7 @@ ACCOUNT_HISTORY = Endpoint(
     "/v1/accounts/{account_id}/history",
     response_model=AccountHistoryResponse,
     extract=lambda d: _ensure_list(
-        (d.get("history") or {}).get("event", [])
-        if d.get("history") not in ("null", None)
-        else []
+        (d.get("history") or {}).get("event", []) if d.get("history") not in ("null", None) else []
     ),
 )
 

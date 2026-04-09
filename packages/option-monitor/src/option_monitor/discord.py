@@ -59,9 +59,7 @@ def send_alert(
         "title": title,
         "color": color,
         "fields": fields,
-        "footer": {
-            "text": f"{leg.symbol} {leg.strike:.0f}{leg.option_type[0]} {leg.expiration}"
-        },
+        "footer": {"text": f"{leg.symbol} {leg.strike:.0f}{leg.option_type[0]} {leg.expiration}"},
     }
 
     _post_webhook(webhook_url, {"embeds": [embed]})

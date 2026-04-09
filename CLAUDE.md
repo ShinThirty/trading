@@ -37,7 +37,7 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   ├── trading-clients/                 # shared API client library
 │   │   ├── pyproject.toml               # depends on: httpx[http2]
 │   │   └── src/trading_clients/
-│   │       ├── endpoint.py              # Endpoint dataclass + BaseClient (get/post/raw_get)
+│   │       ├── endpoint.py              # Endpoint dataclass + BaseClient (get/post/put/delete)
 │   │       ├── table_helpers.py         # Markdown table builders
 │   │       ├── config.py               # Loads credentials from ~/.tradingrc
 │   │       ├── cache.py                 # In-memory TTL cache
@@ -99,19 +99,18 @@ MCP tool call (server.py)
 ```
 EventBridge (cron, Mon-Fri 13:30-20:00 UTC)
   → Lambda handler
-    → TradierClient.raw_get(CLOCK) — market open check
-    → WebullClient.raw_get(ACCOUNT_LIST) — discover accounts
-    → WebullClient.raw_get(POSITIONS) — short option legs per account
-    → TradierClient.raw_get(QUOTES) — batch underlying prices
+    → TradierClient.get(CLOCK) — market open check
+    → WebullClient.get(ACCOUNT_LIST) — discover accounts
+    → WebullClient.get(POSITIONS) — short option legs per account
+    → TradierClient.get(QUOTES) — batch underlying prices
     → Threshold evaluation (DTE-adjusted proximity)
     → Discord webhook (warning/critical embeds)
 ```
 
 ### BaseClient Methods
 
-- `get(endpoint, request) -> str` — returns markdown (MCP tools)
-- `raw_get(endpoint, request) -> Any` — returns extracted JSON (option-monitor)
-- `post/put/delete(endpoint, request) -> str` — returns markdown
+- `get(endpoint, request) -> ResponseModel` — returns typed response model
+- `post/put/delete(endpoint, request) -> ResponseModel` — returns typed response model
 - `close()` — closes the underlying HTTP client
 
 ### Layered Design (inspired by Sarama)
@@ -185,7 +184,7 @@ All Webull endpoints use the v2 API (`x-version: v2` header). Stock and option o
 - All MCP tools are defined in `server.py` and delegate to `client.get/post(ENDPOINT, request)`
 - Each provider has its own client file (thin transport) and endpoint file (typed models) in trading-clients
 - Client helper functions in server.py (`_webull()`, `_tradier()`, etc.) extract the client from lifespan context and raise a clear error if the provider isn't configured
-- Option-monitor uses `client.raw_get(ENDPOINT, request)` for raw JSON instead of markdown
+- MCP server calls `.to_markdown()` on response models; option-monitor accesses typed fields directly
 - Ruff rules: E, F, I (isort), UP (pyupgrade). Line length: 100.
 
 ### Adding a New API Provider

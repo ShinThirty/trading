@@ -340,21 +340,15 @@ EARNINGS_CALENDAR = Endpoint(
     ],
 )
 
-BASIC_FINANCIALS = Endpoint(
-    "/stock/metric", cache_ttl=3600, response_model=BasicFinancialsResponse
-)
+BASIC_FINANCIALS = Endpoint("/stock/metric", cache_ttl=3600, response_model=BasicFinancialsResponse)
 
-EPS_ESTIMATES = Endpoint(
-    "/stock/eps-estimate", cache_ttl=3600, response_model=EpsEstimatesResponse
-)
+EPS_ESTIMATES = Endpoint("/stock/eps-estimate", cache_ttl=3600, response_model=EpsEstimatesResponse)
 
 RECOMMENDATIONS = Endpoint(
     "/stock/recommendation", cache_ttl=3600, response_model=RecommendationsResponse
 )
 
-PRICE_TARGET = Endpoint(
-    "/stock/price-target", cache_ttl=3600, response_model=PriceTargetResponse
-)
+PRICE_TARGET = Endpoint("/stock/price-target", cache_ttl=3600, response_model=PriceTargetResponse)
 
 INSIDER_TRANSACTIONS = Endpoint(
     "/stock/insider-transactions",

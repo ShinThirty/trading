@@ -9,6 +9,13 @@ members = ["packages/*"]
 [dependency-groups]
 dev = ["ruff", "ty"]
 
+[tool.ty.environment]
+extra-paths = [
+    "packages/trading-clients/src",
+    "packages/trading-mcp/src",
+    "packages/option-monitor/src",
+]
+
 [tool.ruff]
 target-version = "py312"
 line-length = 100

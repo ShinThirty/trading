@@ -2,7 +2,7 @@
 
 Each API endpoint is defined as an Endpoint with its path, caching, rate limiting,
 and response model. BaseClient provides get/post/put/delete methods that handle
-encoding requests, making HTTP calls, and decoding responses to markdown.
+encoding requests, making HTTP calls, and decoding typed responses.
 
 Request mixins define the three ways data is sent in HTTP:
   - PathRequest: URL path template params (e.g. /accounts/{account_id})
@@ -10,7 +10,6 @@ Request mixins define the three ways data is sent in HTTP:
   - BodyRequest: JSON or form-encoded request body
 """
 
-import json
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -86,34 +85,26 @@ class BaseClient(ABC):
         """Close the underlying HTTP client."""
         self._http.close()
 
-    def raw_get(self, endpoint: Endpoint, request: ParamsRequest) -> Any:
-        """Send a GET request and return extracted JSON data (no markdown conversion)."""
-        path = self._resolve_path(endpoint, request)
-        data = self._request("GET", endpoint, path=path, params=request.to_params())
-        if endpoint.extract:
-            data = endpoint.extract(data)
-        return data
-
-    def get(self, endpoint: Endpoint, request: ParamsRequest) -> str:
-        """Send a GET request and return the decoded markdown response."""
+    def get(self, endpoint: Endpoint, request: ParamsRequest) -> Any:
+        """Send a GET request and return the typed response model."""
         path = self._resolve_path(endpoint, request)
         data = self._request("GET", endpoint, path=path, params=request.to_params())
         return self._decode(endpoint, data)
 
-    def post(self, endpoint: Endpoint, request: BodyRequest) -> str:
-        """Send a POST request and return the decoded markdown response."""
+    def post(self, endpoint: Endpoint, request: BodyRequest) -> Any:
+        """Send a POST request and return the typed response model."""
         path = self._resolve_path(endpoint, request)
         data = self._request("POST", endpoint, path=path, body=request.to_body())
         return self._decode(endpoint, data)
 
-    def put(self, endpoint: Endpoint, request: BodyRequest) -> str:
-        """Send a PUT request and return the decoded markdown response."""
+    def put(self, endpoint: Endpoint, request: BodyRequest) -> Any:
+        """Send a PUT request and return the typed response model."""
         path = self._resolve_path(endpoint, request)
         data = self._request("PUT", endpoint, path=path, body=request.to_body())
         return self._decode(endpoint, data)
 
-    def delete(self, endpoint: Endpoint, request: ParamsRequest) -> str:
-        """Send a DELETE request and return the decoded markdown response."""
+    def delete(self, endpoint: Endpoint, request: ParamsRequest) -> Any:
+        """Send a DELETE request and return the typed response model."""
         path = self._resolve_path(endpoint, request)
         data = self._request("DELETE", endpoint, path=path, params=request.to_params())
         return self._decode(endpoint, data)
@@ -126,13 +117,13 @@ class BaseClient(ABC):
             path = path.format_map(request.to_path_params())
         return path
 
-    def _decode(self, endpoint: Endpoint, data: Any) -> str:
-        """Extract and transform raw API response to markdown."""
+    def _decode(self, endpoint: Endpoint, data: Any) -> Any:
+        """Extract raw response and convert to typed response model."""
         if endpoint.extract:
             data = endpoint.extract(data)
         if endpoint.response_model:
-            return endpoint.response_model.from_response(data).to_markdown()
-        return json.dumps(data, indent=2, default=str)
+            return endpoint.response_model.from_response(data)
+        return data
 
     @abstractmethod
     def _request(

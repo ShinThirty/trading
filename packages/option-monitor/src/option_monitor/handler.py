@@ -62,15 +62,15 @@ def handler(event: Any, context: Any) -> dict:
 
     try:
         # Check if market is open
-        clock = tradier.raw_get(CLOCK, TradierEmptyRequest())
-        market_state = clock.get("state", "closed")
+        clock = tradier.get(CLOCK, TradierEmptyRequest())
+        market_state = clock.data.get("state", "closed")
         if market_state != "open":
             logger.info("Market is %s, skipping", market_state)
             return {"status": "market_closed", "state": market_state}
 
         # Discover all accounts and fetch positions from each
-        accounts = webull.raw_get(ACCOUNT_LIST, WebullEmptyRequest())
-        if not isinstance(accounts, list) or not accounts:
+        accounts = webull.get(ACCOUNT_LIST, WebullEmptyRequest()).accounts
+        if not accounts:
             logger.warning("No Webull accounts found")
             return {"status": "no_accounts"}
 
@@ -79,14 +79,10 @@ def handler(event: Any, context: Any) -> dict:
             time.sleep(2)  # respect Webull rate limit (2 req/2s for account endpoints)
             acct_id = acct.get("account_id", "")
             acct_label = acct.get("account_label", acct.get("account_type", ""))
-            positions = webull.raw_get(POSITIONS, AccountRequest(account_id=acct_id))
-            if not isinstance(positions, list):
-                positions = []
+            positions = webull.get(POSITIONS, AccountRequest(account_id=acct_id)).positions
             acct_legs = extract_short_legs(positions, acct_id, acct_label)
             legs.extend(acct_legs)
-            logger.info(
-                "Account %s (%s): %d short legs", acct_id[-4:], acct_label, len(acct_legs)
-            )
+            logger.info("Account %s (%s): %d short legs", acct_id[-4:], acct_label, len(acct_legs))
 
         if not legs:
             logger.info("No short option legs found across %d accounts", len(accounts))
@@ -94,9 +90,7 @@ def handler(event: Any, context: Any) -> dict:
 
         # Batch fetch underlying quotes
         symbols = list({leg.symbol for leg in legs})
-        quotes = tradier.raw_get(QUOTES, GetQuotesRequest(symbols=",".join(symbols)))
-        if not isinstance(quotes, list):
-            quotes = []
+        quotes = tradier.get(QUOTES, GetQuotesRequest(symbols=",".join(symbols))).quotes
         price_map = {q["symbol"]: q["last"] for q in quotes if q.get("last") is not None}
 
         notifications = 0

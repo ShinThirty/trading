@@ -24,19 +24,19 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.skip_clock:
-        # Monkey-patch raw_get to return open clock for the CLOCK endpoint
+        # Monkey-patch get to return open clock for the CLOCK endpoint
         from trading_clients.tradier_client import TradierClient
 
-        original_raw_get = TradierClient.raw_get
+        original_get = TradierClient.get
 
-        def patched_raw_get(self, endpoint, request):
-            from trading_clients.endpoints.tradier import CLOCK
+        def patched_get(self, endpoint, request):
+            from trading_clients.endpoints.tradier import CLOCK, ClockResponse
 
             if endpoint is CLOCK:
-                return {"state": "open"}
-            return original_raw_get(self, endpoint, request)
+                return ClockResponse(data={"state": "open"})
+            return original_get(self, endpoint, request)
 
-        TradierClient.raw_get = patched_raw_get
+        TradierClient.get = patched_get
 
     from option_monitor.handler import handler
 

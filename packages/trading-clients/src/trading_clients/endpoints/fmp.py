@@ -243,9 +243,7 @@ BALANCE_SHEET = Endpoint(
     "/balance-sheet-statement", cache_ttl=3600, response_model=BalanceSheetResponse
 )
 
-CASH_FLOW = Endpoint(
-    "/cash-flow-statement", cache_ttl=3600, response_model=CashFlowResponse
-)
+CASH_FLOW = Endpoint("/cash-flow-statement", cache_ttl=3600, response_model=CashFlowResponse)
 
 KEY_METRICS = Endpoint("/key-metrics", cache_ttl=3600, response_model=KeyMetricsResponse)
 

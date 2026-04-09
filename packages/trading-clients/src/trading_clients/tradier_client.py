@@ -85,11 +85,3 @@ class TradierClient(BaseClient):
             self._cache.put(key, data)  # type: ignore[possibly-unbound]
 
         return data
-
-    def get_clock(self) -> dict:
-        """Return raw market clock data for _check_market in server.py."""
-        from trading_clients.endpoints.tradier import CLOCK
-
-        data = self._request("GET", CLOCK, path=CLOCK.path)
-        extract = CLOCK.extract
-        return extract(data) if extract else data

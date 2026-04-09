@@ -112,7 +112,8 @@ def _check_market(ctx: Context, order_type: str, extended_hours: bool) -> None:
     tradier = ctx.request_context.lifespan_context.get("tradier")
     if tradier is None:
         return  # skip check if Tradier not configured
-    state = tradier.get_clock().get("state", "closed")
+    clock = tradier.get(t.CLOCK, t.EmptyRequest())
+    state = clock.data.get("state", "closed")
     if order_type == "MARKET" and state != "open" and not extended_hours:
         raise RuntimeError(
             f"MARKET orders require regular hours (state: {state}). "
@@ -135,7 +136,7 @@ def get_account_balance(ctx: Context, account_id: str | None = None) -> str:
     account_id: Webull account ID. Omit to use the default from ~/.tradingrc.
     """
     client = _webull(ctx)
-    return client.get(BALANCE, AccountRequest(client.resolve_account_id(account_id)))
+    return client.get(BALANCE, AccountRequest(client.resolve_account_id(account_id))).to_markdown()
 
 
 @mcp.tool()
@@ -147,7 +148,9 @@ def get_account_positions(ctx: Context, account_id: str | None = None) -> str:
     account_id: Webull account ID. Omit to use the default from ~/.tradingrc.
     """
     client = _webull(ctx)
-    return client.get(POSITIONS, AccountRequest(client.resolve_account_id(account_id)))
+    return client.get(
+        POSITIONS, AccountRequest(client.resolve_account_id(account_id))
+    ).to_markdown()
 
 
 # ── Orders ───────────────────────────────────────────────────
@@ -165,7 +168,7 @@ def get_open_orders(ctx: Context, page_size: int = 50, account_id: str | None = 
     return client.get(
         OPEN_ORDERS,
         GetOpenOrdersRequest(client.resolve_account_id(account_id), page_size),
-    )
+    ).to_markdown()
 
 
 @mcp.tool()
@@ -188,7 +191,7 @@ def get_today_orders(
         GetOrderHistoryRequest(
             client.resolve_account_id(account_id), page_size, start_date, end_date
         ),
-    )
+    ).to_markdown()
 
 
 @mcp.tool()
@@ -204,7 +207,7 @@ def get_order_detail(ctx: Context, client_order_id: str, account_id: str | None 
     return client.get(
         ORDER_DETAIL,
         GetOrderDetailRequest(client.resolve_account_id(account_id), client_order_id),
-    )
+    ).to_markdown()
 
 
 # ── Order Management (unified for stocks + options) ─────────
@@ -241,10 +244,8 @@ def preview_order(ctx: Context, new_orders: list[dict], account_id: str | None =
     """
     client = _webull(ctx)
     # Preview uses the same request structure as place_order but via preview endpoint
-    req = PreviewOrderRequest(
-        account_id=client.resolve_account_id(account_id), **new_orders[0]
-    )
-    return client.post(PREVIEW_ORDER, req)
+    req = PreviewOrderRequest(account_id=client.resolve_account_id(account_id), **new_orders[0])
+    return client.post(PREVIEW_ORDER, req).to_markdown()
 
 
 @mcp.tool()
@@ -311,7 +312,7 @@ def place_order(
         position_intent=position_intent,
         legs=legs,
     )
-    return client.post(PLACE_ORDER, req)
+    return client.post(PLACE_ORDER, req).to_markdown()
 
 
 @mcp.tool()
@@ -349,7 +350,7 @@ def replace_order(
         trailing_type=trailing_type,
         trailing_stop_step=trailing_stop_step,
     )
-    return client.post(REPLACE_ORDER, req)
+    return client.post(REPLACE_ORDER, req).to_markdown()
 
 
 @mcp.tool()
@@ -362,7 +363,7 @@ def cancel_order(ctx: Context, client_order_id: str, account_id: str | None = No
     """
     client = _webull(ctx)
     req = CancelOrderRequest(client.resolve_account_id(account_id), client_order_id)
-    return client.post(CANCEL_ORDER, req)
+    return client.post(CANCEL_ORDER, req).to_markdown()
 
 
 @mcp.tool()
@@ -370,7 +371,7 @@ def get_app_subscriptions(ctx: Context) -> str:
     """Get all Webull accounts linked to this API key: account ID, account number,
     type (MARGIN/CASH), and label (Individual Cash, Roth IRA, etc.).
     """
-    return _webull(ctx).get(ACCOUNT_LIST, EmptyRequest())
+    return _webull(ctx).get(ACCOUNT_LIST, EmptyRequest()).to_markdown()
 
 
 # ── Webull Market Data ──────────────────────────────────────
@@ -384,8 +385,7 @@ def get_instruments(ctx: Context, symbols: str, category: str = "US_STOCK") -> s
     symbols: comma-separated ticker symbols (e.g. 'AAPL,TSLA'). Max 100.
     category: 'US_STOCK' (default) or 'US_ETF'.
     """
-    return _webull(ctx).get(INSTRUMENTS, GetInstrumentsRequest(symbols, category))
-
+    return _webull(ctx).get(INSTRUMENTS, GetInstrumentsRequest(symbols, category)).to_markdown()
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -404,7 +404,7 @@ def get_option_expirations(ctx: Context, symbol: str) -> str:
 
     Requires [tradier] section in ~/.tradingrc.
     """
-    return _tradier(ctx).get(t.EXPIRATIONS, t.GetExpirationsRequest(symbol))
+    return _tradier(ctx).get(t.EXPIRATIONS, t.GetExpirationsRequest(symbol)).to_markdown()
 
 
 @mcp.tool()
@@ -417,7 +417,7 @@ def get_option_strikes(ctx: Context, symbol: str, expiration: str) -> str:
 
     Requires [tradier] section in ~/.tradingrc.
     """
-    return _tradier(ctx).get(t.STRIKES, t.GetStrikesRequest(symbol, expiration))
+    return _tradier(ctx).get(t.STRIKES, t.GetStrikesRequest(symbol, expiration)).to_markdown()
 
 
 @mcp.tool()
@@ -442,7 +442,7 @@ def get_option_chain(
 
     Requires [tradier] section in ~/.tradingrc.
     """
-    return _tradier(ctx).get(t.CHAIN, t.GetChainRequest(symbol, expiration, greeks))
+    return _tradier(ctx).get(t.CHAIN, t.GetChainRequest(symbol, expiration, greeks)).to_markdown()
 
 
 @mcp.tool()
@@ -456,7 +456,7 @@ def get_option_lookup(ctx: Context, underlying: str) -> str:
 
     Requires [tradier] section in ~/.tradingrc.
     """
-    return _tradier(ctx).get(t.OPTION_LOOKUP, t.GetLookupRequest(underlying))
+    return _tradier(ctx).get(t.OPTION_LOOKUP, t.GetLookupRequest(underlying)).to_markdown()
 
 
 @mcp.tool()
@@ -479,7 +479,11 @@ def get_tradier_history(
 
     Requires [tradier] section in ~/.tradingrc.
     """
-    return _tradier(ctx).get(t.HISTORY, t.GetHistoryRequest(symbol, interval, start, end))
+    return (
+        _tradier(ctx)
+        .get(t.HISTORY, t.GetHistoryRequest(symbol, interval, start, end))
+        .to_markdown()
+    )
 
 
 @mcp.tool()
@@ -492,7 +496,7 @@ def search_symbols(ctx: Context, query: str, indexes: bool = False) -> str:
 
     Requires [tradier] section in ~/.tradingrc.
     """
-    return _tradier(ctx).get(t.SEARCH, t.SearchRequest(query, indexes))
+    return _tradier(ctx).get(t.SEARCH, t.SearchRequest(query, indexes)).to_markdown()
 
 
 @mcp.tool()
@@ -514,7 +518,7 @@ def get_quote(ctx: Context, symbols: str, greeks: bool = False) -> str:
 
     Requires [tradier] section in ~/.tradingrc.
     """
-    return _tradier(ctx).get(t.QUOTES, t.GetQuotesRequest(symbols, greeks))
+    return _tradier(ctx).get(t.QUOTES, t.GetQuotesRequest(symbols, greeks)).to_markdown()
 
 
 @mcp.tool()
@@ -537,7 +541,11 @@ def get_timesales(
 
     Requires [tradier] section in ~/.tradingrc.
     """
-    return _tradier(ctx).get(t.TIMESALES, t.GetTimesalesRequest(symbol, interval, start, end))
+    return (
+        _tradier(ctx)
+        .get(t.TIMESALES, t.GetTimesalesRequest(symbol, interval, start, end))
+        .to_markdown()
+    )
 
 
 @mcp.tool()
@@ -547,7 +555,7 @@ def get_market_clock(ctx: Context) -> str:
 
     Requires [tradier] section in ~/.tradingrc.
     """
-    return _tradier(ctx).get(t.CLOCK, t.EmptyRequest())
+    return _tradier(ctx).get(t.CLOCK, t.EmptyRequest()).to_markdown()
 
 
 # ── Tradier Account ─────────────────────────────────────────
@@ -561,7 +569,7 @@ def get_tradier_profile(ctx: Context) -> str:
     Use this to find your Tradier account_id.
     Requires [tradier] section in ~/.tradingrc.
     """
-    return _tradier(ctx).get(t.PROFILE, t.EmptyRequest())
+    return _tradier(ctx).get(t.PROFILE, t.EmptyRequest()).to_markdown()
 
 
 @mcp.tool()
@@ -573,7 +581,9 @@ def get_tradier_balances(ctx: Context, account_id: str | None = None) -> str:
     Requires [tradier] section in ~/.tradingrc.
     """
     client = _tradier(ctx)
-    return client.get(t.BALANCES, t.AccountIdRequest(client.resolve_account_id(account_id)))
+    return client.get(
+        t.BALANCES, t.AccountIdRequest(client.resolve_account_id(account_id))
+    ).to_markdown()
 
 
 @mcp.tool()
@@ -585,7 +595,9 @@ def get_tradier_positions(ctx: Context, account_id: str | None = None) -> str:
     Requires [tradier] section in ~/.tradingrc.
     """
     client = _tradier(ctx)
-    return client.get(t.POSITIONS, t.AccountIdRequest(client.resolve_account_id(account_id)))
+    return client.get(
+        t.POSITIONS, t.AccountIdRequest(client.resolve_account_id(account_id))
+    ).to_markdown()
 
 
 @mcp.tool()
@@ -609,7 +621,7 @@ def get_tradier_orders(
     return client.get(
         t.ORDERS,
         t.GetOrdersRequest(client.resolve_account_id(account_id), status, page, limit),
-    )
+    ).to_markdown()
 
 
 @mcp.tool()
@@ -624,7 +636,7 @@ def get_tradier_order_detail(ctx: Context, order_id: str, account_id: str | None
     return client.get(
         t.ORDER_DETAIL,
         t.GetOrderDetailRequest(client.resolve_account_id(account_id), order_id),
-    )
+    ).to_markdown()
 
 
 @mcp.tool()
@@ -650,7 +662,7 @@ def get_tradier_gainloss(
     return client.get(
         t.GAINLOSS,
         t.GetGainLossRequest(client.resolve_account_id(account_id), page, limit, sort_by, sort),
-    )
+    ).to_markdown()
 
 
 @mcp.tool()
@@ -674,7 +686,7 @@ def get_tradier_account_history(
         t.GetAccountHistoryRequest(
             client.resolve_account_id(account_id), page, limit, activity_type
         ),
-    )
+    ).to_markdown()
 
 
 # ── Tradier Order Management ───────────────────────────────
@@ -719,7 +731,7 @@ def place_tradier_order(ctx: Context, order_params: dict, account_id: str | None
     return client.post(
         t.PLACE_ORDER,
         t.PlaceOrderRequest(client.resolve_account_id(account_id), params),
-    )
+    ).to_markdown()
 
 
 @mcp.tool()
@@ -741,7 +753,7 @@ def modify_tradier_order(
     return client.put(
         t.MODIFY_ORDER,
         t.ModifyOrderRequest(client.resolve_account_id(account_id), order_id, params),
-    )
+    ).to_markdown()
 
 
 @mcp.tool()
@@ -755,7 +767,7 @@ def cancel_tradier_order(ctx: Context, order_id: str, account_id: str | None = N
     return client.delete(
         t.CANCEL_ORDER,
         t.CancelOrderRequest(client.resolve_account_id(account_id), order_id),
-    )
+    ).to_markdown()
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -776,7 +788,11 @@ def get_company_news(
 
     Requires [finnhub] section in ~/.tradingrc.
     """
-    return _finnhub(ctx).get(fh.COMPANY_NEWS, fh.CompanyNewsRequest(symbol, from_date, to_date))
+    return (
+        _finnhub(ctx)
+        .get(fh.COMPANY_NEWS, fh.CompanyNewsRequest(symbol, from_date, to_date))
+        .to_markdown()
+    )
 
 
 @mcp.tool()
@@ -788,7 +804,7 @@ def get_market_news(ctx: Context, category: str = "general", limit: int = 20) ->
 
     Requires [finnhub] section in ~/.tradingrc.
     """
-    return _finnhub(ctx).get(fh.MARKET_NEWS, fh.MarketNewsRequest(category))
+    return _finnhub(ctx).get(fh.MARKET_NEWS, fh.MarketNewsRequest(category)).to_markdown()
 
 
 @mcp.tool()
@@ -801,7 +817,11 @@ def get_economic_calendar(ctx: Context, from_date: str, to_date: str) -> str:
     Note: requires Finnhub premium plan. Free tier returns 403.
     Requires [finnhub] section in ~/.tradingrc.
     """
-    return _finnhub(ctx).get(fh.ECONOMIC_CALENDAR, fh.DateRangeRequest(from_date, to_date))
+    return (
+        _finnhub(ctx)
+        .get(fh.ECONOMIC_CALENDAR, fh.DateRangeRequest(from_date, to_date))
+        .to_markdown()
+    )
 
 
 @mcp.tool()
@@ -814,7 +834,11 @@ def get_earnings_calendar(ctx: Context, from_date: str, to_date: str, limit: int
 
     Requires [finnhub] section in ~/.tradingrc.
     """
-    return _finnhub(ctx).get(fh.EARNINGS_CALENDAR, fh.DateRangeRequest(from_date, to_date))
+    return (
+        _finnhub(ctx)
+        .get(fh.EARNINGS_CALENDAR, fh.DateRangeRequest(from_date, to_date))
+        .to_markdown()
+    )
 
 
 @mcp.tool()
@@ -826,7 +850,7 @@ def get_basic_financials(ctx: Context, symbol: str) -> str:
 
     Requires [finnhub] section in ~/.tradingrc.
     """
-    return _finnhub(ctx).get(fh.BASIC_FINANCIALS, fh.BasicFinancialsRequest(symbol))
+    return _finnhub(ctx).get(fh.BASIC_FINANCIALS, fh.BasicFinancialsRequest(symbol)).to_markdown()
 
 
 @mcp.tool()
@@ -839,7 +863,7 @@ def get_eps_estimates(ctx: Context, symbol: str) -> str:
     Note: requires Finnhub premium plan. Free tier returns 403.
     Requires [finnhub] section in ~/.tradingrc.
     """
-    return _finnhub(ctx).get(fh.EPS_ESTIMATES, fh.SymbolRequest(symbol))
+    return _finnhub(ctx).get(fh.EPS_ESTIMATES, fh.SymbolRequest(symbol)).to_markdown()
 
 
 @mcp.tool()
@@ -851,7 +875,7 @@ def get_recommendation_trends(ctx: Context, symbol: str) -> str:
 
     Requires [finnhub] section in ~/.tradingrc.
     """
-    return _finnhub(ctx).get(fh.RECOMMENDATIONS, fh.SymbolRequest(symbol))
+    return _finnhub(ctx).get(fh.RECOMMENDATIONS, fh.SymbolRequest(symbol)).to_markdown()
 
 
 @mcp.tool()
@@ -863,7 +887,7 @@ def get_price_target(ctx: Context, symbol: str) -> str:
     Note: requires Finnhub premium plan. Free tier returns 403.
     Requires [finnhub] section in ~/.tradingrc.
     """
-    return _finnhub(ctx).get(fh.PRICE_TARGET, fh.SymbolRequest(symbol))
+    return _finnhub(ctx).get(fh.PRICE_TARGET, fh.SymbolRequest(symbol)).to_markdown()
 
 
 @mcp.tool()
@@ -876,7 +900,7 @@ def get_insider_transactions(ctx: Context, symbol: str, limit: int = 20) -> str:
 
     Requires [finnhub] section in ~/.tradingrc.
     """
-    return _finnhub(ctx).get(fh.INSIDER_TRANSACTIONS, fh.SymbolRequest(symbol))
+    return _finnhub(ctx).get(fh.INSIDER_TRANSACTIONS, fh.SymbolRequest(symbol)).to_markdown()
 
 
 @mcp.tool()
@@ -890,7 +914,11 @@ def get_dividends(ctx: Context, symbol: str, from_date: str, to_date: str) -> st
     Note: requires Finnhub premium plan. Use get_dividend_history (FMP) as free alternative.
     Requires [finnhub] section in ~/.tradingrc.
     """
-    return _finnhub(ctx).get(fh.DIVIDENDS, fh.DividendsRequest(symbol, from_date, to_date))
+    return (
+        _finnhub(ctx)
+        .get(fh.DIVIDENDS, fh.DividendsRequest(symbol, from_date, to_date))
+        .to_markdown()
+    )
 
 
 @mcp.tool()
@@ -901,7 +929,7 @@ def get_company_peers(ctx: Context, symbol: str) -> str:
 
     Requires [finnhub] section in ~/.tradingrc.
     """
-    return _finnhub(ctx).get(fh.PEERS, fh.SymbolRequest(symbol))
+    return _finnhub(ctx).get(fh.PEERS, fh.SymbolRequest(symbol)).to_markdown()
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -917,13 +945,11 @@ def get_company_profile(ctx: Context, symbol: str) -> str:
     symbol: ticker symbol (e.g. 'AAPL').
     Requires [fmp] section in ~/.tradingrc.
     """
-    return _fmp(ctx).get(fmp.PROFILE, fmp.SymbolRequest(symbol))
+    return _fmp(ctx).get(fmp.PROFILE, fmp.SymbolRequest(symbol)).to_markdown()
 
 
 @mcp.tool()
-def get_income_statement(
-    ctx: Context, symbol: str, period: str = "annual", limit: int = 4
-) -> str:
+def get_income_statement(ctx: Context, symbol: str, period: str = "annual", limit: int = 4) -> str:
     """Get income statement: revenue, gross profit, operating income, net income, EPS, EBITDA.
 
     symbol: ticker symbol (e.g. 'AAPL').
@@ -931,13 +957,15 @@ def get_income_statement(
     limit: number of periods to return (default 4).
     Requires [fmp] section in ~/.tradingrc.
     """
-    return _fmp(ctx).get(fmp.INCOME_STATEMENT, fmp.FinancialRequest(symbol, period, limit))
+    return (
+        _fmp(ctx)
+        .get(fmp.INCOME_STATEMENT, fmp.FinancialRequest(symbol, period, limit))
+        .to_markdown()
+    )
 
 
 @mcp.tool()
-def get_balance_sheet(
-    ctx: Context, symbol: str, period: str = "annual", limit: int = 4
-) -> str:
+def get_balance_sheet(ctx: Context, symbol: str, period: str = "annual", limit: int = 4) -> str:
     """Get balance sheet: total assets, liabilities, equity, cash, debt.
 
     symbol: ticker symbol (e.g. 'AAPL').
@@ -945,13 +973,13 @@ def get_balance_sheet(
     limit: number of periods to return (default 4).
     Requires [fmp] section in ~/.tradingrc.
     """
-    return _fmp(ctx).get(fmp.BALANCE_SHEET, fmp.FinancialRequest(symbol, period, limit))
+    return (
+        _fmp(ctx).get(fmp.BALANCE_SHEET, fmp.FinancialRequest(symbol, period, limit)).to_markdown()
+    )
 
 
 @mcp.tool()
-def get_cash_flow(
-    ctx: Context, symbol: str, period: str = "annual", limit: int = 4
-) -> str:
+def get_cash_flow(ctx: Context, symbol: str, period: str = "annual", limit: int = 4) -> str:
     """Get cash flow statement: operating cash flow, capex, free cash flow, dividends, buybacks.
 
     symbol: ticker symbol (e.g. 'AAPL').
@@ -959,13 +987,11 @@ def get_cash_flow(
     limit: number of periods to return (default 4).
     Requires [fmp] section in ~/.tradingrc.
     """
-    return _fmp(ctx).get(fmp.CASH_FLOW, fmp.FinancialRequest(symbol, period, limit))
+    return _fmp(ctx).get(fmp.CASH_FLOW, fmp.FinancialRequest(symbol, period, limit)).to_markdown()
 
 
 @mcp.tool()
-def get_key_metrics(
-    ctx: Context, symbol: str, period: str = "annual", limit: int = 4
-) -> str:
+def get_key_metrics(ctx: Context, symbol: str, period: str = "annual", limit: int = 4) -> str:
     """Get key financial metrics: EV/EBITDA, ROE, ROA, current ratio, debt/equity, FCF yield.
 
     symbol: ticker symbol (e.g. 'AAPL').
@@ -973,7 +999,7 @@ def get_key_metrics(
     limit: number of periods to return (default 4).
     Requires [fmp] section in ~/.tradingrc.
     """
-    return _fmp(ctx).get(fmp.KEY_METRICS, fmp.FinancialRequest(symbol, period, limit))
+    return _fmp(ctx).get(fmp.KEY_METRICS, fmp.FinancialRequest(symbol, period, limit)).to_markdown()
 
 
 @mcp.tool()
@@ -983,7 +1009,7 @@ def get_dividend_history(ctx: Context, symbol: str) -> str:
     symbol: ticker symbol (e.g. 'AAPL').
     Requires [fmp] section in ~/.tradingrc.
     """
-    return _fmp(ctx).get(fmp.DIVIDEND_HISTORY, fmp.SymbolRequest(symbol))
+    return _fmp(ctx).get(fmp.DIVIDEND_HISTORY, fmp.SymbolRequest(symbol)).to_markdown()
 
 
 @mcp.tool()
@@ -994,7 +1020,7 @@ def get_fmp_earnings_calendar(ctx: Context, symbol: str, limit: int = 5) -> str:
     limit: number of recent earnings to return (default 5).
     Requires [fmp] section in ~/.tradingrc.
     """
-    return _fmp(ctx).get(fmp.EARNINGS, fmp.EarningsRequest(symbol, limit))
+    return _fmp(ctx).get(fmp.EARNINGS, fmp.EarningsRequest(symbol, limit)).to_markdown()
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1017,7 +1043,7 @@ def get_economic_data(
     Requires [fred] section in ~/.tradingrc.
     """
     req = fred.GetObservationsRequest(series_id, limit, sort_order)
-    return _fred(ctx).get(fred.OBSERVATIONS, req)
+    return _fred(ctx).get(fred.OBSERVATIONS, req).to_markdown()
 
 
 @mcp.tool()
@@ -1027,7 +1053,7 @@ def get_fred_series_info(ctx: Context, series_id: str) -> str:
     series_id: FRED series ID (e.g. 'CPIAUCSL', 'GDP', 'VIXCLS').
     Requires [fred] section in ~/.tradingrc.
     """
-    return _fred(ctx).get(fred.SERIES_INFO, fred.SeriesIdRequest(series_id))
+    return _fred(ctx).get(fred.SERIES_INFO, fred.SeriesIdRequest(series_id)).to_markdown()
 
 
 @mcp.tool()
@@ -1037,7 +1063,7 @@ def get_upcoming_economic_releases(ctx: Context, limit: int = 20) -> str:
     limit: number of upcoming releases to return (default 20).
     Requires [fred] section in ~/.tradingrc.
     """
-    return _fred(ctx).get(fred.RELEASES, fred.GetReleasesRequest(limit))
+    return _fred(ctx).get(fred.RELEASES, fred.GetReleasesRequest(limit)).to_markdown()
 
 
 @mcp.tool()
@@ -1050,7 +1076,7 @@ def search_fred_series(ctx: Context, query: str, limit: int = 10) -> str:
     Use the returned series_id with get_economic_data to fetch actual values.
     Requires [fred] section in ~/.tradingrc.
     """
-    return _fred(ctx).get(fred.SEARCH, fred.SearchRequest(query, limit))
+    return _fred(ctx).get(fred.SEARCH, fred.SearchRequest(query, limit)).to_markdown()
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1075,7 +1101,11 @@ def get_news_sentiment(
     Rate limit: 25 requests/day. Use sparingly.
     Requires [alphavantage] section in ~/.tradingrc.
     """
-    return _alphavantage(ctx).get(av.SENTIMENT, av.SentimentRequest(tickers, topics, limit=limit))
+    return (
+        _alphavantage(ctx)
+        .get(av.SENTIMENT, av.SentimentRequest(tickers, topics, limit=limit))
+        .to_markdown()
+    )
 
 
 @mcp.tool()
@@ -1086,7 +1116,7 @@ def get_top_movers(ctx: Context) -> str:
     Rate limit: 25 requests/day. Use sparingly.
     Requires [alphavantage] section in ~/.tradingrc.
     """
-    return _alphavantage(ctx).get(av.MOVERS, av.MoversRequest())
+    return _alphavantage(ctx).get(av.MOVERS, av.MoversRequest()).to_markdown()
 
 
 # ═══════════════════════════════════════════════════════════════
