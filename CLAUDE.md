@@ -16,7 +16,7 @@ uv workspace monorepo with three packages:
 
 ```bash
 uv sync --all-packages             # Install/sync all workspace packages
-uv run trading-mcp                 # Start the MCP server (stdio transport)
+uv run --package trading-mcp trading-mcp  # Start the MCP server (stdio transport)
 uv run ruff check packages/        # Lint all packages
 uv run ruff format packages/       # Format all packages
 uv run ty check packages/trading-clients/src/    # Type check trading-clients
@@ -25,7 +25,7 @@ uv run ty check packages/option-monitor/src/     # Type check option-monitor
 uv run python packages/option-monitor/scripts/invoke_local.py --skip-clock  # Test monitor locally
 ```
 
-To add to Claude Code: `claude mcp add trading-mcp -- uv run trading-mcp`
+To add to Claude Code: `claude mcp add trading-mcp -- uv run --package trading-mcp trading-mcp`
 
 ## Architecture
 
