@@ -12,10 +12,16 @@ RC_PATH = Path.home() / ".tradingrc"
 
 
 @dataclass(frozen=True)
+class DiscordConfig:
+    bot_token: str
+    channel_id: str
+
+
+@dataclass(frozen=True)
 class MonitorConfig:
     webull: WebullConfig
     tradier: TradierConfig
-    discord_webhook_url: str
+    discord: DiscordConfig | None = None
     dynamodb_table: str | None = None  # None = in-memory store (local dev)
 
 
@@ -29,9 +35,12 @@ def load_from_rc(path: Path = RC_PATH) -> MonitorConfig:
     webull_section = parser["webull"]
     tradier_section = parser["tradier"]
 
-    discord_url = ""
-    if parser.has_section("discord"):
-        discord_url = parser.get("discord", "webhook_url", fallback="")
+    discord = None
+    if parser.has_section("discord") and parser.has_option("discord", "bot_token"):
+        discord = DiscordConfig(
+            bot_token=parser.get("discord", "bot_token"),
+            channel_id=parser.get("discord", "channel_id"),
+        )
 
     return MonitorConfig(
         webull=WebullConfig(
@@ -44,7 +53,7 @@ def load_from_rc(path: Path = RC_PATH) -> MonitorConfig:
             api_token=tradier_section["api_token"],
             sandbox=parser.getboolean("tradier", "sandbox", fallback=True),
         ),
-        discord_webhook_url=discord_url,
+        discord=discord,
     )
 
 
@@ -67,7 +76,10 @@ def load_from_ssm(parameter_name: str | None = None) -> MonitorConfig:
             api_token=data["tradier_api_token"],
             sandbox=data.get("tradier_sandbox", "false").lower() == "true",
         ),
-        discord_webhook_url=data["discord_webhook_url"],
+        discord=DiscordConfig(
+            bot_token=data["discord_bot_token"],
+            channel_id=data["discord_channel_id"],
+        ),
         dynamodb_table=os.environ.get("DYNAMODB_TABLE", "option-monitor-alerts"),
     )
 

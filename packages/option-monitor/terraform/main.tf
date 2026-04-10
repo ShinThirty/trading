@@ -85,11 +85,13 @@ data "aws_iam_policy_document" "lambda_permissions" {
     resources = ["arn:aws:logs:${var.aws_region}:*:*"]
   }
 
-  # DynamoDB
+  # DynamoDB (monitor: Get/Put, interaction: Update/Scan)
   statement {
     actions = [
       "dynamodb:GetItem",
       "dynamodb:PutItem",
+      "dynamodb:UpdateItem",
+      "dynamodb:Scan",
     ]
     resources = [aws_dynamodb_table.alerts.arn]
   }
@@ -164,4 +166,43 @@ resource "aws_lambda_permission" "eventbridge" {
   function_name = aws_lambda_function.monitor.function_name
   principal     = "events.amazonaws.com"
   source_arn    = aws_cloudwatch_event_rule.schedule.arn
+}
+
+# --- Discord Interaction Handler ---
+
+resource "aws_lambda_function" "interaction" {
+  function_name = "option-monitor-interaction"
+  role          = aws_iam_role.lambda.arn # shares IAM role with monitor
+  handler       = "option_monitor.interaction.handler"
+  runtime       = "python3.12"
+  timeout       = 10
+  memory_size   = 128
+
+  filename         = var.lambda_zip_path # same deployment package
+  source_code_hash = filebase64sha256(var.lambda_zip_path)
+
+  environment {
+    variables = {
+      DYNAMODB_TABLE     = var.dynamodb_table_name
+      DISCORD_PUBLIC_KEY = var.discord_public_key
+    }
+  }
+
+  tags = {
+    Service = "option-monitor"
+  }
+}
+
+resource "aws_cloudwatch_log_group" "interaction" {
+  name              = "/aws/lambda/${aws_lambda_function.interaction.function_name}"
+  retention_in_days = 14
+
+  tags = {
+    Service = "option-monitor"
+  }
+}
+
+resource "aws_lambda_function_url" "interaction" {
+  function_name      = aws_lambda_function.interaction.function_name
+  authorization_type = "NONE" # Discord verifies via Ed25519 signature
 }

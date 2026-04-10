@@ -39,3 +39,8 @@ variable "lambda_timeout" {
   type        = number
   default     = 60
 }
+
+variable "discord_public_key" {
+  description = "Discord application public key (hex) for interaction signature verification"
+  type        = string
+}

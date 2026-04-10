@@ -134,7 +134,7 @@ def handler(event: Any, context: Any) -> dict:
 
             if decision.should_notify:
                 assert decision.level is not None
-                send_alert(config.discord_webhook_url, leg, decision.level, price, proximity)
+                send_alert(config.discord, leg, decision.level, price, proximity)
                 store.put(
                     AlertRecord(
                         dedup_key=leg.dedup_key,
@@ -192,7 +192,7 @@ def handler(event: Any, context: Any) -> dict:
         logger.error("Runtime error: %s", error_msg)
         if "401" in error_msg or "token" in error_msg.lower():
             send_error(
-                config.discord_webhook_url,
+                config.discord,
                 f"Webull token expired — manual re-verification needed.\n\n`{error_msg}`",
             )
         return {"status": "error", "message": error_msg}

@@ -6,6 +6,7 @@ State transitions:
     warning → critical  = escalate (immediate, ignores cooldown)
     same level          = suppress if within 30 min cooldown, re-notify if expired
     any → resolved      = silent (rearms for future breach)
+    muted_until > now   = suppress (orthogonal to level, preserves original state)
 """
 
 from dataclasses import dataclass
@@ -37,6 +38,10 @@ def decide(
         previous: Previous alert record from DynamoDB, or None if first time.
         now: Current Unix timestamp.
     """
+    # Muted — suppress regardless of level (mute is orthogonal to state)
+    if previous and previous.muted_until and now < previous.muted_until:
+        return AlertDecision(action="suppress", level=current_level)
+
     # No alert triggered — check if we need to resolve a previous alert
     if current_level is None:
         if previous and previous.level in ("warning", "critical"):

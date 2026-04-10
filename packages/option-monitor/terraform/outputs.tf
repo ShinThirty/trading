@@ -17,3 +17,8 @@ output "eventbridge_rule_arn" {
 output "ssm_parameter_arn" {
   value = aws_ssm_parameter.credentials.arn
 }
+
+output "interaction_function_url" {
+  description = "Set this as the Interactions Endpoint URL in Discord Developer Portal"
+  value       = aws_lambda_function_url.interaction.function_url
+}

@@ -19,6 +19,7 @@ class AlertRecord:
     proximity_pct: float
     dte: int
     ttl_expire: int  # Unix epoch, 7 days after option expiration
+    muted_until: float = 0  # Unix epoch, 0 = not muted
 
 
 class DynamoAlertStore:
@@ -49,6 +50,7 @@ class DynamoAlertStore:
                 proximity_pct=float(item["proximity_pct"]),
                 dte=int(item["dte"]),
                 ttl_expire=int(item["ttl_expire"]),
+                muted_until=float(item.get("muted_until", 0)),
             )
         except Exception:
             logger.exception("Failed to read alert state for %s", dedup_key)
@@ -66,6 +68,7 @@ class DynamoAlertStore:
                     "proximity_pct": Decimal(str(round(record.proximity_pct, 6))),
                     "dte": record.dte,
                     "ttl_expire": record.ttl_expire,
+                    "muted_until": int(record.muted_until),
                 }
             )
         except Exception:
