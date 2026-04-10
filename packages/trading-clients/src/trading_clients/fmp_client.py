@@ -50,6 +50,12 @@ class FmpClient(BaseClient):
 
         self._limiter.acquire()
         resp = self._http.get(f"{BASE_URL}{resolved}", params=params)
+        if resp.status_code == 402:
+            detail = resp.text[:200].strip() if resp.text else "no details"
+            raise ValueError(
+                f"FMP endpoint {resolved} requires a paid plan ({detail}). "
+                "Use get_basic_financials (Finnhub) for similar metrics."
+            )
         resp.raise_for_status()
         data = resp.json()
 

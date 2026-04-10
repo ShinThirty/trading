@@ -1291,44 +1291,53 @@ def get_company_profile(ctx: Context, symbol: str) -> str:
 
 @mcp.tool()
 def get_income_statement(ctx: Context, symbol: str, period: str = "annual", limit: int = 4) -> str:
-    """Get income statement: revenue, gross profit, operating income, net income, EPS, EBITDA.
+    """Get income statement from SEC filings: revenue, cost of revenue, gross profit,
+    operating income, net income, EPS.
 
     symbol: ticker symbol (e.g. 'AAPL').
-    period: 'annual' or 'quarter'.
+    period: 'annual' or 'quarterly'.
     limit: number of periods to return (default 4).
-    Requires [fmp] section in ~/.tradingrc.
+    Requires [finnhub] section in ~/.tradingrc.
     """
-    return (
-        _fmp(ctx)
-        .get(fmp.INCOME_STATEMENT, fmp.FinancialRequest(symbol, period, limit))
-        .to_markdown()
+    freq = "quarterly" if period in ("quarter", "quarterly") else "annual"
+    result = _finnhub(ctx).get(
+        fh.FINANCIALS_REPORTED, fh.FinancialsReportedRequest(symbol, freq)
     )
+    return result.income_markdown(limit)
 
 
 @mcp.tool()
 def get_balance_sheet(ctx: Context, symbol: str, period: str = "annual", limit: int = 4) -> str:
-    """Get balance sheet: total assets, liabilities, equity, cash, debt.
+    """Get balance sheet from SEC filings: cash, current assets, total assets,
+    current liabilities, long-term debt, total liabilities, total equity.
 
     symbol: ticker symbol (e.g. 'AAPL').
-    period: 'annual' or 'quarter'.
+    period: 'annual' or 'quarterly'.
     limit: number of periods to return (default 4).
-    Requires [fmp] section in ~/.tradingrc.
+    Requires [finnhub] section in ~/.tradingrc.
     """
-    return (
-        _fmp(ctx).get(fmp.BALANCE_SHEET, fmp.FinancialRequest(symbol, period, limit)).to_markdown()
+    freq = "quarterly" if period in ("quarter", "quarterly") else "annual"
+    result = _finnhub(ctx).get(
+        fh.FINANCIALS_REPORTED, fh.FinancialsReportedRequest(symbol, freq)
     )
+    return result.balance_sheet_markdown(limit)
 
 
 @mcp.tool()
 def get_cash_flow(ctx: Context, symbol: str, period: str = "annual", limit: int = 4) -> str:
-    """Get cash flow statement: operating cash flow, capex, free cash flow, dividends, buybacks.
+    """Get cash flow statement from SEC filings: operating cash flow, capex,
+    investing/financing cash flows, dividends, buybacks.
 
     symbol: ticker symbol (e.g. 'AAPL').
-    period: 'annual' or 'quarter'.
+    period: 'annual' or 'quarterly'.
     limit: number of periods to return (default 4).
-    Requires [fmp] section in ~/.tradingrc.
+    Requires [finnhub] section in ~/.tradingrc.
     """
-    return _fmp(ctx).get(fmp.CASH_FLOW, fmp.FinancialRequest(symbol, period, limit)).to_markdown()
+    freq = "quarterly" if period in ("quarter", "quarterly") else "annual"
+    result = _finnhub(ctx).get(
+        fh.FINANCIALS_REPORTED, fh.FinancialsReportedRequest(symbol, freq)
+    )
+    return result.cash_flow_markdown(limit)
 
 
 @mcp.tool()
