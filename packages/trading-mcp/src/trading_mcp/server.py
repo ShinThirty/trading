@@ -9,6 +9,7 @@ from trading_clients.endpoints import alphavantage as av
 from trading_clients.endpoints import finnhub as fh
 from trading_clients.endpoints import fmp, fred
 from trading_clients.endpoints import tradier as t
+from trading_clients.endpoints import yahoo as yh
 from trading_clients.endpoints.webull import (
     ACCOUNT_LIST,
     BALANCE,
@@ -37,6 +38,7 @@ from trading_clients.fmp_client import FmpClient
 from trading_clients.fred_client import FredClient
 from trading_clients.tradier_client import TradierClient
 from trading_clients.webull_client import WebullClient
+from trading_clients.yahoo_client import YahooClient
 
 
 @asynccontextmanager
@@ -53,6 +55,7 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
         ctx["fred"] = FredClient(config.fred)
     if config.alphavantage:
         ctx["alphavantage"] = AlphaVantageClient(config.alphavantage)
+    ctx["yahoo"] = YahooClient()
     try:
         yield ctx
     finally:
@@ -105,6 +108,10 @@ def _alphavantage(ctx: Context) -> AlphaVantageClient:
             "Alpha Vantage not configured. Add [alphavantage] section to ~/.tradingrc"
         )
     return client
+
+
+def _yahoo(ctx: Context) -> YahooClient:
+    return ctx.request_context.lifespan_context["yahoo"]
 
 
 def _check_market(ctx: Context, order_type: str, extended_hours: bool) -> None:
@@ -1117,6 +1124,83 @@ def get_top_movers(ctx: Context) -> str:
     Requires [alphavantage] section in ~/.tradingrc.
     """
     return _alphavantage(ctx).get(av.MOVERS, av.MoversRequest()).to_markdown()
+
+
+# ═══════════════════════════════════════════════════════════════
+# YAHOO FINANCE — Stock Screener
+# ═══════════════════════════════════════════════════════════════
+
+
+@mcp.tool()
+def screen_stocks(
+    ctx: Context,
+    criteria: list[dict],
+    sort_field: str = "intradaymarketcap",
+    sort_dir: str = "DESC",
+    limit: int = 25,
+) -> str:
+    """Screen for US stocks matching specific criteria.
+
+    criteria: list of filter dicts, each with:
+      - field: the data field to filter on
+      - op: comparison operator ('gt', 'lt', 'gte', 'lte', 'eq', 'btwn', 'is-in')
+      - value: comparison value (number for numeric, string for categorical).
+        For 'btwn', use [min, max]. For 'is-in', use a list of values.
+
+    Available fields:
+      Market: intradaymarketcap, intradayprice, averagedailyvol3m, beta
+      Valuation: peeratio.lasttwelvemonths, forwardpe, pricetobook, pegratio_5y
+      Dividends: dividendyield, trailingannualdividendrate
+      Growth: epsgrowth.lasttwelvemonths, revenuepercentgrowth.quarterly
+      Profitability: returnonequity, returnonassets, currentratio
+      Categorical: sector, exchange (use 'eq' or 'is-in')
+      Short Interest: daystocoverso, shortpercentoffloat
+
+    Sectors: 'Technology', 'Healthcare', 'Financial Services', 'Consumer Cyclical',
+      'Communication Services', 'Industrials', 'Consumer Defensive', 'Energy',
+      'Basic Materials', 'Real Estate', 'Utilities'
+
+    sort_field: field to sort by (default 'intradaymarketcap').
+    sort_dir: 'DESC' or 'ASC'.
+    limit: max results to return (default 25, max 250).
+
+    Example: large-cap tech with low P/E:
+      criteria=[
+        {"field": "intradaymarketcap", "op": "gt", "value": 50000000000},
+        {"field": "sector", "op": "eq", "value": "Technology"},
+        {"field": "peeratio.lasttwelvemonths", "op": "lt", "value": 25}
+      ]
+
+    Uses Yahoo Finance (no API key required). Data is 15-minute delayed.
+    """
+    return _yahoo(ctx).post(
+        yh.CUSTOM_SCREEN,
+        yh.ScreenRequest(criteria, sort_field, sort_dir, limit),
+    ).to_markdown()
+
+
+@mcp.tool()
+def get_predefined_screen(ctx: Context, screen_id: str, count: int = 25) -> str:
+    """Get a predefined stock screen from Yahoo Finance.
+
+    screen_id: one of:
+      - 'most_actives' — highest volume today
+      - 'day_gainers' — biggest percentage gainers today
+      - 'day_losers' — biggest percentage losers today
+      - 'aggressive_small_caps' — high-growth small caps
+      - 'growth_technology_stocks' — growing tech stocks
+      - 'most_shorted_stocks' — highest short interest
+      - 'undervalued_large_caps' — large caps trading below intrinsic value
+      - 'undervalued_growth_stocks' — growth stocks at low valuations
+      - 'small_cap_gainers' — small cap stocks gaining today
+    count: number of results to return (default 25).
+
+    Uses Yahoo Finance (no API key required). Data is 15-minute delayed.
+    """
+    return _yahoo(ctx).get(
+        yh.PREDEFINED_SCREEN,
+        yh.PredefinedScreenRequest(screen_id, count),
+    ).to_markdown()
 
 
 # ═══════════════════════════════════════════════════════════════
