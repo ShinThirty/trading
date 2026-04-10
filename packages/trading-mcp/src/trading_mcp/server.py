@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
+from trading_clients import indicators as ta
 from trading_clients.alphavantage_client import AlphaVantageClient
 from trading_clients.config import load_config
 from trading_clients.endpoints import alphavantage as av
@@ -563,6 +564,140 @@ def get_market_clock(ctx: Context) -> str:
     Requires [tradier] section in ~/.tradingrc.
     """
     return _tradier(ctx).get(t.CLOCK, t.EmptyRequest()).to_markdown()
+
+
+# ── Technical Analysis ─────────────────────────────────────
+
+
+@mcp.tool()
+def get_technical_indicators(
+    ctx: Context,
+    symbol: str,
+    indicators: list[str] | None = None,
+    period: str = "daily",
+) -> str:
+    """Compute technical indicators from historical price data.
+
+    symbol: ticker symbol (e.g. 'AAPL').
+    indicators: list of indicators to compute. Default: all.
+      - 'sma' — Simple Moving Average (20 and 50 period)
+      - 'ema' — Exponential Moving Average (12 and 26 period)
+      - 'rsi' — Relative Strength Index (14 period)
+      - 'macd' — MACD line, signal, histogram (12/26/9)
+      - 'bbands' — Bollinger Bands (20 period, 2 std dev)
+      - 'atr' — Average True Range (14 period)
+    period: bar interval — 'daily', 'weekly', or 'monthly'. Default 'daily'.
+
+    Returns the latest values for each indicator plus a recent history table.
+    Requires [tradier] section in ~/.tradingrc.
+    """
+    if indicators is None:
+        indicators = ["sma", "ema", "rsi", "macd", "bbands", "atr"]
+
+    # Fetch enough history for warmup (60 bars covers all indicator needs)
+    resp = _tradier(ctx).get(t.HISTORY, t.GetHistoryRequest(symbol, period))
+    bars = resp.days
+    if not bars:
+        return "(no historical data)"
+
+    closes = [float(b["close"]) for b in bars]
+    latest_price = closes[-1]
+    latest_date = bars[-1].get("date", "")
+
+    sections: list[str] = [f"## {symbol} Technical Indicators ({latest_date})"]
+    sections.append(f"**Price:** {latest_price:,.2f}\n")
+
+    # Number of recent values to show in the table
+    tail = 10
+
+    if "rsi" in indicators:
+        vals = ta.rsi(closes)
+        latest = vals[-1]
+        if latest is not None:
+            level = "oversold" if latest < 30 else "overbought" if latest > 70 else "neutral"
+            sections.append(f"**RSI(14):** {latest:.1f} ({level})")
+
+    if "macd" in indicators:
+        macd_line, signal_line, histogram = ta.macd(closes)
+        m, s, h = macd_line[-1], signal_line[-1], histogram[-1]
+        if m is not None and s is not None and h is not None:
+            trend = "bullish" if h > 0 else "bearish"
+            sections.append(
+                f"**MACD(12,26,9):** line={m:.2f}, signal={s:.2f}, "
+                f"histogram={h:.2f} ({trend})"
+            )
+
+    if "sma" in indicators:
+        sma20 = ta.sma(closes, 20)
+        sma50 = ta.sma(closes, 50)
+        parts = []
+        if sma20[-1] is not None:
+            rel = "above" if latest_price > sma20[-1] else "below"
+            parts.append(f"SMA(20)={sma20[-1]:.2f} (price {rel})")
+        if sma50[-1] is not None:
+            rel = "above" if latest_price > sma50[-1] else "below"
+            parts.append(f"SMA(50)={sma50[-1]:.2f} (price {rel})")
+        if parts:
+            sections.append(f"**SMA:** {', '.join(parts)}")
+
+    if "ema" in indicators:
+        ema12 = ta.ema(closes, 12)
+        ema26 = ta.ema(closes, 26)
+        parts = []
+        if ema12[-1] is not None:
+            parts.append(f"EMA(12)={ema12[-1]:.2f}")
+        if ema26[-1] is not None:
+            parts.append(f"EMA(26)={ema26[-1]:.2f}")
+        if parts:
+            sections.append(f"**EMA:** {', '.join(parts)}")
+
+    if "bbands" in indicators:
+        upper, middle, lower = ta.bollinger_bands(closes)
+        if upper[-1] is not None and middle[-1] is not None and lower[-1] is not None:
+            width = (upper[-1] - lower[-1]) / middle[-1] * 100
+            if latest_price > upper[-1]:
+                pos = "above upper band"
+            elif latest_price < lower[-1]:
+                pos = "below lower band"
+            else:
+                pos = "within bands"
+            sections.append(
+                f"**Bollinger(20,2):** upper={upper[-1]:.2f}, "
+                f"mid={middle[-1]:.2f}, lower={lower[-1]:.2f} "
+                f"(width={width:.1f}%, {pos})"
+            )
+
+    if "atr" in indicators:
+        atr_vals = ta.atr(bars)
+        if atr_vals[-1] is not None:
+            atr_pct = atr_vals[-1] / latest_price * 100
+            sections.append(f"**ATR(14):** {atr_vals[-1]:.2f} ({atr_pct:.1f}% of price)")
+
+    # Recent history table
+    sections.append("\n### Recent Values")
+    from trading_clients.table_helpers import fmt_number, list_table
+
+    rows = []
+    start = max(0, len(bars) - tail)
+    rsi_vals = ta.rsi(closes) if "rsi" in indicators else []
+    sma20_vals = ta.sma(closes, 20) if "sma" in indicators else []
+    atr_vals_full = ta.atr(bars) if "atr" in indicators else []
+
+    for i in range(start, len(bars)):
+        row: dict[str, str] = {
+            "Date": bars[i].get("date", ""),
+            "Close": fmt_number(closes[i]),
+        }
+        if rsi_vals:
+            row["RSI"] = fmt_number(rsi_vals[i], 1) if rsi_vals[i] is not None else ""
+        if sma20_vals:
+            row["SMA20"] = fmt_number(sma20_vals[i]) if sma20_vals[i] is not None else ""
+        if atr_vals_full:
+            row["ATR"] = fmt_number(atr_vals_full[i]) if atr_vals_full[i] is not None else ""
+        rows.append(row)
+
+    sections.append(list_table(rows))
+    return "\n".join(sections)
 
 
 # ── Tradier Account ─────────────────────────────────────────
