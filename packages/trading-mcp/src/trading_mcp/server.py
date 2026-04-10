@@ -1547,6 +1547,42 @@ def get_predefined_screen(ctx: Context, screen_id: str, count: int = 25) -> str:
 
 
 # ═══════════════════════════════════════════════════════════════
+# YouTube
+# ═══════════════════════════════════════════════════════════════
+
+
+@mcp.tool()
+def get_youtube_transcript(ctx: Context, url: str) -> str:
+    """Get the transcript of a YouTube video.
+
+    Extracts auto-generated or manual captions and returns the full text.
+    Useful for analyzing financial commentary, earnings calls, or market analysis videos.
+
+    url: YouTube video URL or video ID (e.g. 'https://www.youtube.com/watch?v=abc123'
+      or just 'abc123').
+    """
+    import re
+
+    from youtube_transcript_api import YouTubeTranscriptApi
+
+    # Extract video ID from URL or use as-is
+    video_id = url
+    m = re.search(r"(?:v=|youtu\.be/|shorts/)([A-Za-z0-9_-]{11})", url)
+    if m:
+        video_id = m.group(1)
+
+    api = YouTubeTranscriptApi()
+    transcript = api.fetch(video_id)
+    full_text = " ".join(s.text for s in transcript.snippets)
+    kind = "auto-generated" if transcript.is_generated else "manual"
+    return (
+        f"**Video ID:** {video_id}\n"
+        f"**Language:** {transcript.language} ({kind})\n\n"
+        f"{full_text}"
+    )
+
+
+# ═══════════════════════════════════════════════════════════════
 
 
 def main():
