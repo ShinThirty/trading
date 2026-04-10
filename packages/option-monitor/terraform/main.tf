@@ -36,14 +36,20 @@ resource "aws_dynamodb_table" "alerts" {
   }
 }
 
-# --- Secrets Manager ---
+# --- SSM Parameter Store ---
 
-resource "aws_secretsmanager_secret" "credentials" {
-  name        = var.secret_name
+resource "aws_ssm_parameter" "credentials" {
+  name        = var.ssm_parameter_name
   description = "Option monitor credentials (Webull, Tradier, Discord)"
+  type        = "SecureString"
+  value       = "{}" # placeholder — populate via AWS CLI after first apply
 
   tags = {
     Service = "option-monitor"
+  }
+
+  lifecycle {
+    ignore_changes = [value] # don't overwrite after manual population
   }
 }
 
@@ -88,10 +94,10 @@ data "aws_iam_policy_document" "lambda_permissions" {
     resources = [aws_dynamodb_table.alerts.arn]
   }
 
-  # Secrets Manager
+  # SSM Parameter Store
   statement {
-    actions   = ["secretsmanager:GetSecretValue"]
-    resources = [aws_secretsmanager_secret.credentials.arn]
+    actions   = ["ssm:GetParameter"]
+    resources = [aws_ssm_parameter.credentials.arn]
   }
 }
 
@@ -116,7 +122,7 @@ resource "aws_lambda_function" "monitor" {
 
   environment {
     variables = {
-      SECRET_NAME    = var.secret_name
+      SSM_PARAMETER  = var.ssm_parameter_name
       DYNAMODB_TABLE = var.dynamodb_table_name
     }
   }

@@ -14,6 +14,6 @@ output "eventbridge_rule_arn" {
   value = aws_cloudwatch_event_rule.schedule.arn
 }
 
-output "secret_arn" {
-  value = aws_secretsmanager_secret.credentials.arn
+output "ssm_parameter_arn" {
+  value = aws_ssm_parameter.credentials.arn
 }

@@ -1,4 +1,4 @@
-"""Configuration loading from ~/.tradingrc (local) or AWS Secrets Manager (Lambda)."""
+"""Configuration loading from ~/.tradingrc (local) or SSM Parameter Store (Lambda)."""
 
 import configparser
 import json
@@ -48,14 +48,14 @@ def load_from_rc(path: Path = RC_PATH) -> MonitorConfig:
     )
 
 
-def load_from_secrets_manager(secret_name: str | None = None) -> MonitorConfig:
-    """Load credentials from AWS Secrets Manager (Lambda)."""
+def load_from_ssm(parameter_name: str | None = None) -> MonitorConfig:
+    """Load credentials from SSM Parameter Store SecureString (Lambda)."""
     import boto3
 
-    name = secret_name or os.environ.get("SECRET_NAME", "option-monitor/credentials")
-    client = boto3.client("secretsmanager")
-    resp = client.get_secret_value(SecretId=name)
-    data = json.loads(resp["SecretString"])
+    name = parameter_name or os.environ.get("SSM_PARAMETER", "/option-monitor/credentials")
+    client = boto3.client("ssm")
+    resp = client.get_parameter(Name=name, WithDecryption=True)
+    data = json.loads(resp["Parameter"]["Value"])
     return MonitorConfig(
         webull=WebullConfig(
             app_key=data["webull_app_key"],
@@ -73,7 +73,7 @@ def load_from_secrets_manager(secret_name: str | None = None) -> MonitorConfig:
 
 
 def load_config() -> MonitorConfig:
-    """Auto-detect environment: Secrets Manager if AWS_LAMBDA_FUNCTION_NAME is set, else RC."""
+    """Auto-detect environment: SSM Parameter Store if AWS_LAMBDA_FUNCTION_NAME is set, else RC."""
     if os.environ.get("AWS_LAMBDA_FUNCTION_NAME"):
-        return load_from_secrets_manager()
+        return load_from_ssm()
     return load_from_rc()

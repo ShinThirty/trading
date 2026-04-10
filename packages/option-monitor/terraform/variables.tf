@@ -10,10 +10,10 @@ variable "lambda_zip_path" {
   default     = "../dist/lambda.zip"
 }
 
-variable "secret_name" {
-  description = "Secrets Manager secret name for credentials"
+variable "ssm_parameter_name" {
+  description = "SSM Parameter Store name for credentials (SecureString)"
   type        = string
-  default     = "option-monitor/credentials"
+  default     = "/option-monitor/credentials"
 }
 
 variable "dynamodb_table_name" {
