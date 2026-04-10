@@ -4,6 +4,7 @@ from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
 from trading_clients import indicators as ta
+from trading_clients import options as opts
 from trading_clients.alphavantage_client import AlphaVantageClient
 from trading_clients.config import load_config
 from trading_clients.endpoints import alphavantage as av
@@ -465,6 +466,204 @@ def get_option_lookup(ctx: Context, underlying: str) -> str:
     Requires [tradier] section in ~/.tradingrc.
     """
     return _tradier(ctx).get(t.OPTION_LOOKUP, t.GetLookupRequest(underlying)).to_markdown()
+
+
+# ── Options Analytics ──────────────────────────────────────
+
+
+@mcp.tool()
+def get_expected_move(ctx: Context, symbol: str, expiration: str) -> str:
+    """Compute the expected move for a stock at a given option expiration.
+
+    Shows the ATM straddle price (expected 1-sigma move), implied volatility,
+    historical volatility, and IV/HV ratio. Useful for sizing positions and
+    evaluating whether options are cheap or expensive.
+
+    symbol: underlying ticker symbol (e.g. 'AAPL').
+    expiration: option expiration date (YYYY-MM-DD, from get_option_expirations).
+
+    Requires [tradier] section in ~/.tradingrc.
+    """
+    from trading_clients.table_helpers import fmt_number, kv_table
+
+    tradier = _tradier(ctx)
+
+    # Get current stock price
+    quote = tradier.get(t.QUOTES, t.GetQuotesRequest(symbol, greeks=False))
+    if not quote.quotes:
+        return f"(no quote for {symbol})"
+    stock_price = float(quote.quotes[0].get("last") or quote.quotes[0].get("close", 0))
+
+    # Get option chain with greeks
+    chain = tradier.get(t.CHAIN, t.GetChainRequest(symbol, expiration, greeks=True))
+    if not chain.options:
+        return f"(no option chain for {symbol} at {expiration})"
+
+    # Expected move from ATM straddle
+    em = opts.expected_move(chain.options, stock_price)
+
+    # Historical volatility from price data
+    history = tradier.get(t.HISTORY, t.GetHistoryRequest(symbol, "daily"))
+    closes = [float(b["close"]) for b in history.days] if history.days else []
+    hv20 = opts.historical_volatility(closes, 20)
+    hv50 = opts.historical_volatility(closes, 50)
+
+    # Build output
+    data: dict[str, str] = {"Stock Price": fmt_number(stock_price)}
+    data["Expiration"] = expiration
+
+    if em["straddle_price"] is not None:
+        straddle = em["straddle_price"]
+        data["ATM Straddle"] = fmt_number(straddle)
+        data["Expected Move"] = f"±${fmt_number(straddle)} ({fmt_number(em['expected_move_pct'])}%)"
+        data["Expected Range"] = (
+            f"${fmt_number(stock_price - straddle)} — ${fmt_number(stock_price + straddle)}"
+        )
+        data["ATM Strikes"] = f"Call {em['atm_call_strike']}, Put {em['atm_put_strike']}"
+
+    if em["atm_iv"] is not None:
+        data["Implied Volatility"] = f"{em['atm_iv'] * 100:.1f}%"
+
+    if hv20 is not None:
+        data["Historical Vol (20d)"] = f"{hv20 * 100:.1f}%"
+    if hv50 is not None:
+        data["Historical Vol (50d)"] = f"{hv50 * 100:.1f}%"
+
+    if em["atm_iv"] is not None and hv20 is not None and hv20 > 0:
+        ratio = em["atm_iv"] / hv20
+        label = "rich" if ratio > 1.2 else "cheap" if ratio < 0.8 else "fair"
+        data["IV/HV Ratio"] = f"{ratio:.2f} ({label})"
+
+    return f"## {symbol} Expected Move ({expiration})\n\n{kv_table(data)}"
+
+
+@mcp.tool()
+def analyze_option_strategy(
+    ctx: Context,
+    symbol: str,
+    expiration: str,
+    legs: list[dict],
+) -> str:
+    """Analyze an option strategy's risk/reward profile.
+
+    Computes max profit, max loss, breakeven points, probability of profit,
+    and risk/reward ratio for any single or multi-leg option strategy.
+
+    symbol: underlying ticker symbol (e.g. 'AAPL').
+    expiration: option expiration date (YYYY-MM-DD).
+    legs: list of leg dicts, each with:
+      - strike: strike price (e.g. 250)
+      - option_type: 'call' or 'put'
+      - side: 'buy' or 'sell'
+      - quantity: number of contracts (default 1)
+
+    Premiums and deltas are auto-fetched from the live option chain.
+
+    Common strategies:
+      CSP: [{"strike": 250, "option_type": "put", "side": "sell"}]
+      Bull put spread: [{"strike": 250, "option_type": "put", "side": "sell"},
+                        {"strike": 240, "option_type": "put", "side": "buy"}]
+      Iron condor: 4 legs (2 puts + 2 calls, short inner / long outer)
+
+    Requires [tradier] section in ~/.tradingrc.
+    """
+    from trading_clients.table_helpers import fmt_number, kv_table
+
+    tradier = _tradier(ctx)
+
+    # Get current stock price
+    quote = tradier.get(t.QUOTES, t.GetQuotesRequest(symbol, greeks=False))
+    if not quote.quotes:
+        return f"(no quote for {symbol})"
+    stock_price = float(quote.quotes[0].get("last") or quote.quotes[0].get("close", 0))
+
+    # Get option chain with greeks
+    chain = tradier.get(t.CHAIN, t.GetChainRequest(symbol, expiration, greeks=True))
+    if not chain.options:
+        return f"(no option chain for {symbol} at {expiration})"
+
+    # Match each leg to a chain entry and fill in premium + delta
+    enriched_legs = []
+    for leg in legs:
+        strike = float(leg["strike"])
+        otype = leg["option_type"]
+        matches = [
+            o for o in chain.options
+            if o.get("option_type") == otype and abs(o["strike"] - strike) < 0.01
+        ]
+        if not matches:
+            return f"(no {otype} at strike {strike} for {expiration})"
+        opt = matches[0]
+        greeks = opt.get("greeks") or {}
+        enriched_legs.append({
+            "strike": strike,
+            "option_type": otype,
+            "side": leg["side"],
+            "quantity": leg.get("quantity", 1),
+            "premium": opts.mid_price(opt),
+            "delta": greeks.get("delta"),
+            "iv": greeks.get("mid_iv"),
+            "bid": opt.get("bid"),
+            "ask": opt.get("ask"),
+            "occ_symbol": opt.get("symbol", ""),
+        })
+
+    # Run strategy analysis
+    result = opts.strategy_analysis(enriched_legs, stock_price)
+
+    # Build leg detail table
+    from trading_clients.table_helpers import list_table
+
+    leg_rows = []
+    for el in enriched_legs:
+        leg_rows.append({
+            "Side": el["side"].upper(),
+            "Type": el["option_type"].upper(),
+            "Strike": fmt_number(el["strike"]),
+            "Bid": fmt_number(el["bid"]),
+            "Ask": fmt_number(el["ask"]),
+            "Mid": fmt_number(el["premium"]),
+            "Delta": fmt_number(el["delta"], 3) if el["delta"] else "",
+            "IV": f"{el['iv'] * 100:.1f}%" if el["iv"] else "",
+            "Qty": str(el["quantity"]),
+        })
+
+    # Build summary
+    data: dict[str, str] = {
+        "Strategy": result.get("strategy_type", ""),
+        "Stock Price": fmt_number(stock_price),
+        "Expiration": expiration,
+    }
+
+    net = result["net_premium"]
+    if net >= 0:
+        data["Net Credit"] = f"${fmt_number(net)} per share (${fmt_number(net * 100)} total)"
+    else:
+        debit = abs(net)
+        data["Net Debit"] = f"${fmt_number(debit)} per share (${fmt_number(debit * 100)} total)"
+
+    data["Max Profit"] = f"${fmt_number(result['max_profit'])}"
+    data["Max Loss"] = f"${fmt_number(result['max_loss'])}"
+
+    if result["breakevens"]:
+        data["Breakeven"] = ", ".join(f"${fmt_number(b)}" for b in result["breakevens"])
+
+    if result["risk_reward_ratio"] is not None:
+        data["Risk/Reward"] = f"{result['risk_reward_ratio']:.2f}"
+
+    if result["probability_of_profit"] is not None:
+        data["P(Profit)"] = f"{result['probability_of_profit'] * 100:.0f}%"
+
+    sections = [
+        f"## {symbol} {result.get('strategy_type', 'Strategy')} Analysis",
+        "",
+        "### Legs",
+        list_table(leg_rows),
+        "",
+        "### Summary",
+        kv_table(data),
+    ]
+    return "\n".join(sections)
 
 
 @mcp.tool()
