@@ -114,9 +114,26 @@ def strategy_analysis(
     strikes = [leg["strike"] for leg in legs]
     min_strike = min(strikes)
     max_strike = max(strikes)
-    margin = max(max_strike - min_strike, stock_price * 0.3)
-    price_low = max(0, min(min_strike, stock_price) - margin)
-    price_high = max(max_strike, stock_price) + margin
+
+    # Check if risk is bounded (all directions have protective legs)
+    has_short_put = any(lg["side"] == "sell" and lg["option_type"] == "put" for lg in legs)
+    has_long_put = any(lg["side"] == "buy" and lg["option_type"] == "put" for lg in legs)
+    has_short_call = any(lg["side"] == "sell" and lg["option_type"] == "call" for lg in legs)
+    has_long_call = any(lg["side"] == "buy" and lg["option_type"] == "call" for lg in legs)
+
+    # Downside: unbounded if short put without protective long put
+    if has_short_put and not has_long_put:
+        price_low = 0.0
+    else:
+        margin = max(max_strike - min_strike, stock_price * 0.1)
+        price_low = max(0, min_strike - margin)
+
+    # Upside: unbounded if short call without protective long call
+    if has_short_call and not has_long_call:
+        price_high = max_strike + stock_price
+    else:
+        margin = max(max_strike - min_strike, stock_price * 0.1)
+        price_high = max_strike + margin
 
     # Evaluate P&L at many price points
     steps = 1000
