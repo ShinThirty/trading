@@ -60,17 +60,26 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │   └── src/trading_mcp/
 │   │       └── server.py                # FastMCP server, tool registration, lifespan
 │   └── option-monitor/                  # Lambda monitoring service
-│       ├── pyproject.toml               # depends on: trading-clients + boto3
+│       ├── pyproject.toml               # depends on: trading-clients + boto3 + pynacl
+│       ├── Makefile                     # deploy/destroy/credentials/test automation
+│       ├── terraform/                   # AWS infrastructure (self-contained)
+│       │   ├── main.tf                  # Lambda, DynamoDB, EventBridge, IAM, SSM
+│       │   ├── variables.tf
+│       │   └── outputs.tf
 │       ├── scripts/
-│       │   └── invoke_local.py          # Local testing with ~/.tradingrc
+│       │   ├── invoke_local.py          # Local testing with ~/.tradingrc
+│       │   ├── build_lambda.sh          # Build Lambda deployment ZIP
+│       │   └── register_commands.py     # Register Discord slash commands
 │       └── src/option_monitor/
 │           ├── handler.py               # Lambda entry point
-│           ├── config.py                # MonitorConfig (Secrets Manager or ~/.tradingrc)
-│           ├── discord.py               # Webhook notifications with rich embeds
+│           ├── config.py                # MonitorConfig (SSM Parameter Store or ~/.tradingrc)
+│           ├── discord.py               # Bot messaging with rich embeds + mute buttons
+│           ├── state.py                 # DynamoDB alert state read/write
+│           ├── interaction.py           # Discord interaction handler (buttons + slash commands)
 │           └── monitor/
 │               ├── positions.py         # Parse Webull positions → ShortOptionLeg
-│               └── thresholds.py        # DTE-based proximity evaluation
-├── terraform/                           # AWS infrastructure (Phase 2)
+│               ├── thresholds.py        # DTE-based proximity evaluation
+│               └── alerts.py            # PagerDuty-inspired alert state machine
 └── tests/                               # Test suite (Phase 2)
 ```
 
@@ -104,7 +113,8 @@ EventBridge (cron, Mon-Fri 13:30-20:00 UTC)
     → WebullClient.get(POSITIONS) — short option legs per account
     → TradierClient.get(QUOTES) — batch underlying prices
     → Threshold evaluation (DTE-adjusted proximity)
-    → Discord webhook (warning/critical embeds)
+    → Alert state machine (dedup/cooldown/muting via DynamoDB)
+    → Discord bot messaging (warning/critical embeds + mute buttons)
 ```
 
 ### BaseClient Methods
