@@ -206,3 +206,18 @@ resource "aws_lambda_function_url" "interaction" {
   function_name      = aws_lambda_function.interaction.function_name
   authorization_type = "NONE" # Discord verifies via Ed25519 signature
 }
+
+resource "aws_lambda_permission" "function_url_public" {
+  statement_id           = "AllowPublicFunctionURL"
+  action                 = "lambda:InvokeFunctionUrl"
+  function_name          = aws_lambda_function.interaction.function_name
+  principal              = "*"
+  function_url_auth_type = "NONE"
+}
+
+resource "aws_lambda_permission" "function_url_invoke" {
+  statement_id  = "AllowPublicInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.interaction.function_name
+  principal     = "*"
+}

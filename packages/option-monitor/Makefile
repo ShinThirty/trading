@@ -23,10 +23,8 @@ DISCORD_PUBLIC_KEY := $(shell python3 -c "$(READ_RC); print(c['discord']['public
 DISCORD_APP_ID     := $(shell python3 -c "$(READ_RC); print(c['discord']['application_id'])" 2>/dev/null)
 DISCORD_BOT_TOKEN  := $(shell python3 -c "$(READ_RC); print(c['discord']['bot_token'])" 2>/dev/null)
 
-# Export AWS credentials from SSO session for Terraform
-export AWS_ACCESS_KEY_ID     ?= $(shell aws configure export-credentials --format env 2>/dev/null | grep AWS_ACCESS_KEY_ID | cut -d= -f2)
-export AWS_SECRET_ACCESS_KEY ?= $(shell aws configure export-credentials --format env 2>/dev/null | grep AWS_SECRET_ACCESS_KEY | cut -d= -f2)
-export AWS_SESSION_TOKEN     ?= $(shell aws configure export-credentials --format env 2>/dev/null | grep AWS_SESSION_TOKEN | cut -d= -f2)
+# AWS credentials: uses default credential chain (profile, env vars, SSO, etc.)
+# If needed, set AWS_PROFILE=personal before running make.
 
 .PHONY: build deploy destroy credentials credentials-delete register-commands test test-local init clean
 
@@ -74,7 +72,8 @@ test:
 	  --function-name option-monitor \
 	  --payload '{}' \
 	  --cli-binary-format raw-in-base64-out \
-	  /dev/stdout 2>/dev/null | python3 -m json.tool
+	  /tmp/option-monitor-out.json > /dev/null 2>&1
+	@cat /tmp/option-monitor-out.json | python3 -m json.tool
 
 ## Test locally without AWS
 test-local:

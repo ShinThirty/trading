@@ -25,10 +25,13 @@ uv pip install \
     "$PKG_DIR" \
     "$REPO_ROOT/packages/trading-clients"
 
-# Install runtime deps (httpx + h2 for HTTP/2, but NOT boto3 — Lambda provides it)
+# Install runtime deps (NOT boto3 — Lambda provides it)
+# Use --python-platform linux to get Linux x86_64 binaries for Lambda
 uv pip install \
     --target "$BUILD_DIR" \
-    "httpx[http2]"
+    --python-platform linux \
+    "httpx[http2]" \
+    "pynacl>=1.5"
 
 echo "==> Creating deployment package"
 cd "$BUILD_DIR"

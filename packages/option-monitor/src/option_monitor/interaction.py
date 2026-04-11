@@ -52,9 +52,10 @@ def _verify_signature(body: str, signature: str, timestamp: str) -> bool:
     """Verify Discord Ed25519 request signature."""
     try:
         key = _get_verify_key()
-        key.verify(f"{timestamp}{body}".encode(), b64decode(signature))
+        key.verify(f"{timestamp}{body}".encode(), bytes.fromhex(signature))
         return True
     except Exception:
+        logger.exception("Signature verification failed")
         return False
 
 
@@ -185,6 +186,8 @@ def handler(event: Any, context: Any) -> dict:
     signature = headers.get("x-signature-ed25519", "")
     timestamp = headers.get("x-signature-timestamp", "")
 
+    json_headers = {"content-type": "application/json"}
+
     # Verify signature
     if not _verify_signature(body, signature, timestamp):
         return {"statusCode": 401, "body": "Invalid signature"}
@@ -194,7 +197,7 @@ def handler(event: Any, context: Any) -> dict:
 
     # PING — Discord verification handshake
     if interaction_type == PING:
-        return {"statusCode": 200, "body": json.dumps({"type": PONG})}
+        return {"statusCode": 200, "headers": json_headers, "body": json.dumps({"type": PONG})}
 
     # Button click
     if interaction_type == MESSAGE_COMPONENT:
@@ -203,7 +206,7 @@ def handler(event: Any, context: Any) -> dict:
             result = _handle_mute_button(custom_id)
         else:
             result = _respond("Unknown button.")
-        return {"statusCode": 200, "body": json.dumps(result)}
+        return {"statusCode": 200, "headers": json_headers, "body": json.dumps(result)}
 
     # Slash command
     if interaction_type == APPLICATION_COMMAND:
@@ -217,6 +220,6 @@ def handler(event: Any, context: Any) -> dict:
         else:
             result = _respond(f"Unknown command: `{command_name}`")
 
-        return {"statusCode": 200, "body": json.dumps(result)}
+        return {"statusCode": 200, "headers": json_headers, "body": json.dumps(result)}
 
-    return {"statusCode": 400, "body": "Unknown interaction type"}
+    return {"statusCode": 400, "headers": json_headers, "body": "Unknown interaction type"}
