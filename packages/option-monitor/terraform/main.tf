@@ -115,7 +115,7 @@ resource "aws_lambda_function" "monitor" {
   function_name = "option-monitor"
   role          = aws_iam_role.lambda.arn
   handler       = "option_monitor.handler.handler"
-  runtime       = "python3.12"
+  runtime       = "python3.13"
   timeout       = var.lambda_timeout
   memory_size   = var.lambda_memory_mb
 
@@ -174,7 +174,7 @@ resource "aws_lambda_function" "interaction" {
   function_name = "option-monitor-interaction"
   role          = aws_iam_role.lambda.arn # shares IAM role with monitor
   handler       = "option_monitor.interaction.handler"
-  runtime       = "python3.12"
+  runtime       = "python3.13"
   timeout       = 10
   memory_size   = 128
 
