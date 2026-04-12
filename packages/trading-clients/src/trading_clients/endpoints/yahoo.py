@@ -72,7 +72,7 @@ class ScreenerResponse:
             total=data.get("total", 0),
         )
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         if not self.quotes:
             return "(no results)"
         rows = [

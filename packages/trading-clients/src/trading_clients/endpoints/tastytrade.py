@@ -97,7 +97,7 @@ class MarketMetricsResponse:
     def from_response(cls, data: list[dict]) -> "MarketMetricsResponse":
         return cls(items=data or [])
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         if not self.items:
             return "(no metrics)"
         rows = []
@@ -125,7 +125,7 @@ class DividendHistoryResponse:
     def from_response(cls, data: list[dict]) -> "DividendHistoryResponse":
         return cls(dividends=data or [])
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         if not self.dividends:
             return "(no dividends)"
         entries = [
@@ -162,7 +162,7 @@ class WatchlistsResponse:
     def from_response(cls, data: list[dict]) -> "WatchlistsResponse":
         return cls(watchlists=data or [])
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         if not self.watchlists:
             return "(no watchlists)"
         entries = [
@@ -180,7 +180,7 @@ class WatchlistDetailResponse:
     def from_response(cls, data: dict) -> "WatchlistDetailResponse":
         return cls(watchlist=data or {})
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         if not self.watchlist:
             return "(no watchlist)"
         entries = self.watchlist.get("watchlist-entries", [])
@@ -252,7 +252,7 @@ class BacktestResponse:
     def from_response(cls, data: dict) -> "BacktestResponse":
         return cls(data=data or {})
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         if not self.data:
             return "(no data)"
         status = self.data.get("status", "")

@@ -82,7 +82,7 @@ class NewsResponse:
     def from_response(cls, data: list[dict]) -> "NewsResponse":
         return cls(articles=data or [])
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         if not self.articles:
             return "(no news)"
         rows = [
@@ -104,7 +104,7 @@ class EconomicCalendarResponse:
     def from_response(cls, data: list[dict]) -> "EconomicCalendarResponse":
         return cls(events=data or [])
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         if not self.events:
             return "(no events)"
         rows = [
@@ -130,7 +130,7 @@ class EarningsCalendarResponse:
     def from_response(cls, data: list[dict]) -> "EarningsCalendarResponse":
         return cls(earnings=data or [])
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         if not self.earnings:
             return "(no earnings)"
         rows = [
@@ -156,7 +156,7 @@ class BasicFinancialsResponse:
     def from_response(cls, data: dict) -> "BasicFinancialsResponse":
         return cls(data=data or {})
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         metric = self.data.get("metric", {})
         if not metric:
             return "(no metrics)"
@@ -186,7 +186,7 @@ class EpsEstimatesResponse:
     def from_response(cls, data: list[dict]) -> "EpsEstimatesResponse":
         return cls(estimates=data or [])
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         if not self.estimates:
             return "(no estimates)"
         rows = [
@@ -210,7 +210,7 @@ class RecommendationsResponse:
     def from_response(cls, data: list[dict]) -> "RecommendationsResponse":
         return cls(trends=data or [])
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         if not self.trends:
             return "(no data)"
         rows = [
@@ -235,7 +235,7 @@ class PriceTargetResponse:
     def from_response(cls, data: dict) -> "PriceTargetResponse":
         return cls(data=data or {})
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         if not self.data:
             return "(no data)"
         return kv_table(
@@ -258,7 +258,7 @@ class InsiderTransactionsResponse:
     def from_response(cls, data: list[dict]) -> "InsiderTransactionsResponse":
         return cls(transactions=data or [])
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         if not self.transactions:
             return "(no transactions)"
         rows = [
@@ -283,7 +283,7 @@ class PeersResponse:
     def from_response(cls, data: list[str]) -> "PeersResponse":
         return cls(peers=data or [])
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         if not self.peers:
             return "(no peers)"
         return ", ".join(self.peers)
@@ -297,7 +297,7 @@ class DividendsResponse:
     def from_response(cls, data: list[dict]) -> "DividendsResponse":
         return cls(dividends=data or [])
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         if not self.dividends:
             return "(no dividends)"
         rows = [
@@ -487,7 +487,7 @@ class FinancialsReportedResponse:
     def cash_flow_markdown(self, limit: int = 4) -> str:
         return self._extract_section("cf", _CF_ITEMS, limit)
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         return self.income_markdown()
 
 

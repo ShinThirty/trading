@@ -48,7 +48,7 @@ class ResponseModel(Protocol):
     @classmethod
     def from_response(cls, data: Any) -> "ResponseModel": ...
 
-    def to_markdown(self) -> str: ...
+    def to_output(self) -> str: ...
 
 
 # ── Endpoint ────────────────────────────────────────────────
@@ -61,7 +61,7 @@ class Endpoint:
     path: HTTP path, may contain {templates} for PathRequest substitution.
     cache_ttl: cache duration in seconds (0 = no cache).
     rate_key: rate limiter bucket name (default = 'default').
-    response_model: class with from_response(data) and to_markdown() methods.
+    response_model: class with from_response(data) and to_output() methods.
     extract: optional callable to unwrap nested response dicts before parsing.
     base_url: override the client's default base URL for this endpoint.
     """

@@ -159,7 +159,7 @@ def get_account_balance(ctx: Context, account_id: str | None = None) -> str:
     account_id: Webull account ID. Omit to use the default from ~/.tradingrc.
     """
     client = _webull(ctx)
-    return client.get(BALANCE, AccountRequest(client.resolve_account_id(account_id))).to_markdown()
+    return client.get(BALANCE, AccountRequest(client.resolve_account_id(account_id))).to_output()
 
 
 @mcp.tool()
@@ -173,7 +173,7 @@ def get_account_positions(ctx: Context, account_id: str | None = None) -> str:
     client = _webull(ctx)
     return client.get(
         POSITIONS, AccountRequest(client.resolve_account_id(account_id))
-    ).to_markdown()
+    ).to_output()
 
 
 # ── Orders ───────────────────────────────────────────────────
@@ -191,7 +191,7 @@ def get_open_orders(ctx: Context, page_size: int = 50, account_id: str | None = 
     return client.get(
         OPEN_ORDERS,
         GetOpenOrdersRequest(client.resolve_account_id(account_id), page_size),
-    ).to_markdown()
+    ).to_output()
 
 
 @mcp.tool()
@@ -214,7 +214,7 @@ def get_today_orders(
         GetOrderHistoryRequest(
             client.resolve_account_id(account_id), page_size, start_date, end_date
         ),
-    ).to_markdown()
+    ).to_output()
 
 
 @mcp.tool()
@@ -230,7 +230,7 @@ def get_order_detail(ctx: Context, client_order_id: str, account_id: str | None 
     return client.get(
         ORDER_DETAIL,
         GetOrderDetailRequest(client.resolve_account_id(account_id), client_order_id),
-    ).to_markdown()
+    ).to_output()
 
 
 # ── Order Management (unified for stocks + options) ─────────
@@ -268,7 +268,7 @@ def preview_order(ctx: Context, new_orders: list[dict], account_id: str | None =
     client = _webull(ctx)
     # Preview uses the same request structure as place_order but via preview endpoint
     req = PreviewOrderRequest(account_id=client.resolve_account_id(account_id), **new_orders[0])
-    return client.post(PREVIEW_ORDER, req).to_markdown()
+    return client.post(PREVIEW_ORDER, req).to_output()
 
 
 @mcp.tool()
@@ -335,7 +335,7 @@ def place_order(
         position_intent=position_intent,
         legs=legs,
     )
-    return client.post(PLACE_ORDER, req).to_markdown()
+    return client.post(PLACE_ORDER, req).to_output()
 
 
 @mcp.tool()
@@ -373,7 +373,7 @@ def replace_order(
         trailing_type=trailing_type,
         trailing_stop_step=trailing_stop_step,
     )
-    return client.post(REPLACE_ORDER, req).to_markdown()
+    return client.post(REPLACE_ORDER, req).to_output()
 
 
 @mcp.tool()
@@ -386,7 +386,7 @@ def cancel_order(ctx: Context, client_order_id: str, account_id: str | None = No
     """
     client = _webull(ctx)
     req = CancelOrderRequest(client.resolve_account_id(account_id), client_order_id)
-    return client.post(CANCEL_ORDER, req).to_markdown()
+    return client.post(CANCEL_ORDER, req).to_output()
 
 
 @mcp.tool()
@@ -394,7 +394,7 @@ def get_app_subscriptions(ctx: Context) -> str:
     """Get all Webull accounts linked to this API key: account ID, account number,
     type (MARGIN/CASH), and label (Individual Cash, Roth IRA, etc.).
     """
-    return _webull(ctx).get(ACCOUNT_LIST, EmptyRequest()).to_markdown()
+    return _webull(ctx).get(ACCOUNT_LIST, EmptyRequest()).to_output()
 
 
 # ── Webull Market Data ──────────────────────────────────────
@@ -408,7 +408,7 @@ def get_instruments(ctx: Context, symbols: str, category: str = "US_STOCK") -> s
     symbols: comma-separated ticker symbols (e.g. 'AAPL,TSLA'). Max 100.
     category: 'US_STOCK' (default) or 'US_ETF'.
     """
-    return _webull(ctx).get(INSTRUMENTS, GetInstrumentsRequest(symbols, category)).to_markdown()
+    return _webull(ctx).get(INSTRUMENTS, GetInstrumentsRequest(symbols, category)).to_output()
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -427,7 +427,7 @@ def get_option_expirations(ctx: Context, symbol: str) -> str:
 
     Requires [tradier] section in ~/.tradingrc.
     """
-    return _tradier(ctx).get(t.EXPIRATIONS, t.GetExpirationsRequest(symbol)).to_markdown()
+    return _tradier(ctx).get(t.EXPIRATIONS, t.GetExpirationsRequest(symbol)).to_output()
 
 
 @mcp.tool()
@@ -440,7 +440,7 @@ def get_option_strikes(ctx: Context, symbol: str, expiration: str) -> str:
 
     Requires [tradier] section in ~/.tradingrc.
     """
-    return _tradier(ctx).get(t.STRIKES, t.GetStrikesRequest(symbol, expiration)).to_markdown()
+    return _tradier(ctx).get(t.STRIKES, t.GetStrikesRequest(symbol, expiration)).to_output()
 
 
 @mcp.tool()
@@ -479,7 +479,7 @@ def get_option_chain(
         hi = min(len(strikes), atm_idx + strike_count + 1)
         keep = set(strikes[lo:hi])
         resp.options = [o for o in resp.options if o["strike"] in keep]
-    return resp.to_markdown()
+    return resp.to_output()
 
 
 @mcp.tool()
@@ -493,7 +493,7 @@ def get_option_lookup(ctx: Context, underlying: str) -> str:
 
     Requires [tradier] section in ~/.tradingrc.
     """
-    return _tradier(ctx).get(t.OPTION_LOOKUP, t.GetLookupRequest(underlying)).to_markdown()
+    return _tradier(ctx).get(t.OPTION_LOOKUP, t.GetLookupRequest(underlying)).to_output()
 
 
 # ── Options Analytics ──────────────────────────────────────
@@ -724,7 +724,7 @@ def get_tradier_history(
     resp = _tradier(ctx).get(t.HISTORY, t.GetHistoryRequest(symbol, interval, start, end))
     if limit and resp.days:
         resp.days = resp.days[-limit:]
-    return resp.to_markdown()
+    return resp.to_output()
 
 
 @mcp.tool()
@@ -737,7 +737,7 @@ def search_symbols(ctx: Context, query: str, indexes: bool = False) -> str:
 
     Requires [tradier] section in ~/.tradingrc.
     """
-    return _tradier(ctx).get(t.SEARCH, t.SearchRequest(query, indexes)).to_markdown()
+    return _tradier(ctx).get(t.SEARCH, t.SearchRequest(query, indexes)).to_output()
 
 
 @mcp.tool()
@@ -759,7 +759,7 @@ def get_quote(ctx: Context, symbols: str, greeks: bool = False) -> str:
 
     Requires [tradier] section in ~/.tradingrc.
     """
-    return _tradier(ctx).get(t.QUOTES, t.GetQuotesRequest(symbols, greeks)).to_markdown()
+    return _tradier(ctx).get(t.QUOTES, t.GetQuotesRequest(symbols, greeks)).to_output()
 
 
 @mcp.tool()
@@ -785,7 +785,7 @@ def get_timesales(
     return (
         _tradier(ctx)
         .get(t.TIMESALES, t.GetTimesalesRequest(symbol, interval, start, end))
-        .to_markdown()
+        .to_output()
     )
 
 
@@ -796,7 +796,7 @@ def get_market_clock(ctx: Context) -> str:
 
     Requires [tradier] section in ~/.tradingrc.
     """
-    return _tradier(ctx).get(t.CLOCK, t.EmptyRequest()).to_markdown()
+    return _tradier(ctx).get(t.CLOCK, t.EmptyRequest()).to_output()
 
 
 # ── Technical Analysis ─────────────────────────────────────
@@ -943,7 +943,7 @@ def get_tradier_profile(ctx: Context) -> str:
     Use this to find your Tradier account_id.
     Requires [tradier] section in ~/.tradingrc.
     """
-    return _tradier(ctx).get(t.PROFILE, t.EmptyRequest()).to_markdown()
+    return _tradier(ctx).get(t.PROFILE, t.EmptyRequest()).to_output()
 
 
 @mcp.tool()
@@ -957,7 +957,7 @@ def get_tradier_balances(ctx: Context, account_id: str | None = None) -> str:
     client = _tradier(ctx)
     return client.get(
         t.BALANCES, t.AccountIdRequest(client.resolve_account_id(account_id))
-    ).to_markdown()
+    ).to_output()
 
 
 @mcp.tool()
@@ -971,7 +971,7 @@ def get_tradier_positions(ctx: Context, account_id: str | None = None) -> str:
     client = _tradier(ctx)
     return client.get(
         t.POSITIONS, t.AccountIdRequest(client.resolve_account_id(account_id))
-    ).to_markdown()
+    ).to_output()
 
 
 @mcp.tool()
@@ -995,7 +995,7 @@ def get_tradier_orders(
     return client.get(
         t.ORDERS,
         t.GetOrdersRequest(client.resolve_account_id(account_id), status, page, limit),
-    ).to_markdown()
+    ).to_output()
 
 
 @mcp.tool()
@@ -1010,7 +1010,7 @@ def get_tradier_order_detail(ctx: Context, order_id: str, account_id: str | None
     return client.get(
         t.ORDER_DETAIL,
         t.GetOrderDetailRequest(client.resolve_account_id(account_id), order_id),
-    ).to_markdown()
+    ).to_output()
 
 
 @mcp.tool()
@@ -1036,7 +1036,7 @@ def get_tradier_gainloss(
     return client.get(
         t.GAINLOSS,
         t.GetGainLossRequest(client.resolve_account_id(account_id), page, limit, sort_by, sort),
-    ).to_markdown()
+    ).to_output()
 
 
 @mcp.tool()
@@ -1060,7 +1060,7 @@ def get_tradier_account_history(
         t.GetAccountHistoryRequest(
             client.resolve_account_id(account_id), page, limit, activity_type
         ),
-    ).to_markdown()
+    ).to_output()
 
 
 # ── Tradier Order Management ───────────────────────────────
@@ -1105,7 +1105,7 @@ def place_tradier_order(ctx: Context, order_params: dict, account_id: str | None
     return client.post(
         t.PLACE_ORDER,
         t.PlaceOrderRequest(client.resolve_account_id(account_id), params),
-    ).to_markdown()
+    ).to_output()
 
 
 @mcp.tool()
@@ -1127,7 +1127,7 @@ def modify_tradier_order(
     return client.put(
         t.MODIFY_ORDER,
         t.ModifyOrderRequest(client.resolve_account_id(account_id), order_id, params),
-    ).to_markdown()
+    ).to_output()
 
 
 @mcp.tool()
@@ -1141,7 +1141,7 @@ def cancel_tradier_order(ctx: Context, order_id: str, account_id: str | None = N
     return client.delete(
         t.CANCEL_ORDER,
         t.CancelOrderRequest(client.resolve_account_id(account_id), order_id),
-    ).to_markdown()
+    ).to_output()
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1165,7 +1165,7 @@ def get_company_news(
     return (
         _finnhub(ctx)
         .get(fh.COMPANY_NEWS, fh.CompanyNewsRequest(symbol, from_date, to_date))
-        .to_markdown()
+        .to_output()
     )
 
 
@@ -1178,7 +1178,7 @@ def get_market_news(ctx: Context, category: str = "general", limit: int = 20) ->
 
     Requires [finnhub] section in ~/.tradingrc.
     """
-    return _finnhub(ctx).get(fh.MARKET_NEWS, fh.MarketNewsRequest(category)).to_markdown()
+    return _finnhub(ctx).get(fh.MARKET_NEWS, fh.MarketNewsRequest(category)).to_output()
 
 
 @mcp.tool()
@@ -1194,7 +1194,7 @@ def get_economic_calendar(ctx: Context, from_date: str, to_date: str) -> str:
     return (
         _finnhub(ctx)
         .get(fh.ECONOMIC_CALENDAR, fh.DateRangeRequest(from_date, to_date))
-        .to_markdown()
+        .to_output()
     )
 
 
@@ -1220,7 +1220,7 @@ def get_earnings_calendar(
     if symbol:
         resp.earnings = [e for e in resp.earnings if e.get("symbol", "").upper() == symbol.upper()]
     resp.earnings = resp.earnings[:limit]
-    return resp.to_markdown()
+    return resp.to_output()
 
 
 @mcp.tool()
@@ -1232,7 +1232,7 @@ def get_basic_financials(ctx: Context, symbol: str) -> str:
 
     Requires [finnhub] section in ~/.tradingrc.
     """
-    return _finnhub(ctx).get(fh.BASIC_FINANCIALS, fh.BasicFinancialsRequest(symbol)).to_markdown()
+    return _finnhub(ctx).get(fh.BASIC_FINANCIALS, fh.BasicFinancialsRequest(symbol)).to_output()
 
 
 @mcp.tool()
@@ -1245,7 +1245,7 @@ def get_eps_estimates(ctx: Context, symbol: str) -> str:
     Note: requires Finnhub premium plan. Free tier returns 403.
     Requires [finnhub] section in ~/.tradingrc.
     """
-    return _finnhub(ctx).get(fh.EPS_ESTIMATES, fh.SymbolRequest(symbol)).to_markdown()
+    return _finnhub(ctx).get(fh.EPS_ESTIMATES, fh.SymbolRequest(symbol)).to_output()
 
 
 @mcp.tool()
@@ -1257,7 +1257,7 @@ def get_recommendation_trends(ctx: Context, symbol: str) -> str:
 
     Requires [finnhub] section in ~/.tradingrc.
     """
-    return _finnhub(ctx).get(fh.RECOMMENDATIONS, fh.SymbolRequest(symbol)).to_markdown()
+    return _finnhub(ctx).get(fh.RECOMMENDATIONS, fh.SymbolRequest(symbol)).to_output()
 
 
 @mcp.tool()
@@ -1269,7 +1269,7 @@ def get_price_target(ctx: Context, symbol: str) -> str:
     Note: requires Finnhub premium plan. Free tier returns 403.
     Requires [finnhub] section in ~/.tradingrc.
     """
-    return _finnhub(ctx).get(fh.PRICE_TARGET, fh.SymbolRequest(symbol)).to_markdown()
+    return _finnhub(ctx).get(fh.PRICE_TARGET, fh.SymbolRequest(symbol)).to_output()
 
 
 @mcp.tool()
@@ -1284,7 +1284,7 @@ def get_insider_transactions(ctx: Context, symbol: str, limit: int = 20) -> str:
     """
     resp = _finnhub(ctx).get(fh.INSIDER_TRANSACTIONS, fh.SymbolRequest(symbol))
     resp.transactions = resp.transactions[:limit]
-    return resp.to_markdown()
+    return resp.to_output()
 
 
 @mcp.tool()
@@ -1301,7 +1301,7 @@ def get_dividends(ctx: Context, symbol: str, from_date: str, to_date: str) -> st
     return (
         _finnhub(ctx)
         .get(fh.DIVIDENDS, fh.DividendsRequest(symbol, from_date, to_date))
-        .to_markdown()
+        .to_output()
     )
 
 
@@ -1313,7 +1313,7 @@ def get_company_peers(ctx: Context, symbol: str) -> str:
 
     Requires [finnhub] section in ~/.tradingrc.
     """
-    return _finnhub(ctx).get(fh.PEERS, fh.SymbolRequest(symbol)).to_markdown()
+    return _finnhub(ctx).get(fh.PEERS, fh.SymbolRequest(symbol)).to_output()
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1329,7 +1329,7 @@ def get_company_profile(ctx: Context, symbol: str) -> str:
     symbol: ticker symbol (e.g. 'AAPL').
     Requires [fmp] section in ~/.tradingrc.
     """
-    return _fmp(ctx).get(fmp.PROFILE, fmp.SymbolRequest(symbol)).to_markdown()
+    return _fmp(ctx).get(fmp.PROFILE, fmp.SymbolRequest(symbol)).to_output()
 
 
 @mcp.tool()
@@ -1386,7 +1386,7 @@ def get_key_metrics(ctx: Context, symbol: str, period: str = "annual", limit: in
     limit: number of periods to return (default 4).
     Requires [fmp] section in ~/.tradingrc.
     """
-    return _fmp(ctx).get(fmp.KEY_METRICS, fmp.FinancialRequest(symbol, period, limit)).to_markdown()
+    return _fmp(ctx).get(fmp.KEY_METRICS, fmp.FinancialRequest(symbol, period, limit)).to_output()
 
 
 @mcp.tool()
@@ -1399,14 +1399,14 @@ def get_dividend_history(ctx: Context, symbol: str) -> str:
     fmp_client = ctx.request_context.lifespan_context.get("fmp")
     if fmp_client:
         try:
-            return fmp_client.get(fmp.DIVIDEND_HISTORY, fmp.SymbolRequest(symbol)).to_markdown()
+            return fmp_client.get(fmp.DIVIDEND_HISTORY, fmp.SymbolRequest(symbol)).to_output()
         except ValueError:
             pass  # FMP paywall — fall through to TastyTrade
     tt_client = ctx.request_context.lifespan_context.get("tastytrade")
     if tt_client:
         return tt_client.get(
             tt.DIVIDEND_HISTORY, tt.DividendHistoryRequest(symbol)
-        ).to_markdown()
+        ).to_output()
     raise RuntimeError(
         "No dividend data source available. Add [fmp] or [tastytrade] to ~/.tradingrc"
     )
@@ -1420,7 +1420,7 @@ def get_fmp_earnings_calendar(ctx: Context, symbol: str, limit: int = 5) -> str:
     limit: number of recent earnings to return (default 5).
     Requires [fmp] section in ~/.tradingrc.
     """
-    return _fmp(ctx).get(fmp.EARNINGS, fmp.EarningsRequest(symbol, limit)).to_markdown()
+    return _fmp(ctx).get(fmp.EARNINGS, fmp.EarningsRequest(symbol, limit)).to_output()
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1443,7 +1443,7 @@ def get_economic_data(
     Requires [fred] section in ~/.tradingrc.
     """
     req = fred.GetObservationsRequest(series_id, limit, sort_order)
-    return _fred(ctx).get(fred.OBSERVATIONS, req).to_markdown()
+    return _fred(ctx).get(fred.OBSERVATIONS, req).to_output()
 
 
 @mcp.tool()
@@ -1453,7 +1453,7 @@ def get_fred_series_info(ctx: Context, series_id: str) -> str:
     series_id: FRED series ID (e.g. 'CPIAUCSL', 'GDP', 'VIXCLS').
     Requires [fred] section in ~/.tradingrc.
     """
-    return _fred(ctx).get(fred.SERIES_INFO, fred.SeriesIdRequest(series_id)).to_markdown()
+    return _fred(ctx).get(fred.SERIES_INFO, fred.SeriesIdRequest(series_id)).to_output()
 
 
 @mcp.tool()
@@ -1463,7 +1463,7 @@ def get_upcoming_economic_releases(ctx: Context, limit: int = 20) -> str:
     limit: number of upcoming releases to return (default 20).
     Requires [fred] section in ~/.tradingrc.
     """
-    return _fred(ctx).get(fred.RELEASES, fred.GetReleasesRequest(limit)).to_markdown()
+    return _fred(ctx).get(fred.RELEASES, fred.GetReleasesRequest(limit)).to_output()
 
 
 @mcp.tool()
@@ -1476,7 +1476,7 @@ def search_fred_series(ctx: Context, query: str, limit: int = 10) -> str:
     Use the returned series_id with get_economic_data to fetch actual values.
     Requires [fred] section in ~/.tradingrc.
     """
-    return _fred(ctx).get(fred.SEARCH, fred.SearchRequest(query, limit)).to_markdown()
+    return _fred(ctx).get(fred.SEARCH, fred.SearchRequest(query, limit)).to_output()
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1504,7 +1504,7 @@ def get_news_sentiment(
     return (
         _alphavantage(ctx)
         .get(av.SENTIMENT, av.SentimentRequest(tickers, topics, limit=limit))
-        .to_markdown()
+        .to_output()
     )
 
 
@@ -1516,7 +1516,7 @@ def get_top_movers(ctx: Context) -> str:
     Rate limit: 25 requests/day. Use sparingly.
     Requires [alphavantage] section in ~/.tradingrc.
     """
-    return _alphavantage(ctx).get(av.MOVERS, av.MoversRequest()).to_markdown()
+    return _alphavantage(ctx).get(av.MOVERS, av.MoversRequest()).to_output()
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1539,7 +1539,7 @@ def get_iv_metrics(ctx: Context, symbols: str) -> str:
     """
     return _tastytrade(ctx).get(
         tt.MARKET_METRICS, tt.MarketMetricsRequest(symbols)
-    ).to_markdown()
+    ).to_output()
 
 
 @mcp.tool()
@@ -1554,7 +1554,7 @@ def get_public_watchlists(ctx: Context) -> str:
     """
     return _tastytrade(ctx).get(
         tt.PUBLIC_WATCHLISTS, tt.EmptyRequest()
-    ).to_markdown()
+    ).to_output()
 
 
 @mcp.tool()
@@ -1569,7 +1569,7 @@ def get_public_watchlist(ctx: Context, name: str) -> str:
     """
     return _tastytrade(ctx).get(
         tt.PUBLIC_WATCHLIST, tt.WatchlistRequest(name)
-    ).to_markdown()
+    ).to_output()
 
 
 @mcp.tool()
@@ -1643,13 +1643,13 @@ def backtest_strategy(
     )
     bt_id = result.data.get("id")
     if not bt_id:
-        return result.to_markdown()
+        return result.to_output()
 
     # Poll until complete (up to 5 minutes)
     for _ in range(100):
         result = client.get(tt.BACKTEST_GET, tt.BacktestIdRequest(bt_id))
         if result.data.get("status") == "completed":
-            return result.to_markdown()
+            return result.to_output()
         time.sleep(3)
 
     return f"Backtest {bt_id} still running. Check back later."
@@ -1708,7 +1708,7 @@ def screen_stocks(
             yh.CUSTOM_SCREEN,
             yh.ScreenRequest(criteria, sort_field, sort_dir, limit),
         )
-        .to_markdown()
+        .to_output()
     )
 
 
@@ -1736,7 +1736,7 @@ def get_predefined_screen(ctx: Context, screen_id: str, count: int = 25) -> str:
             yh.PREDEFINED_SCREEN,
             yh.PredefinedScreenRequest(screen_id, count),
         )
-        .to_markdown()
+        .to_output()
     )
 
 

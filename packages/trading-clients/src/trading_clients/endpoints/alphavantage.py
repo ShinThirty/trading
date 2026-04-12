@@ -49,7 +49,7 @@ class SentimentResponse:
     def from_response(cls, data: list[dict]) -> "SentimentResponse":
         return cls(articles=data or [])
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         if not self.articles:
             return "(no articles)"
         rows = [
@@ -73,7 +73,7 @@ class MoversResponse:
     def from_response(cls, data: dict) -> "MoversResponse":
         return cls(data=data or {})
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         if not self.data:
             return "(no data)"
         sections = []

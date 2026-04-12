@@ -66,7 +66,7 @@ class ObservationsResponse:
     def from_response(cls, data: list[dict]) -> "ObservationsResponse":
         return cls(observations=data or [])
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         if not self.observations:
             return "(no data)"
         return ", ".join(
@@ -82,7 +82,7 @@ class SeriesInfoResponse:
     def from_response(cls, data: dict) -> "SeriesInfoResponse":
         return cls(data=data or {})
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         if not self.data:
             return "(no data)"
         return kv_table(
@@ -105,7 +105,7 @@ class ReleasesResponse:
     def from_response(cls, data: list[dict]) -> "ReleasesResponse":
         return cls(releases=data or [])
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         if not self.releases:
             return "(no releases)"
         return ", ".join(
@@ -121,7 +121,7 @@ class FredSearchResponse:
     def from_response(cls, data: list[dict]) -> "FredSearchResponse":
         return cls(series=data or [])
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         if not self.series:
             return "(no results)"
         rows = [

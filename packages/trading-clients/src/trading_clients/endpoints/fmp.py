@@ -50,7 +50,7 @@ class ProfileResponse:
     def from_response(cls, data: dict) -> "ProfileResponse":
         return cls(data=data or {})
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         if not self.data:
             return "(no data)"
         return kv_table(
@@ -79,7 +79,7 @@ class IncomeStatementResponse:
     def from_response(cls, data: list[dict]) -> "IncomeStatementResponse":
         return cls(statements=data or [])
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         if not self.statements:
             return "(no data)"
         rows = [
@@ -105,7 +105,7 @@ class BalanceSheetResponse:
     def from_response(cls, data: list[dict]) -> "BalanceSheetResponse":
         return cls(statements=data or [])
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         if not self.statements:
             return "(no data)"
         rows = [
@@ -130,7 +130,7 @@ class CashFlowResponse:
     def from_response(cls, data: list[dict]) -> "CashFlowResponse":
         return cls(statements=data or [])
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         if not self.statements:
             return "(no data)"
         rows = [
@@ -155,7 +155,7 @@ class KeyMetricsResponse:
     def from_response(cls, data: list[dict]) -> "KeyMetricsResponse":
         return cls(metrics=data or [])
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         if not self.metrics:
             return "(no data)"
         rows = [
@@ -182,7 +182,7 @@ class FmpEarningsResponse:
     def from_response(cls, data: list[dict]) -> "FmpEarningsResponse":
         return cls(earnings=data or [])
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         if not self.earnings:
             return "(no data)"
         rows = [
@@ -207,7 +207,7 @@ class DividendHistoryResponse:
     def from_response(cls, data: list[dict]) -> "DividendHistoryResponse":
         return cls(dividends=data or [])
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         if not self.dividends:
             return "(no dividends)"
         rows = [

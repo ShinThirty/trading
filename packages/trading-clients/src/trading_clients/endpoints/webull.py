@@ -159,7 +159,7 @@ class AccountListResponse:
     def from_response(cls, data: list[dict]) -> "AccountListResponse":
         return cls(accounts=data or [])
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         if not self.accounts:
             return "(no accounts)"
         rows = [
@@ -206,7 +206,7 @@ class AccountBalanceResponse:
             available_withdrawal=usd.get("available_withdrawal", ""),
         )
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         selected = {
             "Net Liquidation": fmt_number(self.net_liquidation),
             "Market Value": fmt_number(self.market_value),
@@ -230,7 +230,7 @@ class PositionsResponse:
     def from_response(cls, data: list[dict]) -> "PositionsResponse":
         return cls(positions=data or [])
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         if not self.positions:
             return "(no positions)"
         has_options = any(p.get("legs") for p in self.positions)
@@ -276,7 +276,7 @@ class InstrumentsResponse:
     def from_response(cls, data: list[dict]) -> "InstrumentsResponse":
         return cls(instruments=data or [])
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         if not self.instruments:
             return "(no instruments)"
         rows = [
@@ -302,7 +302,7 @@ class OrderListResponse:
     def from_response(cls, data: list[dict]) -> "OrderListResponse":
         return cls(combos=data or [])
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         if not self.combos:
             return "(no orders)"
         rows = []
@@ -338,7 +338,7 @@ class OrderDetailResponse:
     def from_response(cls, data: dict) -> "OrderDetailResponse":
         return cls(combo=data or {})
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         orders = self.combo.get("orders", [])
         if not orders:
             return "(no data)"
@@ -379,7 +379,7 @@ class OrderResultResponse:
     def from_response(cls, data: dict) -> "OrderResultResponse":
         return cls(data=data or {})
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         if not self.data:
             return "(no data)"
         return kv_table(self.data)

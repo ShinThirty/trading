@@ -270,7 +270,7 @@ class ExpirationsResponse:
     def from_response(cls, data: list[str]) -> "ExpirationsResponse":
         return cls(dates=data or [])
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         if not self.dates:
             return "(no expirations)"
         return ", ".join(self.dates)
@@ -284,7 +284,7 @@ class StrikesResponse:
     def from_response(cls, data: list) -> "StrikesResponse":
         return cls(strikes=data or [])
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         if not self.strikes:
             return "(no strikes)"
         return ", ".join(fmt_number(s) for s in self.strikes)
@@ -298,7 +298,7 @@ class OptionChainResponse:
     def from_response(cls, data: list[dict]) -> "OptionChainResponse":
         return cls(options=data or [])
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         if not self.options:
             return "(no options)"
         rows = []
@@ -337,7 +337,7 @@ class OptionLookupResponse:
     def from_response(cls, data: list) -> "OptionLookupResponse":
         return cls(options=data or [])
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         if not self.options:
             return "(no options)"
         return ", ".join(str(o) for o in self.options)
@@ -351,7 +351,7 @@ class HistoryResponse:
     def from_response(cls, data: list[dict]) -> "HistoryResponse":
         return cls(days=data or [])
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         if not self.days:
             return "(no data)"
         rows = [
@@ -376,7 +376,7 @@ class SearchResponse:
     def from_response(cls, data: list[dict]) -> "SearchResponse":
         return cls(results=data or [])
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         if not self.results:
             return "(no results)"
         rows = [
@@ -399,7 +399,7 @@ class QuotesResponse:
     def from_response(cls, data: list[dict]) -> "QuotesResponse":
         return cls(quotes=data or [])
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         if not self.quotes:
             return "(no quotes)"
         rows = []
@@ -467,7 +467,7 @@ class TimesalesResponse:
     def from_response(cls, data: list[dict]) -> "TimesalesResponse":
         return cls(ticks=data or [])
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         if not self.ticks:
             return "(no data)"
         rows = [
@@ -493,7 +493,7 @@ class ClockResponse:
     def from_response(cls, data: dict) -> "ClockResponse":
         return cls(data=data or {})
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         if not self.data:
             return "(no data)"
         return kv_table(
@@ -516,7 +516,7 @@ class ProfileResponse:
     def from_response(cls, data: list[dict]) -> "ProfileResponse":
         return cls(accounts=data or [])
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         if not self.accounts:
             return "(no accounts)"
         rows = [
@@ -541,7 +541,7 @@ class BalancesResponse:
     def from_response(cls, data: dict) -> "BalancesResponse":
         return cls(data=data or {})
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         if not self.data:
             return "(no data)"
         selected = {
@@ -567,7 +567,7 @@ class PositionsResponse:
     def from_response(cls, data: list[dict]) -> "PositionsResponse":
         return cls(positions=data or [])
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         if not self.positions:
             return "(no positions)"
         rows = [
@@ -590,7 +590,7 @@ class OrdersResponse:
     def from_response(cls, data: list[dict]) -> "OrdersResponse":
         return cls(orders=data or [])
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         if not self.orders:
             return "(no orders)"
         rows = [
@@ -622,7 +622,7 @@ class KVResponse:
     def from_response(cls, data: dict) -> "KVResponse":
         return cls(data=data or {})
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         if not self.data:
             return "(no data)"
         return kv_table(self.data)
@@ -636,7 +636,7 @@ class GainLossResponse:
     def from_response(cls, data: list[dict]) -> "GainLossResponse":
         return cls(items=data or [])
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         if not self.items:
             return "(no closed positions)"
         rows = [
@@ -664,7 +664,7 @@ class AccountHistoryResponse:
     def from_response(cls, data: list[dict]) -> "AccountHistoryResponse":
         return cls(events=data or [])
 
-    def to_markdown(self) -> str:
+    def to_output(self) -> str:
         if not self.events:
             return "(no activity)"
         rows = [
