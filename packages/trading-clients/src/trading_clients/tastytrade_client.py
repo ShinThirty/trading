@@ -82,13 +82,14 @@ class TastyTradeClient(BaseClient):
 
         self._limiter.acquire()
         token = self._ensure_token()
+        base = endpoint.base_url or BASE_URL
         headers = {
             "Authorization": f"Bearer {token}",
             "Accept": "application/json",
             "Content-Type": "application/json",
         }
-        resp = self._http.get(
-            f"{BASE_URL}{resolved}", params=params, headers=headers
+        resp = self._http.request(
+            method, f"{base}{resolved}", params=params, json=body, headers=headers
         )
         resp.raise_for_status()
         data = resp.json()

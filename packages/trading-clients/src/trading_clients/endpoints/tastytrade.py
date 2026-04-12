@@ -1,8 +1,9 @@
 """TastyTrade API endpoint definitions with typed request/response models."""
 
 from dataclasses import dataclass
+from typing import Any
 
-from trading_clients.endpoint import Endpoint, ParamsRequest, PathRequest
+from trading_clients.endpoint import BodyRequest, Endpoint, ParamsRequest, PathRequest
 from trading_clients.table_helpers import fmt_number, list_table
 
 # ═══════════════════════════════════════════════════════════════
@@ -202,4 +203,114 @@ PUBLIC_WATCHLIST = Endpoint(
     cache_ttl=3600,
     response_model=WatchlistDetailResponse,
     extract=lambda d: d.get("data", d),
+)
+
+
+# ═══════════════════════════════════════════════════════════════
+# Backtesting
+# ═══════════════════════════════════════════════════════════════
+
+BACKTESTER_URL = "https://backtester.vast.tastyworks.com"
+
+
+@dataclass
+class BacktestRequest(BodyRequest):
+    symbol: str
+    start_date: str
+    end_date: str
+    legs: list[dict]
+    entry_conditions: dict
+    exit_conditions: dict
+
+    def to_body(self) -> dict[str, Any]:
+        return {
+            "symbol": self.symbol,
+            "startDate": self.start_date,
+            "endDate": self.end_date,
+            "legs": self.legs,
+            "entryConditions": self.entry_conditions,
+            "exitConditions": self.exit_conditions,
+        }
+
+
+@dataclass
+class BacktestIdRequest(PathRequest, ParamsRequest):
+    backtest_id: str
+
+    def to_path_params(self) -> dict[str, str]:
+        return {"id": self.backtest_id}
+
+    def to_params(self) -> dict[str, str]:
+        return {}
+
+
+@dataclass
+class BacktestResponse:
+    data: dict
+
+    @classmethod
+    def from_response(cls, data: dict) -> "BacktestResponse":
+        return cls(data=data or {})
+
+    def to_markdown(self) -> str:
+        if not self.data:
+            return "(no data)"
+        status = self.data.get("status", "")
+        if status != "completed":
+            progress = self.data.get("progress", 0)
+            bt_id = self.data.get("id", "")
+            return f"Backtest {bt_id}: {status} (progress: {progress})"
+
+        results = self.data.get("results", self.data)
+        trials = results.get("trials", [])
+        stats = results.get("statistics", {})
+
+        if not trials and not stats:
+            return "(no trials — entry conditions may be too restrictive)"
+
+        # Summary from statistics
+        lines: list[str] = []
+        if stats:
+            lines.append(
+                f"**{stats.get('Number of trades', 0)} trades** | "
+                f"Win: {stats.get('Win percentage', '?')}% | "
+                f"P&L: ${stats.get('Total profit/loss', '?')} | "
+                f"Avg premium: ${stats.get('Avg. premium', '?')}"
+            )
+            lines.append(
+                f"Avg win: ${stats.get('Avg. win size', '?')} | "
+                f"Avg loss: ${stats.get('Avg. loss size', '?')} | "
+                f"Worst: ${stats.get('Worst loss', '?')} | "
+                f"Best: ${stats.get('Highest profit', '?')}"
+            )
+            lines.append(
+                f"Avg DIT: {stats.get('Avg. days in trade', '?')} | "
+                f"Max DD: {stats.get('Max drawdown', '?')}% on "
+                f"{str(stats.get('Max drawdown date', ''))[:10]} | "
+                f"BPR/trade: ${stats.get('Avg. BPR per trade', '?')}"
+            )
+
+        # Individual trials
+        if trials:
+            lines.append("")
+            for t in trials:
+                pnl = float(t.get("profitLoss", 0))
+                m = "W" if pnl > 0 else "L"
+                o = str(t.get("openDateTime", ""))[:10]
+                c = str(t.get("closeDateTime", ""))[:10]
+                lines.append(f"{m} {o} -> {c}: ${pnl:.2f}")
+
+        return "\n".join(lines)
+
+
+BACKTEST_CREATE = Endpoint(
+    "/backtests",
+    response_model=BacktestResponse,
+    base_url=BACKTESTER_URL,
+)
+
+BACKTEST_GET = Endpoint(
+    "/backtests/{id}",
+    response_model=BacktestResponse,
+    base_url=BACKTESTER_URL,
 )

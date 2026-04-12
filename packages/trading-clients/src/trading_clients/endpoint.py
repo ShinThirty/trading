@@ -63,6 +63,7 @@ class Endpoint:
     rate_key: rate limiter bucket name (default = 'default').
     response_model: class with from_response(data) and to_markdown() methods.
     extract: optional callable to unwrap nested response dicts before parsing.
+    base_url: override the client's default base URL for this endpoint.
     """
 
     path: str
@@ -70,6 +71,7 @@ class Endpoint:
     rate_key: str = "default"
     response_model: type[ResponseModel] | None = None
     extract: Callable[[Any], Any] | None = None
+    base_url: str | None = None
 
 
 # ── BaseClient ──────────────────────────────────────────────
