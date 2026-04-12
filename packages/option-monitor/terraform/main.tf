@@ -10,7 +10,8 @@ terraform {
 }
 
 provider "aws" {
-  region = var.aws_region
+  region  = var.aws_region
+  profile = "personal"
 }
 
 # --- DynamoDB ---
@@ -82,7 +83,10 @@ data "aws_iam_policy_document" "lambda_permissions" {
       "logs:CreateLogStream",
       "logs:PutLogEvents",
     ]
-    resources = ["arn:aws:logs:${var.aws_region}:*:*"]
+    resources = [
+      "${aws_cloudwatch_log_group.monitor.arn}:*",
+      "${aws_cloudwatch_log_group.interaction.arn}:*",
+    ]
   }
 
   # DynamoDB (monitor: Get/Put, interaction: Update/Scan)
@@ -134,7 +138,7 @@ resource "aws_lambda_function" "monitor" {
   }
 }
 
-resource "aws_cloudwatch_log_group" "lambda" {
+resource "aws_cloudwatch_log_group" "monitor" {
   name              = "/aws/lambda/${aws_lambda_function.monitor.function_name}"
   retention_in_days = 14
 
@@ -155,7 +159,7 @@ resource "aws_cloudwatch_event_rule" "schedule" {
   }
 }
 
-resource "aws_cloudwatch_event_target" "lambda" {
+resource "aws_cloudwatch_event_target" "monitor" {
   rule = aws_cloudwatch_event_rule.schedule.name
   arn  = aws_lambda_function.monitor.arn
 }
@@ -215,9 +219,3 @@ resource "aws_lambda_permission" "function_url_public" {
   function_url_auth_type = "NONE"
 }
 
-resource "aws_lambda_permission" "function_url_invoke" {
-  statement_id  = "AllowPublicInvoke"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.interaction.function_name
-  principal     = "*"
-}

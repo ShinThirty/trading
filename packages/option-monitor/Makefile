@@ -23,8 +23,8 @@ DISCORD_PUBLIC_KEY := $(shell python3 -c "$(READ_RC); print(c['discord']['public
 DISCORD_APP_ID     := $(shell python3 -c "$(READ_RC); print(c['discord']['application_id'])" 2>/dev/null)
 DISCORD_BOT_TOKEN  := $(shell python3 -c "$(READ_RC); print(c['discord']['bot_token'])" 2>/dev/null)
 
-# AWS credentials: uses default credential chain (profile, env vars, SSO, etc.)
-# If needed, set AWS_PROFILE=personal before running make.
+# AWS credentials: uses "personal" profile with credential_process bridge to aws login
+export AWS_PROFILE := personal
 
 .PHONY: build deploy destroy credentials credentials-delete register-commands test test-local init clean
 
