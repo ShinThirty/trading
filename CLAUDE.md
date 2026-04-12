@@ -48,13 +48,15 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │       ├── fmp_client.py            # API key auth
 │   │       ├── fred_client.py           # API key auth
 │   │       ├── alphavantage_client.py   # API key auth
+│   │       ├── tastytrade_client.py     # OAuth2 refresh token auth
 │   │       └── endpoints/               # Typed request/response models + Endpoint defs
 │   │           ├── webull.py            # 11 endpoints (account, orders, instruments)
 │   │           ├── tradier.py           # 19 endpoints (options, quotes, account, orders)
 │   │           ├── finnhub.py           # 11 endpoints (news, earnings, financials)
 │   │           ├── fmp.py               # 7 endpoints (financial statements, profiles)
 │   │           ├── fred.py              # 4 endpoints (economic data series)
-│   │           └── alphavantage.py      # 2 endpoints (sentiment, movers)
+│   │           ├── alphavantage.py      # 2 endpoints (sentiment, movers)
+│   │           └── tastytrade.py        # 5 endpoints (IV metrics, backtesting, watchlists, dividends)
 │   ├── trading-mcp/                     # MCP server (thin shell)
 │   │   ├── pyproject.toml               # depends on: trading-clients + mcp[cli]
 │   │   └── src/trading_mcp/
@@ -100,7 +102,7 @@ MCP tool call (server.py)
     → BaseClient resolves path templates (PathRequest)
     → client._request() handles auth, HTTP, caching, rate limiting
     → BaseClient._decode() extracts + transforms via response model
-  → returns markdown string to FastMCP
+  → returns formatted string via .to_output() to FastMCP
 ```
 
 ### Data Flow — Option Monitor
@@ -126,7 +128,7 @@ EventBridge (cron, Mon-Fri 13:30-20:00 UTC)
 ### Layered Design (inspired by Sarama)
 
 1. **Request mixins** (`endpoint.py`): `PathRequest`, `ParamsRequest`, `BodyRequest` — the three ways data is sent in HTTP. Request models compose these to express their contract.
-2. **Endpoint definitions** (`endpoints/*.py`): Each endpoint bundles its path, cache TTL, rate key, response model, and optional extract function. Response models have `from_response()` + `to_markdown()`.
+2. **Endpoint definitions** (`endpoints/*.py`): Each endpoint bundles its path, cache TTL, rate key, response model, optional extract function, and optional `base_url` override. Response models have `from_response()` + `to_output()`.
 3. **Client transport** (`*_client.py`): Thin HTTP wrappers. Each extends `BaseClient` and implements `_request()` with provider-specific auth.
 4. **Server tools** (`server.py`): MCP tool functions create typed requests and call `client.get/post(ENDPOINT, request)`.
 
@@ -140,6 +142,7 @@ EventBridge (cron, Mon-Fri 13:30-20:00 UTC)
 | **FMP** | Financial statements, company profiles | API key |
 | **FRED** | Macroeconomic data (CPI, GDP, VIX, rates) | API key |
 | **Alpha Vantage** | News sentiment, top market movers | API key |
+| **TastyTrade** | IV rank/percentile, backtesting, watchlists, dividends | OAuth2 refresh token |
 
 ### No Webull SDK
 
@@ -173,6 +176,10 @@ api_key = <your_api_key>
 [alphavantage]
 api_key = <your_api_key>
 
+[tastytrade]
+client_secret = <your_oauth_client_secret>
+refresh_token = <your_oauth_refresh_token>
+
 [discord]
 webhook_url = <discord_webhook_url_for_option_monitor>
 ```
@@ -194,8 +201,18 @@ All Webull endpoints use the v2 API (`x-version: v2` header). Stock and option o
 - All MCP tools are defined in `server.py` and delegate to `client.get/post(ENDPOINT, request)`
 - Each provider has its own client file (thin transport) and endpoint file (typed models) in trading-clients
 - Client helper functions in server.py (`_webull()`, `_tradier()`, etc.) extract the client from lifespan context and raise a clear error if the provider isn't configured
-- MCP server calls `.to_markdown()` on response models; option-monitor accesses typed fields directly
+- MCP server calls `.to_output()` on response models; option-monitor accesses typed fields directly
 - Ruff rules: E, F, I (isort), UP (pyupgrade). Line length: 100.
+
+### Output Format Convention
+
+Response models implement `to_output()` (not `to_markdown()`) to produce LLM-friendly text. Choose the format based on data shape:
+
+- **Markdown table** (`list_table`/`kv_table`): Multi-column comparison data where column alignment aids readability (option chains, quotes, financial statements, IV metrics, earnings, orders, positions).
+- **CSV / inline**: Single-column lists or simple key-value pairs (expirations, strikes, symbols, peers, FRED observations, dividend dates, watchlists).
+- **Custom text**: Complex multi-section responses (backtest results, top movers).
+
+Rule of thumb: if it has 3+ columns that benefit from side-by-side comparison, use a table. Otherwise use comma-separated inline format to minimize LLM context usage.
 
 ### Adding a New API Provider
 
@@ -203,8 +220,8 @@ All Webull endpoints use the v2 API (`x-version: v2` header). Stock and option o
 
 2. **Endpoints** (`trading-clients/endpoints/newprovider.py`): Define for each endpoint:
    - A **request model** (dataclass extending `ParamsRequest`, `BodyRequest`, and/or `PathRequest`)
-   - A **response model** (dataclass with `from_response(data)` classmethod and `to_markdown()` method)
-   - An **Endpoint** constant with path, cache_ttl, rate_key, response_model, and optional extract function
+   - A **response model** (dataclass with `from_response(data)` classmethod and `to_output()` method)
+   - An **Endpoint** constant with path, cache_ttl, rate_key, response_model, optional extract function, and optional base_url
 
 3. **Client** (`trading-clients/newprovider_client.py`): Create a class extending `BaseClient` with:
    - `__init__` taking the config, creating `httpx.Client`, `TTLCache`, `RateLimiter`
