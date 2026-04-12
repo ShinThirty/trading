@@ -10,6 +10,7 @@ from trading_clients.config import load_config
 from trading_clients.endpoints import alphavantage as av
 from trading_clients.endpoints import finnhub as fh
 from trading_clients.endpoints import fmp, fred
+from trading_clients.endpoints import tastytrade as tt
 from trading_clients.endpoints import tradier as t
 from trading_clients.endpoints import yahoo as yh
 from trading_clients.endpoints.webull import (
@@ -38,6 +39,7 @@ from trading_clients.endpoints.webull import (
 from trading_clients.finnhub_client import FinnhubClient
 from trading_clients.fmp_client import FmpClient
 from trading_clients.fred_client import FredClient
+from trading_clients.tastytrade_client import TastyTradeClient
 from trading_clients.tradier_client import TradierClient
 from trading_clients.webull_client import WebullClient
 from trading_clients.yahoo_client import YahooClient
@@ -57,6 +59,8 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
         ctx["fred"] = FredClient(config.fred)
     if config.alphavantage:
         ctx["alphavantage"] = AlphaVantageClient(config.alphavantage)
+    if config.tastytrade:
+        ctx["tastytrade"] = TastyTradeClient(config.tastytrade)
     ctx["yahoo"] = YahooClient()
     try:
         yield ctx
@@ -114,6 +118,16 @@ def _alphavantage(ctx: Context) -> AlphaVantageClient:
 
 def _yahoo(ctx: Context) -> YahooClient:
     return ctx.request_context.lifespan_context["yahoo"]
+
+
+def _tastytrade(ctx: Context) -> TastyTradeClient:
+    client = ctx.request_context.lifespan_context.get("tastytrade")
+    if client is None:
+        raise RuntimeError(
+            "TastyTrade not configured. Add [tastytrade] section to ~/.tradingrc "
+            "with client_secret and refresh_token."
+        )
+    return client
 
 
 def _check_market(ctx: Context, order_type: str, extended_hours: bool) -> None:
@@ -1490,6 +1504,29 @@ def get_top_movers(ctx: Context) -> str:
     Requires [alphavantage] section in ~/.tradingrc.
     """
     return _alphavantage(ctx).get(av.MOVERS, av.MoversRequest()).to_markdown()
+
+
+# ═══════════════════════════════════════════════════════════════
+# TASTYTRADE — IV Rank, IV Percentile, Market Metrics
+# ═══════════════════════════════════════════════════════════════
+
+
+@mcp.tool()
+def get_iv_metrics(ctx: Context, symbols: str) -> str:
+    """Get implied volatility metrics: IV rank, IV percentile, IV index, 30-day IV,
+    5-day IV change, next earnings date, and liquidity rating.
+
+    IV Rank shows where current IV sits relative to its 52-week high/low (0-100).
+    IV Percentile shows what % of days in the past year had lower IV (0-100%).
+    Use these to time premium-selling strategies: high IV Rank = rich premiums.
+
+    symbols: comma-separated ticker symbols (e.g. 'AAPL,QCOM,ADBE').
+
+    Requires [tastytrade] section in ~/.tradingrc.
+    """
+    return _tastytrade(ctx).get(
+        tt.MARKET_METRICS, tt.MarketMetricsRequest(symbols)
+    ).to_markdown()
 
 
 # ═══════════════════════════════════════════════════════════════

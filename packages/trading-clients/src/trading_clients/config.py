@@ -42,6 +42,12 @@ class AlphaVantageConfig:
 
 
 @dataclass(frozen=True)
+class TastyTradeConfig:
+    client_secret: str
+    refresh_token: str
+
+
+@dataclass(frozen=True)
 class AppConfig:
     webull: WebullConfig
     tradier: TradierConfig | None = None
@@ -49,6 +55,7 @@ class AppConfig:
     fmp: FmpConfig | None = None
     fred: FredConfig | None = None
     alphavantage: AlphaVantageConfig | None = None
+    tastytrade: TastyTradeConfig | None = None
 
 
 def load_config(path: Path = RC_PATH) -> AppConfig:
@@ -106,6 +113,14 @@ def load_config(path: Path = RC_PATH) -> AppConfig:
     if parser.has_section("alphavantage"):
         alphavantage = AlphaVantageConfig(api_key=parser.get("alphavantage", "api_key"))
 
+    # TastyTrade (optional)
+    tastytrade = None
+    if parser.has_section("tastytrade"):
+        tastytrade = TastyTradeConfig(
+            client_secret=parser.get("tastytrade", "client_secret"),
+            refresh_token=parser.get("tastytrade", "refresh_token"),
+        )
+
     return AppConfig(
         webull=webull,
         tradier=tradier,
@@ -113,6 +128,7 @@ def load_config(path: Path = RC_PATH) -> AppConfig:
         fmp=fmp,
         fred=fred,
         alphavantage=alphavantage,
+        tastytrade=tastytrade,
     )
 
 
