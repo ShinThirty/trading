@@ -127,14 +127,11 @@ class DividendHistoryResponse:
     def to_markdown(self) -> str:
         if not self.dividends:
             return "(no dividends)"
-        rows = [
-            {
-                "Ex-Date": d.get("occurred-date", ""),
-                "Dividend": fmt_number(d.get("amount"), 4),
-            }
+        entries = [
+            f"{d.get('occurred-date', '')} ${fmt_number(d.get('amount'), 4)}"
             for d in self.dividends
         ]
-        return list_table(rows)
+        return ", ".join(entries)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -167,14 +164,11 @@ class WatchlistsResponse:
     def to_markdown(self) -> str:
         if not self.watchlists:
             return "(no watchlists)"
-        rows = [
-            {
-                "Name": w.get("name", ""),
-                "Symbols": str(len(w.get("watchlist-entries", []))),
-            }
+        entries = [
+            f"{w.get('name', '')} ({len(w.get('watchlist-entries', []))})"
             for w in self.watchlists
         ]
-        return list_table(rows)
+        return ", ".join(entries)
 
 
 @dataclass
