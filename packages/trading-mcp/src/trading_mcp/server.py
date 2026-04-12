@@ -435,23 +435,37 @@ def get_option_chain(
     symbol: str,
     expiration: str,
     greeks: bool = True,
+    strike_count: int = 15,
 ) -> str:
-    """Get the full option chain for an underlying symbol at a specific expiration.
+    """Get the option chain for an underlying symbol at a specific expiration.
 
-    Returns all calls and puts with: bid/ask with sizes, last price, day change/%,
-    volume, open interest, and optionally greeks (IV, delta, gamma, theta, vega, rho).
+    Returns calls and puts near the money with: bid/ask with sizes, last price,
+    day change/%, volume, open interest, and optionally greeks (IV, delta, gamma,
+    theta, vega, rho).
 
     symbol: underlying ticker symbol (e.g. 'AAPL').
     expiration: expiration date (YYYY-MM-DD, from get_option_expirations).
     greeks: include greeks and IV per contract (default True).
+    strike_count: number of strikes above and below ATM to include (default 15).
+      Set to 0 for the full unfiltered chain.
 
     Typical workflow:
     1. get_option_expirations('AAPL') → list of dates
-    2. get_option_chain('AAPL', '2026-04-17') → full chain with greeks
+    2. get_option_chain('AAPL', '2026-04-17') → chain with greeks
 
     Requires [tradier] section in ~/.tradingrc.
     """
-    return _tradier(ctx).get(t.CHAIN, t.GetChainRequest(symbol, expiration, greeks)).to_markdown()
+    resp = _tradier(ctx).get(t.CHAIN, t.GetChainRequest(symbol, expiration, greeks))
+    if resp.options and strike_count > 0:
+        strikes = sorted({o["strike"] for o in resp.options})
+        mid = (strikes[0] + strikes[-1]) / 2
+        # Find the strike closest to midpoint of the tradeable range (≈ ATM)
+        atm_idx = min(range(len(strikes)), key=lambda i: abs(strikes[i] - mid))
+        lo = max(0, atm_idx - strike_count)
+        hi = min(len(strikes), atm_idx + strike_count + 1)
+        keep = set(strikes[lo:hi])
+        resp.options = [o for o in resp.options if o["strike"] in keep]
+    return resp.to_markdown()
 
 
 @mcp.tool()
@@ -588,25 +602,28 @@ def analyze_option_strategy(
         strike = float(leg["strike"])
         otype = leg["option_type"]
         matches = [
-            o for o in chain.options
+            o
+            for o in chain.options
             if o.get("option_type") == otype and abs(o["strike"] - strike) < 0.01
         ]
         if not matches:
             return f"(no {otype} at strike {strike} for {expiration})"
         opt = matches[0]
         greeks = opt.get("greeks") or {}
-        enriched_legs.append({
-            "strike": strike,
-            "option_type": otype,
-            "side": leg["side"],
-            "quantity": leg.get("quantity", 1),
-            "premium": opts.mid_price(opt),
-            "delta": greeks.get("delta"),
-            "iv": greeks.get("mid_iv"),
-            "bid": opt.get("bid"),
-            "ask": opt.get("ask"),
-            "occ_symbol": opt.get("symbol", ""),
-        })
+        enriched_legs.append(
+            {
+                "strike": strike,
+                "option_type": otype,
+                "side": leg["side"],
+                "quantity": leg.get("quantity", 1),
+                "premium": opts.mid_price(opt),
+                "delta": greeks.get("delta"),
+                "iv": greeks.get("mid_iv"),
+                "bid": opt.get("bid"),
+                "ask": opt.get("ask"),
+                "occ_symbol": opt.get("symbol", ""),
+            }
+        )
 
     # Run strategy analysis
     result = opts.strategy_analysis(enriched_legs, stock_price)
@@ -616,17 +633,19 @@ def analyze_option_strategy(
 
     leg_rows = []
     for el in enriched_legs:
-        leg_rows.append({
-            "Side": el["side"].upper(),
-            "Type": el["option_type"].upper(),
-            "Strike": fmt_number(el["strike"]),
-            "Bid": fmt_number(el["bid"]),
-            "Ask": fmt_number(el["ask"]),
-            "Mid": fmt_number(el["premium"]),
-            "Delta": fmt_number(el["delta"], 3) if el["delta"] else "",
-            "IV": f"{el['iv'] * 100:.1f}%" if el["iv"] else "",
-            "Qty": str(el["quantity"]),
-        })
+        leg_rows.append(
+            {
+                "Side": el["side"].upper(),
+                "Type": el["option_type"].upper(),
+                "Strike": fmt_number(el["strike"]),
+                "Bid": fmt_number(el["bid"]),
+                "Ask": fmt_number(el["ask"]),
+                "Mid": fmt_number(el["premium"]),
+                "Delta": fmt_number(el["delta"], 3) if el["delta"] else "",
+                "IV": f"{el['iv'] * 100:.1f}%" if el["iv"] else "",
+                "Qty": str(el["quantity"]),
+            }
+        )
 
     # Build summary
     data: dict[str, str] = {
@@ -673,6 +692,7 @@ def get_tradier_history(
     interval: str = "daily",
     start: str | None = None,
     end: str | None = None,
+    limit: int | None = None,
 ) -> str:
     """Get historical OHLCV pricing data. Works for both stocks AND option contracts.
 
@@ -683,14 +703,14 @@ def get_tradier_history(
     interval: 'daily', 'weekly', or 'monthly'.
     start: start date (YYYY-MM-DD). Defaults to beginning of available data.
     end: end date (YYYY-MM-DD). Defaults to today.
+    limit: max number of bars to return, keeping the most recent. Default: all bars.
 
     Requires [tradier] section in ~/.tradingrc.
     """
-    return (
-        _tradier(ctx)
-        .get(t.HISTORY, t.GetHistoryRequest(symbol, interval, start, end))
-        .to_markdown()
-    )
+    resp = _tradier(ctx).get(t.HISTORY, t.GetHistoryRequest(symbol, interval, start, end))
+    if limit and resp.days:
+        resp.days = resp.days[-limit:]
+    return resp.to_markdown()
 
 
 @mcp.tool()
@@ -822,8 +842,7 @@ def get_technical_indicators(
         if m is not None and s is not None and h is not None:
             trend = "bullish" if h > 0 else "bearish"
             sections.append(
-                f"**MACD(12,26,9):** line={m:.2f}, signal={s:.2f}, "
-                f"histogram={h:.2f} ({trend})"
+                f"**MACD(12,26,9):** line={m:.2f}, signal={s:.2f}, histogram={h:.2f} ({trend})"
             )
 
     if "sma" in indicators:
@@ -1166,20 +1185,28 @@ def get_economic_calendar(ctx: Context, from_date: str, to_date: str) -> str:
 
 
 @mcp.tool()
-def get_earnings_calendar(ctx: Context, from_date: str, to_date: str, limit: int = 50) -> str:
+def get_earnings_calendar(
+    ctx: Context,
+    from_date: str,
+    to_date: str,
+    symbol: str | None = None,
+    limit: int = 50,
+) -> str:
     """Get upcoming and recent earnings reports. Automatically filters out micro-caps.
 
     from_date: start date (YYYY-MM-DD).
     to_date: end date (YYYY-MM-DD).
+    symbol: optional ticker to filter for (e.g. 'TSLA'). Returns only that symbol's
+      earnings entry when set.
     limit: max number of entries to return (default 50).
 
     Requires [finnhub] section in ~/.tradingrc.
     """
-    return (
-        _finnhub(ctx)
-        .get(fh.EARNINGS_CALENDAR, fh.DateRangeRequest(from_date, to_date))
-        .to_markdown()
-    )
+    resp = _finnhub(ctx).get(fh.EARNINGS_CALENDAR, fh.DateRangeRequest(from_date, to_date))
+    if symbol:
+        resp.earnings = [e for e in resp.earnings if e.get("symbol", "").upper() == symbol.upper()]
+    resp.earnings = resp.earnings[:limit]
+    return resp.to_markdown()
 
 
 @mcp.tool()
@@ -1241,7 +1268,9 @@ def get_insider_transactions(ctx: Context, symbol: str, limit: int = 20) -> str:
 
     Requires [finnhub] section in ~/.tradingrc.
     """
-    return _finnhub(ctx).get(fh.INSIDER_TRANSACTIONS, fh.SymbolRequest(symbol)).to_markdown()
+    resp = _finnhub(ctx).get(fh.INSIDER_TRANSACTIONS, fh.SymbolRequest(symbol))
+    resp.transactions = resp.transactions[:limit]
+    return resp.to_markdown()
 
 
 @mcp.tool()
@@ -1300,9 +1329,7 @@ def get_income_statement(ctx: Context, symbol: str, period: str = "annual", limi
     Requires [finnhub] section in ~/.tradingrc.
     """
     freq = "quarterly" if period in ("quarter", "quarterly") else "annual"
-    result = _finnhub(ctx).get(
-        fh.FINANCIALS_REPORTED, fh.FinancialsReportedRequest(symbol, freq)
-    )
+    result = _finnhub(ctx).get(fh.FINANCIALS_REPORTED, fh.FinancialsReportedRequest(symbol, freq))
     return result.income_markdown(limit)
 
 
@@ -1317,9 +1344,7 @@ def get_balance_sheet(ctx: Context, symbol: str, period: str = "annual", limit: 
     Requires [finnhub] section in ~/.tradingrc.
     """
     freq = "quarterly" if period in ("quarter", "quarterly") else "annual"
-    result = _finnhub(ctx).get(
-        fh.FINANCIALS_REPORTED, fh.FinancialsReportedRequest(symbol, freq)
-    )
+    result = _finnhub(ctx).get(fh.FINANCIALS_REPORTED, fh.FinancialsReportedRequest(symbol, freq))
     return result.balance_sheet_markdown(limit)
 
 
@@ -1334,9 +1359,7 @@ def get_cash_flow(ctx: Context, symbol: str, period: str = "annual", limit: int 
     Requires [finnhub] section in ~/.tradingrc.
     """
     freq = "quarterly" if period in ("quarter", "quarterly") else "annual"
-    result = _finnhub(ctx).get(
-        fh.FINANCIALS_REPORTED, fh.FinancialsReportedRequest(symbol, freq)
-    )
+    result = _finnhub(ctx).get(fh.FINANCIALS_REPORTED, fh.FinancialsReportedRequest(symbol, freq))
     return result.cash_flow_markdown(limit)
 
 
@@ -1516,10 +1539,14 @@ def screen_stocks(
 
     Uses Yahoo Finance (no API key required). Data is 15-minute delayed.
     """
-    return _yahoo(ctx).post(
-        yh.CUSTOM_SCREEN,
-        yh.ScreenRequest(criteria, sort_field, sort_dir, limit),
-    ).to_markdown()
+    return (
+        _yahoo(ctx)
+        .post(
+            yh.CUSTOM_SCREEN,
+            yh.ScreenRequest(criteria, sort_field, sort_dir, limit),
+        )
+        .to_markdown()
+    )
 
 
 @mcp.tool()
@@ -1540,10 +1567,14 @@ def get_predefined_screen(ctx: Context, screen_id: str, count: int = 25) -> str:
 
     Uses Yahoo Finance (no API key required). Data is 15-minute delayed.
     """
-    return _yahoo(ctx).get(
-        yh.PREDEFINED_SCREEN,
-        yh.PredefinedScreenRequest(screen_id, count),
-    ).to_markdown()
+    return (
+        _yahoo(ctx)
+        .get(
+            yh.PREDEFINED_SCREEN,
+            yh.PredefinedScreenRequest(screen_id, count),
+        )
+        .to_markdown()
+    )
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1575,11 +1606,7 @@ def get_youtube_transcript(ctx: Context, url: str) -> str:
     transcript = api.fetch(video_id)
     full_text = " ".join(s.text for s in transcript.snippets)
     kind = "auto-generated" if transcript.is_generated else "manual"
-    return (
-        f"**Video ID:** {video_id}\n"
-        f"**Language:** {transcript.language} ({kind})\n\n"
-        f"{full_text}"
-    )
+    return f"**Video ID:** {video_id}\n**Language:** {transcript.language} ({kind})\n\n{full_text}"
 
 
 # ═══════════════════════════════════════════════════════════════
