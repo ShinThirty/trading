@@ -1542,6 +1542,36 @@ def get_iv_metrics(ctx: Context, symbols: str) -> str:
     ).to_markdown()
 
 
+@mcp.tool()
+def get_public_watchlists(ctx: Context) -> str:
+    """List all TastyTrade curated watchlists with symbol counts.
+
+    Includes sector lists, high IV rank names, liquid options, dividend aristocrats,
+    earnings calendars, and more. Use get_public_watchlist to get the symbols in
+    a specific list.
+
+    Requires [tastytrade] section in ~/.tradingrc.
+    """
+    return _tastytrade(ctx).get(
+        tt.PUBLIC_WATCHLISTS, tt.EmptyRequest()
+    ).to_markdown()
+
+
+@mcp.tool()
+def get_public_watchlist(ctx: Context, name: str) -> str:
+    """Get all symbols in a TastyTrade curated watchlist.
+
+    name: watchlist name (e.g. 'tasty IVR', 'High Options Volume',
+      '52 Week Near Low', 'A.I. Stocks', 'Dividend Aristocrats').
+      Use get_public_watchlists to see available names.
+
+    Requires [tastytrade] section in ~/.tradingrc.
+    """
+    return _tastytrade(ctx).get(
+        tt.PUBLIC_WATCHLIST, tt.WatchlistRequest(name)
+    ).to_markdown()
+
+
 # ═══════════════════════════════════════════════════════════════
 # YAHOO FINANCE — Stock Screener
 # ═══════════════════════════════════════════════════════════════

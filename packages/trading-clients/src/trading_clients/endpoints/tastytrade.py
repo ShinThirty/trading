@@ -29,6 +29,23 @@ class DividendHistoryRequest(PathRequest, ParamsRequest):
         return {}
 
 
+@dataclass
+class EmptyRequest(ParamsRequest):
+    def to_params(self) -> dict[str, str]:
+        return {}
+
+
+@dataclass
+class WatchlistRequest(PathRequest, ParamsRequest):
+    name: str
+
+    def to_path_params(self) -> dict[str, str]:
+        return {"name": self.name}
+
+    def to_params(self) -> dict[str, str]:
+        return {}
+
+
 # ═══════════════════════════════════════════════════════════════
 # Response Models
 # ═══════════════════════════════════════════════════════════════
@@ -136,4 +153,64 @@ DIVIDEND_HISTORY = Endpoint(
     cache_ttl=3600,
     response_model=DividendHistoryResponse,
     extract=lambda d: d.get("data", {}).get("items", d.get("items", [])),
+)
+
+
+@dataclass
+class WatchlistsResponse:
+    watchlists: list[dict]
+
+    @classmethod
+    def from_response(cls, data: list[dict]) -> "WatchlistsResponse":
+        return cls(watchlists=data or [])
+
+    def to_markdown(self) -> str:
+        if not self.watchlists:
+            return "(no watchlists)"
+        rows = [
+            {
+                "Name": w.get("name", ""),
+                "Symbols": str(len(w.get("watchlist-entries", []))),
+            }
+            for w in self.watchlists
+        ]
+        return list_table(rows)
+
+
+@dataclass
+class WatchlistDetailResponse:
+    watchlist: dict
+
+    @classmethod
+    def from_response(cls, data: dict) -> "WatchlistDetailResponse":
+        return cls(watchlist=data or {})
+
+    def to_markdown(self) -> str:
+        if not self.watchlist:
+            return "(no watchlist)"
+        entries = self.watchlist.get("watchlist-entries", [])
+        if not entries:
+            return "(empty watchlist)"
+        rows = [
+            {
+                "Symbol": e.get("symbol", ""),
+                "Type": e.get("instrument-type", ""),
+            }
+            for e in entries
+        ]
+        return list_table(rows)
+
+
+PUBLIC_WATCHLISTS = Endpoint(
+    "/public-watchlists",
+    cache_ttl=3600,
+    response_model=WatchlistsResponse,
+    extract=lambda d: d.get("data", {}).get("items", d.get("items", [])),
+)
+
+PUBLIC_WATCHLIST = Endpoint(
+    "/public-watchlists/{name}",
+    cache_ttl=3600,
+    response_model=WatchlistDetailResponse,
+    extract=lambda d: d.get("data", d),
 )
