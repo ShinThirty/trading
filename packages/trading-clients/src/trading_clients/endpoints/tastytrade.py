@@ -191,14 +191,9 @@ class WatchlistDetailResponse:
         entries = self.watchlist.get("watchlist-entries", [])
         if not entries:
             return "(empty watchlist)"
-        rows = [
-            {
-                "Symbol": e.get("symbol", ""),
-                "Type": e.get("instrument-type", ""),
-            }
-            for e in entries
-        ]
-        return list_table(rows)
+        name = self.watchlist.get("name", "Watchlist")
+        symbols = [e.get("symbol", "") for e in entries if e.get("symbol")]
+        return f"**{name}** ({len(symbols)} symbols): {', '.join(symbols)}"
 
 
 PUBLIC_WATCHLISTS = Endpoint(
