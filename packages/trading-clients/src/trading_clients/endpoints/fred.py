@@ -69,8 +69,9 @@ class ObservationsResponse:
     def to_markdown(self) -> str:
         if not self.observations:
             return "(no data)"
-        rows = [{"Date": o.get("date", ""), "Value": o.get("value", "")} for o in self.observations]
-        return list_table(rows)
+        return ", ".join(
+            f"{o.get('date', '')}: {o.get('value', '')}" for o in self.observations
+        )
 
 
 @dataclass
@@ -107,15 +108,9 @@ class ReleasesResponse:
     def to_markdown(self) -> str:
         if not self.releases:
             return "(no releases)"
-        rows = [
-            {
-                "Release ID": str(r.get("release_id", "")),
-                "Release": r.get("release_name", ""),
-                "Date": r.get("date", ""),
-            }
-            for r in self.releases
-        ]
-        return list_table(rows)
+        return ", ".join(
+            f"{r.get('date', '')} {r.get('release_name', '')}" for r in self.releases
+        )
 
 
 @dataclass

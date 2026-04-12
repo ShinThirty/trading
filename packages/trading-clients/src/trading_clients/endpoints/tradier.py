@@ -9,7 +9,6 @@ from trading_clients.table_helpers import (
     fmt_number,
     kv_table,
     list_table,
-    md_table,
 )
 
 # ═══════════════════════════════════════════════════════════════
@@ -274,7 +273,7 @@ class ExpirationsResponse:
     def to_markdown(self) -> str:
         if not self.dates:
             return "(no expirations)"
-        return md_table(["Expiration"], [[d] for d in self.dates])
+        return ", ".join(self.dates)
 
 
 @dataclass
@@ -288,7 +287,7 @@ class StrikesResponse:
     def to_markdown(self) -> str:
         if not self.strikes:
             return "(no strikes)"
-        return md_table(["Strike"], [[fmt_number(s)] for s in self.strikes])
+        return ", ".join(fmt_number(s) for s in self.strikes)
 
 
 @dataclass
@@ -341,7 +340,7 @@ class OptionLookupResponse:
     def to_markdown(self) -> str:
         if not self.options:
             return "(no options)"
-        return md_table(["Option Symbol"], [[str(o)] for o in self.options])
+        return ", ".join(str(o) for o in self.options)
 
 
 @dataclass

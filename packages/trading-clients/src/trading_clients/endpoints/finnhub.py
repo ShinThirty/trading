@@ -8,7 +8,6 @@ from trading_clients.table_helpers import (
     fmt_number,
     kv_table,
     list_table,
-    md_table,
     unix_to_date,
 )
 
@@ -287,7 +286,7 @@ class PeersResponse:
     def to_markdown(self) -> str:
         if not self.peers:
             return "(no peers)"
-        return md_table(["Symbol"], [[s] for s in self.peers])
+        return ", ".join(self.peers)
 
 
 @dataclass
