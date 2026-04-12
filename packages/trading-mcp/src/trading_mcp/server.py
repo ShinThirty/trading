@@ -1391,12 +1391,25 @@ def get_key_metrics(ctx: Context, symbol: str, period: str = "annual", limit: in
 
 @mcp.tool()
 def get_dividend_history(ctx: Context, symbol: str) -> str:
-    """Get full dividend payment history: ex-date, pay date, record date, amount.
+    """Get dividend payment history: ex-date, pay date, record date, amount.
 
     symbol: ticker symbol (e.g. 'AAPL').
-    Requires [fmp] section in ~/.tradingrc.
+    Requires [fmp] or [tastytrade] section in ~/.tradingrc.
     """
-    return _fmp(ctx).get(fmp.DIVIDEND_HISTORY, fmp.SymbolRequest(symbol)).to_markdown()
+    fmp_client = ctx.request_context.lifespan_context.get("fmp")
+    if fmp_client:
+        try:
+            return fmp_client.get(fmp.DIVIDEND_HISTORY, fmp.SymbolRequest(symbol)).to_markdown()
+        except ValueError:
+            pass  # FMP paywall — fall through to TastyTrade
+    tt_client = ctx.request_context.lifespan_context.get("tastytrade")
+    if tt_client:
+        return tt_client.get(
+            tt.DIVIDEND_HISTORY, tt.DividendHistoryRequest(symbol)
+        ).to_markdown()
+    raise RuntimeError(
+        "No dividend data source available. Add [fmp] or [tastytrade] to ~/.tradingrc"
+    )
 
 
 @mcp.tool()

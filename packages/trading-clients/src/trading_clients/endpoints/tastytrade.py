@@ -2,8 +2,8 @@
 
 from dataclasses import dataclass
 
-from trading_clients.endpoint import Endpoint, ParamsRequest
-from trading_clients.table_helpers import list_table
+from trading_clients.endpoint import Endpoint, ParamsRequest, PathRequest
+from trading_clients.table_helpers import fmt_number, list_table
 
 # ═══════════════════════════════════════════════════════════════
 # Request Models
@@ -16,6 +16,17 @@ class MarketMetricsRequest(ParamsRequest):
 
     def to_params(self) -> dict[str, str]:
         return {"symbols": self.symbols}
+
+
+@dataclass
+class DividendHistoryRequest(PathRequest, ParamsRequest):
+    symbol: str
+
+    def to_path_params(self) -> dict[str, str]:
+        return {"symbol": self.symbol}
+
+    def to_params(self) -> dict[str, str]:
+        return {}
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -88,6 +99,27 @@ class MarketMetricsResponse:
         return list_table(rows)
 
 
+@dataclass
+class DividendHistoryResponse:
+    dividends: list[dict]
+
+    @classmethod
+    def from_response(cls, data: list[dict]) -> "DividendHistoryResponse":
+        return cls(dividends=data or [])
+
+    def to_markdown(self) -> str:
+        if not self.dividends:
+            return "(no dividends)"
+        rows = [
+            {
+                "Ex-Date": d.get("occurred-date", ""),
+                "Dividend": fmt_number(d.get("amount"), 4),
+            }
+            for d in self.dividends
+        ]
+        return list_table(rows)
+
+
 # ═══════════════════════════════════════════════════════════════
 # Endpoint Definitions
 # ═══════════════════════════════════════════════════════════════
@@ -96,5 +128,12 @@ MARKET_METRICS = Endpoint(
     "/market-metrics",
     cache_ttl=300,
     response_model=MarketMetricsResponse,
+    extract=lambda d: d.get("data", {}).get("items", d.get("items", [])),
+)
+
+DIVIDEND_HISTORY = Endpoint(
+    "/market-metrics/historic-corporate-events/dividends/{symbol}",
+    cache_ttl=3600,
+    response_model=DividendHistoryResponse,
     extract=lambda d: d.get("data", {}).get("items", d.get("items", [])),
 )
