@@ -353,7 +353,7 @@ def _analyze_equity_strategy(
                 lg for lg in legs if lg["side"] == "sell" and lg["option_type"] == "call"
             ][0]
             strike = short_call["strike"]
-            premium = net_premium  # per-share net credit
+            premium = short_call["premium"]  # per-share, not scaled by qty
             extras["if_called_return"] = (strike - cost_basis + premium) / cost_basis
             extras["static_return"] = premium / cost_basis
 
