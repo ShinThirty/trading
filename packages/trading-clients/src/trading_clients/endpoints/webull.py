@@ -303,13 +303,15 @@ class PositionsResponse:
                             }
                         )
                     elif itype == "OPTION":
+                        # Covered stock option legs are short — negate qty
+                        opt_qty = -qty if strategy == "COVERED_STOCK" else qty
                         result.append(
                             {
                                 "symbol": symbol,
-                                "quantity": qty,
+                                "quantity": opt_qty,
                                 "last": sf(lg.get("last_price")),
                                 "cost": sf(lg.get("cost")),
-                                "value": sf(lg.get("last_price")) * qty * -100,
+                                "value": sf(lg.get("last_price")) * opt_qty * -100,
                                 "pnl": sf(lg.get("unrealized_profit_loss")),
                                 "pnl_pct": 0.0,
                                 "is_option": True,
