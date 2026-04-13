@@ -964,21 +964,6 @@ def get_market_news(ctx: Context, category: str = "general", limit: int = 20) ->
 
 
 @mcp.tool()
-def get_economic_calendar(ctx: Context, from_date: str, to_date: str) -> str:
-    """Get upcoming economic events: FOMC meetings, CPI releases, jobs reports, GDP, etc.
-
-    from_date: start date (YYYY-MM-DD).
-    to_date: end date (YYYY-MM-DD).
-
-    Note: requires Finnhub premium plan. Free tier returns 403.
-    Requires [finnhub] section in ~/.tradingrc.
-    """
-    return (
-        _finnhub(ctx).get(fh.ECONOMIC_CALENDAR, fh.DateRangeRequest(from_date, to_date)).to_output()
-    )
-
-
-@mcp.tool()
 def get_earnings_calendar(
     ctx: Context,
     from_date: str,
@@ -1017,15 +1002,33 @@ def get_basic_financials(ctx: Context, symbol: str) -> str:
 
 @mcp.tool()
 def get_eps_estimates(ctx: Context, symbol: str) -> str:
-    """Get analyst EPS estimates for upcoming quarters: average, high, low, and number
-    of analysts.
+    """Get analyst EPS estimates for upcoming quarters and years: average, high, low,
+    number of analysts, year-ago EPS, and growth rate.
+
+    Periods: current quarter (0q), next quarter (+1q), current year (0y), next year (+1y).
 
     symbol: ticker symbol (e.g. 'AAPL').
 
-    Note: requires Finnhub premium plan. Free tier returns 403.
-    Requires [finnhub] section in ~/.tradingrc.
+    Uses Yahoo Finance via yfinance (no API key required).
     """
-    return _finnhub(ctx).get(fh.EPS_ESTIMATES, fh.SymbolRequest(symbol)).to_output()
+    from trading_clients.table_helpers import fmt_number, list_table
+
+    data = yfc.earnings_estimate(symbol)
+    if not data:
+        return f"(no EPS estimates for {symbol})"
+    rows = [
+        {
+            "Period": d["period"],
+            "# Analysts": str(int(d.get("numberOfAnalysts", 0))),
+            "Avg": fmt_number(d.get("avg")),
+            "Low": fmt_number(d.get("low")),
+            "High": fmt_number(d.get("high")),
+            "Year Ago": fmt_number(d.get("yearAgoEps")),
+            "Growth": fmt_number(d.get("growth")),
+        }
+        for d in data
+    ]
+    return list_table(rows)
 
 
 @mcp.tool()
@@ -1042,14 +1045,25 @@ def get_recommendation_trends(ctx: Context, symbol: str) -> str:
 
 @mcp.tool()
 def get_price_target(ctx: Context, symbol: str) -> str:
-    """Get analyst consensus price target: high, low, mean, and median target prices.
+    """Get analyst consensus price target: current price, high, low, mean, and median
+    target prices.
 
     symbol: ticker symbol (e.g. 'AAPL').
 
-    Note: requires Finnhub premium plan. Free tier returns 403.
-    Requires [finnhub] section in ~/.tradingrc.
+    Uses Yahoo Finance via yfinance (no API key required).
     """
-    return _finnhub(ctx).get(fh.PRICE_TARGET, fh.SymbolRequest(symbol)).to_output()
+    from trading_clients.table_helpers import fmt_number, kv_table
+
+    data = yfc.analyst_price_targets(symbol)
+    if not data:
+        return f"(no price targets for {symbol})"
+    return kv_table({
+        "Current": fmt_number(data.get("current")),
+        "Target Low": fmt_number(data.get("low")),
+        "Target Mean": fmt_number(data.get("mean")),
+        "Target Median": fmt_number(data.get("median")),
+        "Target High": fmt_number(data.get("high")),
+    })
 
 
 @mcp.tool()
@@ -1065,22 +1079,6 @@ def get_insider_transactions(ctx: Context, symbol: str, limit: int = 20) -> str:
     resp = _finnhub(ctx).get(fh.INSIDER_TRANSACTIONS, fh.SymbolRequest(symbol))
     resp.transactions = resp.transactions[:limit]
     return resp.to_output()
-
-
-@mcp.tool()
-def get_dividends(ctx: Context, symbol: str, from_date: str, to_date: str) -> str:
-    """Get dividend history: ex-date, pay date, record date, and amount.
-
-    symbol: ticker symbol (e.g. 'AAPL').
-    from_date: start date (YYYY-MM-DD).
-    to_date: end date (YYYY-MM-DD).
-
-    Note: requires Finnhub premium plan. Use get_dividend_history (FMP) as free alternative.
-    Requires [finnhub] section in ~/.tradingrc.
-    """
-    return (
-        _finnhub(ctx).get(fh.DIVIDENDS, fh.DividendsRequest(symbol, from_date, to_date)).to_output()
-    )
 
 
 @mcp.tool()

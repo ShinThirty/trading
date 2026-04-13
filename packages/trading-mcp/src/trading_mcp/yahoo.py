@@ -54,3 +54,21 @@ def short_interest(symbol: str) -> dict:
         "shortRatio": info.get("shortRatio"),
         "shortPercentOfFloat": info.get("shortPercentOfFloat"),
     }
+
+
+def earnings_estimate(symbol: str) -> list[dict]:
+    """Get analyst EPS estimates. Returns list of row dicts with period as a field."""
+    df = yf.Ticker(symbol).get_earnings_estimate()
+    if df is None or df.empty:
+        return []
+    rows = []
+    for period, row in df.iterrows():
+        r = row.to_dict()
+        r["period"] = str(period)
+        rows.append(r)
+    return rows
+
+
+def analyst_price_targets(symbol: str) -> dict:
+    """Get analyst consensus price targets: current, low, mean, median, high."""
+    return yf.Ticker(symbol).get_analyst_price_targets() or {}
