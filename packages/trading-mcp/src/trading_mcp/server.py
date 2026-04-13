@@ -12,7 +12,6 @@ from trading_clients.endpoints import finnhub as fh
 from trading_clients.endpoints import fmp, fred
 from trading_clients.endpoints import tastytrade as tt
 from trading_clients.endpoints import tradier as t
-from trading_clients.endpoints import yahoo as yh
 from trading_clients.endpoints.webull import (
     ACCOUNT_LIST,
     BALANCE,
@@ -36,13 +35,15 @@ from trading_clients.endpoints.webull import (
     PreviewOrderRequest,
     ReplaceOrderRequest,
 )
+from trading_clients.endpoints.yahoo import ScreenerResponse
 from trading_clients.finnhub_client import FinnhubClient
 from trading_clients.fmp_client import FmpClient
 from trading_clients.fred_client import FredClient
 from trading_clients.tastytrade_client import TastyTradeClient
 from trading_clients.tradier_client import TradierClient
 from trading_clients.webull_client import WebullClient
-from trading_clients.yahoo_client import YahooClient
+
+from trading_mcp import yahoo as yfc
 
 
 @asynccontextmanager
@@ -61,7 +62,6 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
         ctx["alphavantage"] = AlphaVantageClient(config.alphavantage)
     if config.tastytrade:
         ctx["tastytrade"] = TastyTradeClient(config.tastytrade)
-    ctx["yahoo"] = YahooClient()
     try:
         yield ctx
     finally:
@@ -116,10 +116,6 @@ def _alphavantage(ctx: Context) -> AlphaVantageClient:
     return client
 
 
-def _yahoo(ctx: Context) -> YahooClient:
-    return ctx.request_context.lifespan_context["yahoo"]
-
-
 def _tastytrade(ctx: Context) -> TastyTradeClient:
     client = ctx.request_context.lifespan_context.get("tastytrade")
     if client is None:
@@ -171,9 +167,7 @@ def get_account_positions(ctx: Context, account_id: str | None = None) -> str:
     account_id: Webull account ID. Omit to use the default from ~/.tradingrc.
     """
     client = _webull(ctx)
-    return client.get(
-        POSITIONS, AccountRequest(client.resolve_account_id(account_id))
-    ).to_output()
+    return client.get(POSITIONS, AccountRequest(client.resolve_account_id(account_id))).to_output()
 
 
 # ── Orders ───────────────────────────────────────────────────
@@ -1192,9 +1186,7 @@ def get_economic_calendar(ctx: Context, from_date: str, to_date: str) -> str:
     Requires [finnhub] section in ~/.tradingrc.
     """
     return (
-        _finnhub(ctx)
-        .get(fh.ECONOMIC_CALENDAR, fh.DateRangeRequest(from_date, to_date))
-        .to_output()
+        _finnhub(ctx).get(fh.ECONOMIC_CALENDAR, fh.DateRangeRequest(from_date, to_date)).to_output()
     )
 
 
@@ -1299,9 +1291,7 @@ def get_dividends(ctx: Context, symbol: str, from_date: str, to_date: str) -> st
     Requires [finnhub] section in ~/.tradingrc.
     """
     return (
-        _finnhub(ctx)
-        .get(fh.DIVIDENDS, fh.DividendsRequest(symbol, from_date, to_date))
-        .to_output()
+        _finnhub(ctx).get(fh.DIVIDENDS, fh.DividendsRequest(symbol, from_date, to_date)).to_output()
     )
 
 
@@ -1404,9 +1394,7 @@ def get_dividend_history(ctx: Context, symbol: str) -> str:
             pass  # FMP paywall — fall through to TastyTrade
     tt_client = ctx.request_context.lifespan_context.get("tastytrade")
     if tt_client:
-        return tt_client.get(
-            tt.DIVIDEND_HISTORY, tt.DividendHistoryRequest(symbol)
-        ).to_output()
+        return tt_client.get(tt.DIVIDEND_HISTORY, tt.DividendHistoryRequest(symbol)).to_output()
     raise RuntimeError(
         "No dividend data source available. Add [fmp] or [tastytrade] to ~/.tradingrc"
     )
@@ -1421,6 +1409,26 @@ def get_fmp_earnings_calendar(ctx: Context, symbol: str, limit: int = 5) -> str:
     Requires [fmp] section in ~/.tradingrc.
     """
     return _fmp(ctx).get(fmp.EARNINGS, fmp.EarningsRequest(symbol, limit)).to_output()
+
+
+@mcp.tool()
+def get_sector_performance(ctx: Context, date: str, exchange: str = "NYSE") -> str:
+    """Get sector performance for a specific date: average percentage change for each
+    of 11 sectors (Technology, Healthcare, Financial Services, etc.), sorted best to worst.
+
+    Useful for understanding sector rotation and whether a stock's movement is
+    stock-specific or sector-wide.
+
+    date: trading date (YYYY-MM-DD). Use a recent trading day (not weekend/holiday).
+    exchange: 'NYSE' (default) or 'NASDAQ'.
+
+    Requires [fmp] section in ~/.tradingrc.
+    """
+    return (
+        _fmp(ctx)
+        .get(fmp.SECTOR_PERFORMANCE, fmp.SectorPerformanceRequest(date, exchange))
+        .to_output()
+    )
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1537,9 +1545,7 @@ def get_iv_metrics(ctx: Context, symbols: str) -> str:
 
     Requires [tastytrade] section in ~/.tradingrc.
     """
-    return _tastytrade(ctx).get(
-        tt.MARKET_METRICS, tt.MarketMetricsRequest(symbols)
-    ).to_output()
+    return _tastytrade(ctx).get(tt.MARKET_METRICS, tt.MarketMetricsRequest(symbols)).to_output()
 
 
 @mcp.tool()
@@ -1552,9 +1558,7 @@ def get_public_watchlists(ctx: Context) -> str:
 
     Requires [tastytrade] section in ~/.tradingrc.
     """
-    return _tastytrade(ctx).get(
-        tt.PUBLIC_WATCHLISTS, tt.EmptyRequest()
-    ).to_output()
+    return _tastytrade(ctx).get(tt.PUBLIC_WATCHLISTS, tt.EmptyRequest()).to_output()
 
 
 @mcp.tool()
@@ -1567,9 +1571,7 @@ def get_public_watchlist(ctx: Context, name: str) -> str:
 
     Requires [tastytrade] section in ~/.tradingrc.
     """
-    return _tastytrade(ctx).get(
-        tt.PUBLIC_WATCHLIST, tt.WatchlistRequest(name)
-    ).to_output()
+    return _tastytrade(ctx).get(tt.PUBLIC_WATCHLIST, tt.WatchlistRequest(name)).to_output()
 
 
 @mcp.tool()
@@ -1656,7 +1658,7 @@ def backtest_strategy(
 
 
 # ═══════════════════════════════════════════════════════════════
-# YAHOO FINANCE — Stock Screener
+# YAHOO FINANCE
 # ═══════════════════════════════════════════════════════════════
 
 
@@ -1677,13 +1679,14 @@ def screen_stocks(
         For 'btwn', use [min, max]. For 'is-in', use a list of values.
 
     Available fields:
-      Market: intradaymarketcap, intradayprice, averagedailyvol3m, beta
-      Valuation: peeratio.lasttwelvemonths, forwardpe, pricetobook, pegratio_5y
-      Dividends: dividendyield, trailingannualdividendrate
-      Growth: epsgrowth.lasttwelvemonths, revenuepercentgrowth.quarterly
-      Profitability: returnonequity, returnonassets, currentratio
+      Market: intradaymarketcap, intradayprice, avgdailyvol3m, beta, percentchange
+      Valuation: peratio.lasttwelvemonths, pricebookratio.quarterly, pegratio_5y
+      Dividends: forward_dividend_yield, forward_dividend_per_share
+      Growth: epsgrowth.lasttwelvemonths, quarterlyrevenuegrowth.quarterly
+      Profitability: returnonequity.lasttwelvemonths, returnonassets.lasttwelvemonths,
+        currentratio.lasttwelvemonths
       Categorical: sector, exchange (use 'eq' or 'is-in')
-      Short Interest: daystocoverso, shortpercentoffloat
+      Short Interest: days_to_cover_short.value, short_percentage_of_float.value
 
     Sectors: 'Technology', 'Healthcare', 'Financial Services', 'Consumer Cyclical',
       'Communication Services', 'Industrials', 'Consumer Defensive', 'Energy',
@@ -1697,19 +1700,13 @@ def screen_stocks(
       criteria=[
         {"field": "intradaymarketcap", "op": "gt", "value": 50000000000},
         {"field": "sector", "op": "eq", "value": "Technology"},
-        {"field": "peeratio.lasttwelvemonths", "op": "lt", "value": 25}
+        {"field": "peratio.lasttwelvemonths", "op": "lt", "value": 25}
       ]
 
-    Uses Yahoo Finance (no API key required). Data is 15-minute delayed.
+    Uses Yahoo Finance via yfinance (no API key required). Data is 15-minute delayed.
     """
-    return (
-        _yahoo(ctx)
-        .post(
-            yh.CUSTOM_SCREEN,
-            yh.ScreenRequest(criteria, sort_field, sort_dir, limit),
-        )
-        .to_output()
-    )
+    result = yfc.custom_screen(criteria, sort_field, sort_dir == "ASC", limit)
+    return ScreenerResponse.from_response(result).to_output()
 
 
 @mcp.tool()
@@ -1728,16 +1725,68 @@ def get_predefined_screen(ctx: Context, screen_id: str, count: int = 25) -> str:
       - 'small_cap_gainers' — small cap stocks gaining today
     count: number of results to return (default 25).
 
-    Uses Yahoo Finance (no API key required). Data is 15-minute delayed.
+    Uses Yahoo Finance via yfinance (no API key required). Data is 15-minute delayed.
     """
-    return (
-        _yahoo(ctx)
-        .get(
-            yh.PREDEFINED_SCREEN,
-            yh.PredefinedScreenRequest(screen_id, count),
-        )
-        .to_output()
-    )
+    return ScreenerResponse.from_response(yfc.predefined_screen(screen_id, count)).to_output()
+
+
+@mcp.tool()
+def get_institutional_ownership(ctx: Context, symbol: str) -> str:
+    """Get top institutional holders of a stock: holder name, shares held, percentage
+    held, position value, and recent change.
+
+    Shows who the biggest institutional investors are (Vanguard, BlackRock, etc.)
+    and whether they're accumulating or reducing positions.
+
+    symbol: ticker symbol (e.g. 'AAPL').
+
+    Uses Yahoo Finance via yfinance (no API key required).
+    """
+    from trading_clients.table_helpers import fmt_large, fmt_number, list_table
+
+    holders = yfc.institutional_holders(symbol)
+    if not holders:
+        return f"(no institutional ownership data for {symbol})"
+    rows = [
+        {
+            "Holder": h.get("Holder", ""),
+            "Shares": fmt_large(h.get("Shares")),
+            "% Held": fmt_number(h.get("pctHeld", 0) * 100),
+            "Value": fmt_large(h.get("Value")),
+            "Change": fmt_number(h.get("pctChange", 0) * 100),
+            "Date": str(h.get("Date Reported", ""))[:10],
+        }
+        for h in holders
+    ]
+    return list_table(rows)
+
+
+@mcp.tool()
+def get_short_interest(ctx: Context, symbol: str) -> str:
+    """Get short interest data for a stock: shares short, short ratio (days to cover),
+    short % of float, and month-over-month change.
+
+    Useful for gauging squeeze risk on CSP positions and identifying heavily shorted names.
+
+    symbol: ticker symbol (e.g. 'AAPL').
+
+    Uses Yahoo Finance via yfinance (no API key required).
+    """
+    from trading_clients.table_helpers import fmt_large, fmt_number, kv_table
+
+    data = yfc.short_interest(symbol)
+    if not any(data.values()):
+        return f"(no short interest data for {symbol})"
+    result: dict[str, str] = {}
+    if data["sharesShort"] is not None:
+        result["Shares Short"] = fmt_large(data["sharesShort"])
+    if data["sharesShortPriorMonth"] is not None:
+        result["Shares Short (Prior Month)"] = fmt_large(data["sharesShortPriorMonth"])
+    if data["shortRatio"] is not None:
+        result["Short Ratio (Days to Cover)"] = fmt_number(data["shortRatio"])
+    if data["shortPercentOfFloat"] is not None:
+        result["Short % of Float"] = fmt_number(data["shortPercentOfFloat"] * 100) + "%"
+    return kv_table(result)
 
 
 # ═══════════════════════════════════════════════════════════════

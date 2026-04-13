@@ -29,6 +29,15 @@ class FinancialRequest(ParamsRequest):
 
 
 @dataclass
+class SectorPerformanceRequest(ParamsRequest):
+    date: str
+    exchange: str = "NYSE"
+
+    def to_params(self) -> dict[str, str]:
+        return {"date": self.date, "exchange": self.exchange}
+
+
+@dataclass
 class EarningsRequest(ParamsRequest):
     symbol: str
     limit: int = 5
@@ -249,4 +258,25 @@ KEY_METRICS = Endpoint("/key-metrics", cache_ttl=3600, response_model=KeyMetrics
 
 EARNINGS = Endpoint("/earnings", cache_ttl=3600, response_model=FmpEarningsResponse)
 
+@dataclass
+class SectorPerformanceResponse:
+    sectors: list[dict]
+
+    @classmethod
+    def from_response(cls, data: list[dict]) -> "SectorPerformanceResponse":
+        return cls(sectors=data or [])
+
+    def to_output(self) -> str:
+        if not self.sectors:
+            return "(no data)"
+        ranked = sorted(self.sectors, key=lambda s: s.get("averageChange", 0), reverse=True)
+        return ", ".join(
+            f"{s.get('sector', '')} {fmt_number(s.get('averageChange'))}%" for s in ranked
+        )
+
+
 DIVIDEND_HISTORY = Endpoint("/dividends", cache_ttl=3600, response_model=DividendHistoryResponse)
+
+SECTOR_PERFORMANCE = Endpoint(
+    "/sector-performance-snapshot", cache_ttl=300, response_model=SectorPerformanceResponse
+)

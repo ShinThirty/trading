@@ -53,12 +53,13 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │           ├── webull.py            # 11 endpoints (account, orders, instruments)
 │   │           ├── tradier.py           # 19 endpoints (options, quotes, account, orders)
 │   │           ├── finnhub.py           # 11 endpoints (news, earnings, financials)
-│   │           ├── fmp.py               # 7 endpoints (financial statements, profiles)
+│   │           ├── fmp.py               # 8 endpoints (financial statements, profiles, sector perf)
 │   │           ├── fred.py              # 4 endpoints (economic data series)
 │   │           ├── alphavantage.py      # 2 endpoints (sentiment, movers)
-│   │           └── tastytrade.py        # 5 endpoints (IV metrics, backtesting, watchlists, dividends)
+│   │           ├── tastytrade.py        # 5 endpoints (IV metrics, backtesting, watchlists, dividends)
+│   │           └── yahoo.py             # Response models for Yahoo Finance (via yfinance)
 │   ├── trading-mcp/                     # MCP server (thin shell)
-│   │   ├── pyproject.toml               # depends on: trading-clients + mcp[cli]
+│   │   ├── pyproject.toml               # depends on: trading-clients + mcp[cli] + yfinance
 │   │   └── src/trading_mcp/
 │   │       └── server.py                # FastMCP server, tool registration, lifespan
 │   └── option-monitor/                  # Lambda monitoring service
@@ -89,7 +90,7 @@ trading-mcp/                             # monorepo root (uv workspace)
 
 ```
 trading-clients (httpx[http2])
-  ├── trading-mcp (+ mcp[cli])
+  ├── trading-mcp (+ mcp[cli] + yfinance)
   └── option-monitor (+ boto3)
 ```
 
@@ -139,10 +140,11 @@ EventBridge (cron, Mon-Fri 13:30-20:00 UTC)
 | **Webull** (required) | Brokerage: account, orders, positions | HMAC-SHA1 + token |
 | **Tradier** | Option chains, greeks, IV, quotes, account | Bearer token |
 | **Finnhub** | News, earnings calendar, key metrics | API key |
-| **FMP** | Financial statements, company profiles | API key |
+| **FMP** | Financial statements, company profiles, sector performance | API key |
 | **FRED** | Macroeconomic data (CPI, GDP, VIX, rates) | API key |
 | **Alpha Vantage** | News sentiment, top market movers | API key |
 | **TastyTrade** | IV rank/percentile, backtesting, watchlists, dividends | OAuth2 refresh token |
+| **Yahoo Finance** | Stock screener, institutional ownership | None (via yfinance) |
 
 ### No Webull SDK
 
