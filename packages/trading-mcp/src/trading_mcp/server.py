@@ -697,11 +697,18 @@ def analyze_option_strategy(
         data["Shares"] = str(equity_position["shares"])
 
     net = result["net_premium"]
+    from math import gcd
+
+    leg_qtys = [el.get("quantity", 1) for el in enriched_legs]
+    units = gcd(*leg_qtys) if leg_qtys else 1
+    per_share = net / units
+    total = net * 100
     if net >= 0:
-        data["Net Credit"] = f"${fmt_number(net)} per share (${fmt_number(net * 100)} total)"
+        data["Net Credit"] = f"${fmt_number(per_share)} per share (${fmt_number(total)} total)"
     else:
-        debit = abs(net)
-        data["Net Debit"] = f"${fmt_number(debit)} per share (${fmt_number(debit * 100)} total)"
+        data["Net Debit"] = (
+            f"${fmt_number(abs(per_share))} per share (${fmt_number(abs(total))} total)"
+        )
 
     data["Max Profit"] = f"${fmt_number(result['max_profit'])}"
     data["Max Loss"] = f"${fmt_number(result['max_loss'])}"
