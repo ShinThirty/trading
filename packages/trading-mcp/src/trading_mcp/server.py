@@ -391,6 +391,135 @@ def get_app_subscriptions(ctx: Context) -> str:
     return _webull(ctx).get(ACCOUNT_LIST, EmptyRequest()).to_output()
 
 
+@mcp.tool()
+def get_portfolio_summary(
+    ctx: Context,
+    fidelity_folder: str | None = None,
+) -> str:
+    """Get a consolidated view across ALL Webull accounts and optionally Fidelity.
+
+    Iterates all Webull accounts (Roth IRA, Individual Cash, Margin, etc.),
+    fetches balance and positions for each, and aggregates into one summary.
+    Optionally includes Fidelity positions from exported CSVs.
+
+    fidelity_folder: path to folder containing Fidelity Positions_*.csv files
+      (e.g. '~/Downloads/fidelity'). Omit to show Webull only.
+
+    Note: fetches Webull data sequentially to respect rate limits (~1 req/second).
+    """
+    from trading_clients.portfolio import (
+        AccountSummary,
+        PortfolioSummary,
+        format_portfolio_summary,
+        parse_fidelity_folder,
+    )
+
+    client = _webull(ctx)
+    summaries: list[AccountSummary] = []
+    errors: dict[str, str] = {}
+
+    # 1. Discover all Webull accounts
+    account_list = client.get(ACCOUNT_LIST, EmptyRequest())
+    if not account_list.accounts:
+        errors["Webull"] = "No accounts found"
+
+    # 2. Fetch balance + positions for each Webull account
+    for acct in account_list.accounts:
+        aid = acct.get("account_id", "")
+        label = acct.get("account_label", acct.get("account_type", aid))
+        atype = acct.get("account_type", "")
+
+        try:
+            bal = client.get(BALANCE, AccountRequest(aid))
+        except Exception as e:
+            errors[label] = str(e)
+            continue
+
+        sf = _safe_float
+        nlv = sf(bal.net_liquidation)
+        cash = sf(bal.cash_balance)
+        mv = sf(bal.market_value)
+
+        try:
+            pos_resp = client.get(POSITIONS, AccountRequest(aid))
+            positions = _webull_positions_to_dicts(pos_resp)
+        except Exception as e:
+            positions = []
+            errors[f"{label} (positions)"] = str(e)
+
+        summaries.append(
+            AccountSummary(
+                account_id=aid,
+                label=label,
+                broker="Webull",
+                account_type=atype,
+                nlv=nlv,
+                cash=cash,
+                market_value=mv,
+                day_pnl=sf(bal.day_pnl),
+                unrealized_pnl=sf(bal.unrealized_pnl),
+                positions=positions,
+            )
+        )
+
+    # 3. Parse Fidelity CSVs if folder provided
+    if fidelity_folder:
+        try:
+            summaries.extend(parse_fidelity_folder(fidelity_folder))
+        except Exception as e:
+            errors["Fidelity"] = str(e)
+
+    return format_portfolio_summary(PortfolioSummary(summaries, errors))
+
+
+def _safe_float(val: Any) -> float:
+    if val is None or val == "":
+        return 0.0
+    try:
+        return float(str(val).replace(",", ""))
+    except (ValueError, TypeError):
+        return 0.0
+
+
+def _webull_positions_to_dicts(pos_resp: Any) -> list[dict]:
+    """Convert Webull PositionsResponse to normalized position dicts."""
+    result: list[dict] = []
+    for p in pos_resp.positions:
+        legs = p.get("legs", [])
+        is_option = p.get("instrument_type") == "OPTION" or bool(p.get("option_strategy"))
+        symbol = p.get("symbol", "")
+        qty = float(p.get("quantity") or 0)
+        cost = float(p.get("cost_price") or 0)
+        last = float(p.get("last_price") or 0)
+        mv = float(p.get("market_value") or 0)
+        pnl = float(p.get("unrealized_profit_loss") or 0)
+        pnl_rate = p.get("unrealized_profit_loss_rate")
+        pnl_pct = float(pnl_rate) * 100 if pnl_rate else 0.0
+
+        pos: dict = {
+            "symbol": symbol,
+            "quantity": qty,
+            "last": last,
+            "cost": cost,
+            "value": mv,
+            "pnl": pnl,
+            "pnl_pct": pnl_pct,
+            "is_option": is_option,
+            "is_cash": False,
+        }
+
+        if is_option and legs:
+            leg = legs[0]
+            pos["underlying"] = symbol
+            pos["option_type"] = (leg.get("option_type") or "").lower()
+            pos["strike"] = float(leg.get("strike_price") or 0)
+            pos["expiration"] = leg.get("option_expire_date", "")
+            pos["strategy"] = p.get("option_strategy", "")
+
+        result.append(pos)
+    return result
+
+
 # ── Webull Market Data ──────────────────────────────────────
 
 
