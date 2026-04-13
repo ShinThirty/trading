@@ -233,50 +233,92 @@ class PositionsResponse:
     def to_output(self) -> str:
         if not self.positions:
             return "(no positions)"
-        has_options = any(p.get("legs") for p in self.positions)
-        rows = []
+
+        simple: list[dict] = []
+        multi_leg: list[dict] = []
         for p in self.positions:
-            pnl_rate = p.get("unrealized_profit_loss_rate")
-            pnl_pct = fmt_number(float(pnl_rate) * 100) if pnl_rate else ""
-            row: dict[str, str] = {
-                "Symbol": p.get("symbol", ""),
-                "Qty": p.get("quantity", ""),
-                "Cost": fmt_number(p.get("cost_price")),
-                "Last": fmt_number(p.get("last_price")),
-                "Mkt Val": fmt_number(p.get("market_value")),
-                "P&L": fmt_number(p.get("unrealized_profit_loss")),
-                "P&L %": pnl_pct,
-            }
-            legs = p.get("legs", [])
-            equity_leg = next((lg for lg in legs if lg.get("instrument_type") == "EQUITY"), None)
-            option_leg = next((lg for lg in legs if lg.get("instrument_type") == "OPTION"), None)
-            row["Eq Cost"] = fmt_number(equity_leg.get("cost")) if equity_leg else ""
-            row["Opt Cost"] = fmt_number(option_leg.get("cost")) if option_leg else ""
+            if len(p.get("legs", [])) > 1:
+                multi_leg.append(p)
+            else:
+                simple.append(p)
+
+        sections: list[str] = []
+
+        # Flat table for equity and single-leg option positions
+        if simple:
+            has_options = any(
+                p.get("option_strategy") or p.get("instrument_type") == "OPTION" for p in simple
+            )
+            rows = []
+            for p in simple:
+                pnl_rate = p.get("unrealized_profit_loss_rate")
+                pnl_pct = fmt_number(float(pnl_rate) * 100) if pnl_rate else ""
+                row: dict[str, str] = {
+                    "Symbol": p.get("symbol", ""),
+                    "Qty": p.get("quantity", ""),
+                    "Cost": fmt_number(p.get("cost_price")),
+                    "Last": fmt_number(p.get("last_price")),
+                    "Mkt Val": fmt_number(p.get("market_value")),
+                    "P&L": fmt_number(p.get("unrealized_profit_loss")),
+                    "P&L %": pnl_pct,
+                }
+                if has_options:
+                    legs = p.get("legs", [])
+                    option_leg = next(
+                        (lg for lg in legs if lg.get("instrument_type") == "OPTION"),
+                        None,
+                    )
+                    if option_leg:
+                        row["Option"] = option_leg.get("option_type", "")
+                        row["Strike"] = fmt_number(option_leg.get("option_exercise_price"))
+                        row["Exp"] = option_leg.get("option_expire_date", "")
+                    else:
+                        row["Option"] = ""
+                        row["Strike"] = ""
+                        row["Exp"] = ""
+                    row["Strategy"] = p.get("option_strategy", "")
+                rows.append(row)
+            cols = ["Symbol", "Qty", "Cost", "Last", "Mkt Val", "P&L", "P&L %"]
             if has_options:
-                if option_leg:
-                    row["Option"] = option_leg.get("option_type", "")
-                    row["Strike"] = fmt_number(option_leg.get("option_exercise_price"))
-                    row["Exp"] = option_leg.get("option_expire_date", "")
+                cols += ["Option", "Strike", "Exp", "Strategy"]
+            sections.append(list_table(rows, cols))
+
+        # Per-position tables for multi-leg positions
+        for p in multi_leg:
+            symbol = p.get("symbol", "")
+            strategy = p.get("option_strategy", "")
+            pnl = fmt_number(p.get("unrealized_profit_loss"))
+            header = f"### {symbol} — {strategy}"
+            if pnl:
+                header += f" (P&L: {pnl})"
+
+            leg_rows = []
+            for lg in p.get("legs", []):
+                itype = lg.get("instrument_type", "")
+                if itype == "EQUITY":
+                    leg_desc = "EQUITY"
+                    qty = str(int(float(p.get("quantity", "0")) * 100))
+                elif itype == "OPTION":
+                    otype = lg.get("option_type", "")
+                    strike = fmt_number(lg.get("option_exercise_price"))
+                    exp = lg.get("option_expire_date", "")
+                    leg_desc = f"{otype} {strike} {exp}"
+                    qty = p.get("quantity", "")
                 else:
-                    row["Option"] = ""
-                    row["Strike"] = ""
-                    row["Exp"] = ""
-                row["Strategy"] = p.get("option_strategy", "")
-            rows.append(row)
-        cols = [
-            "Symbol",
-            "Qty",
-            "Cost",
-            "Eq Cost",
-            "Opt Cost",
-            "Last",
-            "Mkt Val",
-            "P&L",
-            "P&L %",
-        ]
-        if has_options:
-            cols += ["Option", "Strike", "Exp", "Strategy"]
-        return list_table(rows, cols)
+                    leg_desc = itype
+                    qty = ""
+                leg_rows.append(
+                    {
+                        "Leg": leg_desc,
+                        "Qty": qty,
+                        "Cost": fmt_number(lg.get("cost")),
+                        "Last": fmt_number(lg.get("last_price")),
+                        "P&L": fmt_number(lg.get("unrealized_profit_loss")),
+                    }
+                )
+            sections.append(header + "\n" + list_table(leg_rows))
+
+        return "\n\n".join(sections)
 
 
 @dataclass
