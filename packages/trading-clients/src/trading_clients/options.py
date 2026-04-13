@@ -7,6 +7,83 @@ Operates on option chain dicts (from Tradier) and OHLCV bar data.
 from math import log, sqrt
 
 
+def parse_occ(symbol: str) -> tuple[str, str, str, float]:
+    """Parse OCC option symbol into (underlying, expiration, option_type, strike).
+
+    Standard format: ROOT + YYMMDD + C/P + 8-digit strike (strike * 1000).
+    Example: 'AAPL260417P00250000' → ('AAPL', '2026-04-17', 'put', 250.0)
+    """
+    root = symbol[:-15]
+    d = symbol[-15:-9]
+    option_type = "call" if symbol[-9] == "C" else "put"
+    strike = int(symbol[-8:]) / 1000
+    exp = f"20{d[:2]}-{d[2:4]}-{d[4:6]}"
+    return root, exp, option_type, strike
+
+
+def roll_analysis(
+    current: dict,
+    new: dict,
+    stock_price: float,
+    current_exp: str,
+    target_exp: str,
+    current_strike: float,
+    actual_strike: float,
+) -> dict:
+    """Compute roll metrics for a short option position.
+
+    current/new: option quote dicts with bid, ask, and optional greeks.
+    Returns dict with: close_cost, open_premium, net, net_total,
+    cur_dte, new_dte, roll_type, and greek changes.
+    """
+    from datetime import date
+
+    cur_bid = float(current.get("bid") or 0)
+    cur_ask = float(current.get("ask") or 0)
+    new_bid = float(new.get("bid") or 0)
+    new_ask = float(new.get("ask") or 0)
+    cur_greeks = current.get("greeks") or {}
+    new_greeks = new.get("greeks") or {}
+
+    close_cost = cur_ask
+    open_premium = new_bid
+    net = open_premium - close_cost
+
+    today = date.today()
+    cur_dte = max((date.fromisoformat(current_exp) - today).days, 0)
+    new_dte = max((date.fromisoformat(target_exp) - today).days, 0)
+
+    if abs(actual_strike - current_strike) < 0.01:
+        roll_type = "Horizontal (same strike)"
+    elif actual_strike > current_strike:
+        roll_type = "Diagonal (roll up)"
+    else:
+        roll_type = "Diagonal (roll down)"
+
+    result: dict = {
+        "stock_price": stock_price,
+        "roll_type": roll_type,
+        "close_cost": close_cost,
+        "open_premium": open_premium,
+        "net": net,
+        "cur_bid": cur_bid,
+        "cur_ask": cur_ask,
+        "new_bid": new_bid,
+        "new_ask": new_ask,
+        "cur_dte": cur_dte,
+        "new_dte": new_dte,
+    }
+
+    for key in ("delta", "theta", "mid_iv"):
+        cur_val = cur_greeks.get(key)
+        new_val = new_greeks.get(key)
+        if cur_val is not None and new_val is not None:
+            result[f"cur_{key}"] = cur_val
+            result[f"new_{key}"] = new_val
+
+    return result
+
+
 def historical_volatility(closes: list[float], period: int = 20) -> float | None:
     """Annualized historical volatility from daily closing prices.
 

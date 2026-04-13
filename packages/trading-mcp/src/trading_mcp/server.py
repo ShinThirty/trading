@@ -783,6 +783,167 @@ def analyze_option_strategy(
 
 
 @mcp.tool()
+def analyze_roll(
+    ctx: Context,
+    current_symbol: str,
+    target_expiration: str,
+    target_strike: float | None = None,
+    quantity: int = 1,
+) -> str:
+    """Analyze rolling an option position to a new expiration and/or strike.
+
+    Computes cost to close, premium for new position, net credit/debit, DTE change,
+    and greek comparison. Designed for covered calls and CSPs that need regular rolling.
+
+    current_symbol: OCC option symbol of current position
+      (e.g. 'SMH260501C00410000'). Use get_account_positions to find it,
+      or get_option_lookup to construct it.
+    target_expiration: expiration date for the new position (YYYY-MM-DD).
+      Use get_option_expirations to find available dates.
+    target_strike: strike price for new position. Omit to keep same strike
+      (horizontal roll). Change for diagonal rolls (roll up/down).
+    quantity: number of contracts being rolled (default 1).
+
+    Requires [tradier] section in ~/.tradingrc.
+    """
+    from trading_clients.table_helpers import fmt_number, kv_table
+
+    tradier = _tradier(ctx)
+
+    # Parse OCC symbol
+    try:
+        underlying, current_exp, option_type, current_strike = opts.parse_occ(current_symbol)
+    except (IndexError, ValueError):
+        return f"(invalid OCC symbol: {current_symbol})"
+
+    if target_strike is None:
+        target_strike = current_strike
+
+    # Fetch: current option quote, stock price, target chain
+    cur_resp = tradier.get(t.QUOTES, t.GetQuotesRequest(current_symbol, greeks=True))
+    if not cur_resp.quotes:
+        return f"(no quote for {current_symbol})"
+
+    stock_resp = tradier.get(t.QUOTES, t.GetQuotesRequest(underlying, greeks=False))
+    stock_price = 0.0
+    if stock_resp.quotes:
+        stock_price = float(
+            stock_resp.quotes[0].get("last") or stock_resp.quotes[0].get("close", 0)
+        )
+
+    chain = tradier.get(t.CHAIN, t.GetChainRequest(underlying, target_expiration, greeks=True))
+    if not chain.options:
+        return f"(no option chain for {underlying} at {target_expiration})"
+
+    # Find target option (exact strike, then closest)
+    matches = [
+        o
+        for o in chain.options
+        if o.get("option_type") == option_type and abs(o["strike"] - target_strike) < 0.01
+    ]
+    if not matches:
+        typed = [o for o in chain.options if o.get("option_type") == option_type]
+        if not typed:
+            return f"(no {option_type} options at {target_expiration})"
+        matches = [min(typed, key=lambda o: abs(o["strike"] - target_strike))]
+    new_opt = matches[0]
+    actual_strike = new_opt["strike"]
+
+    # Compute roll metrics
+    r = opts.roll_analysis(
+        cur_resp.quotes[0],
+        new_opt,
+        stock_price,
+        current_exp,
+        target_expiration,
+        current_strike,
+        actual_strike,
+    )
+
+    # --- Format output ---
+    type_label = option_type.upper()
+    title = (
+        f"## {underlying} Roll: "
+        f"{current_exp} {type_label[0]}{current_strike:g} → "
+        f"{target_expiration} {type_label[0]}{actual_strike:g}"
+    )
+
+    cur_data: dict[str, str] = {
+        "Symbol": current_symbol,
+        "Type": type_label,
+        "Strike": fmt_number(current_strike),
+        "Expiration": current_exp,
+        "DTE": str(r["cur_dte"]),
+        "Bid": fmt_number(r["cur_bid"]),
+        "Ask": fmt_number(r["cur_ask"]),
+    }
+    new_data: dict[str, str] = {
+        "Symbol": new_opt.get("symbol", ""),
+        "Type": type_label,
+        "Strike": fmt_number(actual_strike),
+        "Expiration": target_expiration,
+        "DTE": str(r["new_dte"]),
+        "Bid": fmt_number(r["new_bid"]),
+        "Ask": fmt_number(r["new_ask"]),
+    }
+    for label, data, prefix in [
+        ("cur", cur_data, "cur_"),
+        ("new", new_data, "new_"),
+    ]:
+        if r.get(f"{prefix}delta") is not None:
+            data["Delta"] = fmt_number(r[f"{prefix}delta"], 4)
+        if r.get(f"{prefix}theta") is not None:
+            data["Theta"] = fmt_number(r[f"{prefix}theta"], 4)
+        if r.get(f"{prefix}mid_iv") is not None:
+            data["IV"] = f"{r[f'{prefix}mid_iv'] * 100:.1f}%"
+
+    net = r["net"]
+    net_total = net * quantity * 100
+    roll_data: dict[str, str] = {
+        "Stock Price": fmt_number(stock_price),
+        "Roll Type": r["roll_type"],
+        "Cost to Close": f"${fmt_number(r['close_cost'])} (buy at ask)",
+        "New Premium": f"${fmt_number(r['open_premium'])} (sell at bid)",
+    }
+    if net >= 0:
+        roll_data["Net Credit"] = f"${fmt_number(net)}/sh (${fmt_number(net_total)} total)"
+    else:
+        roll_data["Net Debit"] = f"${fmt_number(abs(net))}/sh (${fmt_number(abs(net_total))} total)"
+    roll_data["DTE Change"] = (
+        f"{r['cur_dte']} → {r['new_dte']} (+{r['new_dte'] - r['cur_dte']} days)"
+    )
+
+    for key, label in [("delta", "Delta"), ("theta", "Theta")]:
+        if r.get(f"cur_{key}") is not None:
+            diff = r[f"new_{key}"] - r[f"cur_{key}"]
+            sign = "+" if diff >= 0 else ""
+            roll_data[f"{label} Change"] = (
+                f"{fmt_number(r[f'cur_{key}'], 4)} → "
+                f"{fmt_number(r[f'new_{key}'], 4)} ({sign}{fmt_number(diff, 4)})"
+            )
+    if r.get("cur_mid_iv") is not None:
+        iv_diff = (r["new_mid_iv"] - r["cur_mid_iv"]) * 100
+        sign = "+" if iv_diff >= 0 else ""
+        roll_data["IV Change"] = (
+            f"{r['cur_mid_iv'] * 100:.1f}% → {r['new_mid_iv'] * 100:.1f}% ({sign}{iv_diff:.1f}%)"
+        )
+
+    sections = [
+        title,
+        "",
+        "### Current Position",
+        kv_table(cur_data),
+        "",
+        "### New Position",
+        kv_table(new_data),
+        "",
+        "### Roll Summary",
+        kv_table(roll_data),
+    ]
+    return "\n".join(sections)
+
+
+@mcp.tool()
 def get_tradier_history(
     ctx: Context,
     symbol: str,
