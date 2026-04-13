@@ -307,3 +307,54 @@ def format_portfolio_summary(summary: PortfolioSummary) -> str:
         sections.append("")
 
     return "\n".join(sections)
+
+
+def format_greeks_compact(totals: dict, n_options: int, detail_path: str) -> str:
+    """Format a compact portfolio Greeks summary with pointer to detail file."""
+    d_sign = "+" if totals["delta"] >= 0 else ""
+    t_sign = "+" if totals["theta"] >= 0 else ""
+    v_sign = "+" if totals["vega"] >= 0 else ""
+    return (
+        f"Portfolio Greeks ({n_options} option positions)\n"
+        f"Net Delta: {d_sign}{fmt_number(totals['delta'], 0)}"
+        f" (≈${d_sign}{fmt_number(totals['delta'], 0)} per $1 move)\n"
+        f"Net Theta: {t_sign}${fmt_number(totals['theta'])}/day\n"
+        f"Net Gamma: {fmt_number(totals['gamma'], 0)}\n"
+        f"Net Vega:  {v_sign}${fmt_number(totals['vega'])} per 1% IV move\n"
+        f"Full details: {detail_path}"
+    )
+
+
+def format_greeks_detail(totals: dict, by_underlying: dict) -> str:
+    """Format a detailed per-underlying Greeks breakdown as markdown."""
+    d_sign = "+" if totals["delta"] >= 0 else ""
+    t_sign = "+" if totals["theta"] >= 0 else ""
+    v_sign = "+" if totals["vega"] >= 0 else ""
+
+    sections = [
+        "## Portfolio Greeks Detail",
+        "",
+        "### Summary",
+        f"- Net Delta: {d_sign}{fmt_number(totals['delta'], 0)}",
+        f"- Net Theta: {t_sign}${fmt_number(totals['theta'])}/day",
+        f"- Net Gamma: {fmt_number(totals['gamma'], 0)}",
+        f"- Net Vega: {v_sign}${fmt_number(totals['vega'])}",
+        "",
+    ]
+
+    underlying_rows = []
+    for sym in sorted(by_underlying, key=lambda s: abs(by_underlying[s]["delta"]), reverse=True):
+        u = by_underlying[sym]
+        underlying_rows.append(
+            {
+                "Symbol": sym,
+                "Delta": fmt_number(u["delta"], 0),
+                "Theta": fmt_number(u["theta"]),
+                "Gamma": fmt_number(u["gamma"], 0),
+                "Vega": fmt_number(u["vega"]),
+            }
+        )
+    sections.append("### By Underlying (sorted by |delta|)")
+    sections.append(list_table(underlying_rows))
+
+    return "\n".join(sections)

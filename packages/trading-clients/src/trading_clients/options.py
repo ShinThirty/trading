@@ -21,6 +21,111 @@ def parse_occ(symbol: str) -> tuple[str, str, str, float]:
     return root, exp, option_type, strike
 
 
+def build_occ(underlying: str, expiration: str, option_type: str, strike: float) -> str:
+    """Build OCC option symbol from components.
+
+    Example: ('AAPL', '2026-04-17', 'put', 250.0) → 'AAPL260417P00250000'
+    """
+    # YYMMDD from YYYY-MM-DD
+    date_part = expiration[2:4] + expiration[5:7] + expiration[8:10]
+    cp = "C" if option_type.lower().startswith("c") else "P"
+    strike_int = int(strike * 1000)
+    return f"{underlying}{date_part}{cp}{strike_int:08d}"
+
+
+def aggregate_greeks(
+    positions: list[dict],
+    greeks_by_symbol: dict[str, dict],
+) -> dict:
+    """Aggregate portfolio Greeks from position dicts and a Greeks lookup.
+
+    positions: normalized position dicts (from to_normalized() or Fidelity parser).
+      Option entries must have: underlying, option_type, strike, expiration, quantity.
+      Equity entries contribute delta = quantity (1 delta per share).
+    greeks_by_symbol: OCC symbol → {delta, gamma, theta, vega, mid_iv} from Tradier.
+
+    Returns dict with:
+      totals: {delta, gamma, theta, vega}
+      by_underlying: {symbol: {delta, gamma, theta, vega, positions: [...]}}
+    """
+    by_underlying: dict[str, dict] = {}
+    totals = {"delta": 0.0, "gamma": 0.0, "theta": 0.0, "vega": 0.0}
+
+    def _get_underlying(sym: str) -> dict:
+        if sym not in by_underlying:
+            by_underlying[sym] = {
+                "delta": 0.0,
+                "gamma": 0.0,
+                "theta": 0.0,
+                "vega": 0.0,
+                "positions": [],
+            }
+        return by_underlying[sym]
+
+    for p in positions:
+        if p.get("is_cash"):
+            continue
+
+        symbol = p.get("underlying", p["symbol"])
+        entry = _get_underlying(symbol)
+        positions_list: list = entry["positions"]
+
+        if p.get("is_option"):
+            occ = build_occ(
+                p["underlying"],
+                p["expiration"],
+                p["option_type"],
+                p["strike"],
+            )
+            greeks = greeks_by_symbol.get(occ, {})
+            qty = p.get("quantity", 0)
+            multiplier = qty * 100  # each contract = 100 shares
+
+            pos_delta = (greeks.get("delta") or 0) * multiplier
+            pos_gamma = (greeks.get("gamma") or 0) * multiplier
+            pos_theta = (greeks.get("theta") or 0) * multiplier
+            pos_vega = (greeks.get("vega") or 0) * multiplier
+
+            positions_list.append(
+                {
+                    "occ": occ,
+                    "type": p["option_type"],
+                    "strike": p["strike"],
+                    "expiration": p["expiration"],
+                    "quantity": qty,
+                    "delta": pos_delta,
+                    "gamma": pos_gamma,
+                    "theta": pos_theta,
+                    "vega": pos_vega,
+                    "iv": greeks.get("mid_iv"),
+                }
+            )
+            entry["delta"] = float(entry["delta"]) + pos_delta
+            entry["gamma"] = float(entry["gamma"]) + pos_gamma
+            entry["theta"] = float(entry["theta"]) + pos_theta
+            entry["vega"] = float(entry["vega"]) + pos_vega
+            totals["delta"] += pos_delta
+            totals["gamma"] += pos_gamma
+            totals["theta"] += pos_theta
+            totals["vega"] += pos_vega
+        else:
+            qty = p.get("quantity", 0)
+            entry["delta"] = float(entry["delta"]) + qty
+            positions_list.append(
+                {
+                    "type": "equity",
+                    "quantity": qty,
+                    "delta": qty,
+                    "gamma": 0.0,
+                    "theta": 0.0,
+                    "vega": 0.0,
+                }
+            )
+            totals["delta"] += qty
+
+    return {"totals": totals, "by_underlying": by_underlying}
+
+
 def roll_analysis(
     current: dict,
     new: dict,

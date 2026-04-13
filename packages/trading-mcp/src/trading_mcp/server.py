@@ -492,6 +492,74 @@ def _safe_float(val: Any) -> float:
         return 0.0
 
 
+@mcp.tool()
+def get_portfolio_greeks(
+    ctx: Context,
+    fidelity_folder: str | None = None,
+) -> str:
+    """Get aggregate portfolio Greeks (delta, theta, gamma, vega) across all accounts.
+
+    Fetches all option positions from Webull (and optionally Fidelity CSVs),
+    constructs OCC symbols, batch-quotes Greeks from Tradier, and aggregates
+    per-underlying and portfolio-wide.
+
+    fidelity_folder: path to folder containing Fidelity Positions_*.csv files
+      (e.g. '~/Downloads/fidelity'). Omit for Webull only.
+
+    Requires [webull] and [tradier] sections in ~/.tradingrc.
+    """
+    import tempfile
+
+    from trading_clients.portfolio import (
+        format_greeks_compact,
+        format_greeks_detail,
+        parse_fidelity_folder,
+    )
+
+    webull = _webull(ctx)
+    tradier = _tradier(ctx)
+
+    # 1. Collect all positions across accounts
+    all_positions: list[dict] = []
+    account_list = webull.get(ACCOUNT_LIST, EmptyRequest())
+    for acct in account_list.accounts:
+        aid = acct.get("account_id", "")
+        try:
+            all_positions.extend(webull.get(POSITIONS, AccountRequest(aid)).to_normalized())
+        except Exception:
+            continue
+
+    if fidelity_folder:
+        for acct in parse_fidelity_folder(fidelity_folder):
+            all_positions.extend(acct.positions)
+
+    # 2. Build OCC symbols for all option positions
+    option_positions = [p for p in all_positions if p.get("is_option")]
+    if not option_positions:
+        return "(no option positions found)"
+
+    occ_set: set[str] = set()
+    for p in option_positions:
+        occ_set.add(opts.build_occ(p["underlying"], p["expiration"], p["option_type"], p["strike"]))
+
+    # 3. Batch quote Greeks from Tradier
+    greeks_by_symbol: dict[str, dict] = {}
+    quote_resp = tradier.get(t.QUOTES, t.GetQuotesRequest(",".join(occ_set), greeks=True))
+    for q in quote_resp.quotes:
+        greeks = q.get("greeks") or {}
+        if greeks:
+            greeks_by_symbol[q.get("symbol", "")] = greeks
+
+    # 4. Aggregate and format
+    result = opts.aggregate_greeks(all_positions, greeks_by_symbol)
+
+    f = tempfile.NamedTemporaryFile(mode="w", suffix=".md", prefix="greeks_", delete=False)
+    f.write(format_greeks_detail(result["totals"], result["by_underlying"]))
+    f.close()
+
+    return format_greeks_compact(result["totals"], len(option_positions), f.name)
+
+
 # ── Webull Market Data ──────────────────────────────────────
 
 
