@@ -65,6 +65,12 @@ Collect these inputs — which ones matter depends on intent:
 - Stock price makes 100 shares expensive (>$15K notional) and you want exposure to several names
 - Time horizon is 6-12+ months (LEAPS theta decay is slow)
 
+**Auto-trigger: LEAPS vs shares comparison.** When Accumulate intent is selected and
+100 shares would cost >$15K, proactively run a side-by-side comparison before
+presenting the entry recommendation. Compare: capital required, delta exposure (per
+dollar invested), break-even at expiry, theta cost per month, and max loss. The user
+should not need to ask for this — surface it automatically.
+
 ### Intent: Enter at Discount (high conviction)
 
 **Strategies:**
