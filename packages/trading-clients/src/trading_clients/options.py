@@ -92,6 +92,13 @@ def detect_strategy(legs: list[dict], equity_position: dict | None = None) -> st
     """Detect option strategy name from leg structure and equity position."""
     n = len(legs)
 
+    # Multi-expiration strategies: route to dedicated detection
+    expirations = {lg.get("expiration") for lg in legs if lg.get("expiration")}
+    if len(expirations) > 1:
+        from trading_clients.options_multi_exp import detect_multi_exp_strategy
+
+        return detect_multi_exp_strategy(legs)
+
     # Equity-aware strategies (checked first)
     if equity_position is not None:
         short_calls = [lg for lg in legs if lg["side"] == "sell" and lg["option_type"] == "call"]

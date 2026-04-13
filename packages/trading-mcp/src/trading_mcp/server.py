@@ -563,7 +563,6 @@ def get_expected_move(ctx: Context, symbol: str, expiration: str) -> str:
 def analyze_option_strategy(
     ctx: Context,
     symbol: str,
-    expiration: str,
     legs: list[dict],
     shares: int | None = None,
     cost_basis: float | None = None,
@@ -573,31 +572,52 @@ def analyze_option_strategy(
     Computes max profit, max loss, breakeven points, probability of profit,
     and risk/reward ratio for any single or multi-leg option strategy.
 
+    Supports both single-expiration strategies (verticals, iron condors, etc.) and
+    multi-expiration strategies (calendar spreads, diagonal spreads, PMCC, double
+    diagonals). For multi-expiration, uses Black-Scholes to value the far-dated leg
+    at the near-term expiration.
+
     symbol: underlying ticker symbol (e.g. 'AAPL').
-    expiration: option expiration date (YYYY-MM-DD).
     legs: list of leg dicts, each with:
       - strike: strike price (e.g. 250)
       - option_type: 'call' or 'put'
       - side: 'buy' or 'sell'
       - quantity: number of contracts (default 1)
+      - expiration: option expiration date (YYYY-MM-DD)
     shares: number of shares held (e.g. 100 for covered call). Omit for option-only.
     cost_basis: per-share cost basis (e.g. 150.00). Required when shares is provided.
 
     Premiums and deltas are auto-fetched from the live option chain.
 
     Common strategies:
-      CSP: [{"strike": 250, "option_type": "put", "side": "sell"}]
-      Covered call: shares=100, cost_basis=150.00,
-                    [{"strike": 160, "option_type": "call", "side": "sell"}]
-      Bull put spread: [{"strike": 250, "option_type": "put", "side": "sell"},
-                        {"strike": 240, "option_type": "put", "side": "buy"}]
-      Iron condor: 4 legs (2 puts + 2 calls, short inner / long outer)
+      CSP: [{"strike": 250, "option_type": "put", "side": "sell",
+             "expiration": "2026-06-18"}]
+      Bull put spread:
+           [{"strike": 250, "option_type": "put", "side": "sell",
+             "expiration": "2026-06-18"},
+            {"strike": 240, "option_type": "put", "side": "buy",
+             "expiration": "2026-06-18"}]
+      Calendar spread:
+           [{"strike": 100, "option_type": "call", "side": "sell",
+             "expiration": "2026-05-15"},
+            {"strike": 100, "option_type": "call", "side": "buy",
+             "expiration": "2026-06-18"}]
+      Diagonal / PMCC:
+           [{"strike": 90, "option_type": "call", "side": "buy",
+             "expiration": "2027-01-15"},
+            {"strike": 110, "option_type": "call", "side": "sell",
+             "expiration": "2026-05-15"}]
 
     Requires [tradier] section in ~/.tradingrc.
     """
     from trading_clients.table_helpers import fmt_number, kv_table
 
     tradier = _tradier(ctx)
+
+    # Validate every leg has an expiration
+    for i, leg in enumerate(legs):
+        if "expiration" not in leg:
+            return f"(leg {i + 1} missing required 'expiration' field)"
 
     # Validate equity params
     equity_position = None
@@ -616,23 +636,29 @@ def analyze_option_strategy(
         return f"(no quote for {symbol})"
     stock_price = float(quote.quotes[0].get("last") or quote.quotes[0].get("close", 0))
 
-    # Get option chain with greeks
-    chain = tradier.get(t.CHAIN, t.GetChainRequest(symbol, expiration, greeks=True))
-    if not chain.options:
-        return f"(no option chain for {symbol} at {expiration})"
+    # Fetch option chain for each unique expiration
+    unique_exps = sorted({leg["expiration"] for leg in legs})
+    chains: dict[str, list[dict]] = {}
+    for exp in unique_exps:
+        chain = tradier.get(t.CHAIN, t.GetChainRequest(symbol, exp, greeks=True))
+        if not chain.options:
+            return f"(no option chain for {symbol} at {exp})"
+        chains[exp] = chain.options
 
-    # Match each leg to a chain entry and fill in premium + delta
+    # Match each leg to its chain entry and fill in premium + delta
     enriched_legs = []
     for leg in legs:
         strike = float(leg["strike"])
         otype = leg["option_type"]
+        leg_exp = leg["expiration"]
+        chain_options = chains[leg_exp]
         matches = [
             o
-            for o in chain.options
+            for o in chain_options
             if o.get("option_type") == otype and abs(o["strike"] - strike) < 0.01
         ]
         if not matches:
-            return f"(no {otype} at strike {strike} for {expiration})"
+            return f"(no {otype} at strike {strike} for {leg_exp})"
         opt = matches[0]
         greeks = opt.get("greeks") or {}
         enriched_legs.append(
@@ -647,11 +673,18 @@ def analyze_option_strategy(
                 "bid": opt.get("bid"),
                 "ask": opt.get("ask"),
                 "occ_symbol": opt.get("symbol", ""),
+                "expiration": leg_exp,
             }
         )
 
-    # Run strategy analysis
-    result = opts.strategy_analysis(enriched_legs, stock_price, equity_position)
+    # Route to appropriate analyzer
+    is_multi_exp = len(unique_exps) > 1
+    if is_multi_exp:
+        from trading_clients.options_multi_exp import analyze_multi_exp_strategy
+
+        result = analyze_multi_exp_strategy(enriched_legs, stock_price)
+    else:
+        result = opts.strategy_analysis(enriched_legs, stock_price, equity_position)
 
     # Build leg detail table
     from trading_clients.table_helpers import list_table
@@ -663,6 +696,7 @@ def analyze_option_strategy(
                 "Side": "LONG",
                 "Type": "EQUITY",
                 "Strike": "",
+                "Exp": "",
                 "Bid": "",
                 "Ask": "",
                 "Mid": fmt_number(stock_price),
@@ -672,26 +706,32 @@ def analyze_option_strategy(
             }
         )
     for el in enriched_legs:
-        leg_rows.append(
-            {
-                "Side": el["side"].upper(),
-                "Type": el["option_type"].upper(),
-                "Strike": fmt_number(el["strike"]),
-                "Bid": fmt_number(el["bid"]),
-                "Ask": fmt_number(el["ask"]),
-                "Mid": fmt_number(el["premium"]),
-                "Delta": (fmt_number(el["delta"], 3) if el["delta"] else ""),
-                "IV": (f"{el['iv'] * 100:.1f}%" if el["iv"] else ""),
-                "Qty": str(el["quantity"]),
-            }
-        )
+        row: dict[str, str] = {
+            "Side": el["side"].upper(),
+            "Type": el["option_type"].upper(),
+            "Strike": fmt_number(el["strike"]),
+        }
+        if is_multi_exp:
+            row["Exp"] = el["expiration"]
+        row["Bid"] = fmt_number(el["bid"])
+        row["Ask"] = fmt_number(el["ask"])
+        row["Mid"] = fmt_number(el["premium"])
+        row["Delta"] = fmt_number(el["delta"], 3) if el["delta"] else ""
+        row["IV"] = f"{el['iv'] * 100:.1f}%" if el["iv"] else ""
+        row["Qty"] = str(el["quantity"])
+        leg_rows.append(row)
 
     # Build summary
     data: dict[str, str] = {
         "Strategy": result.get("strategy_type", ""),
         "Stock Price": fmt_number(stock_price),
-        "Expiration": expiration,
     }
+    if is_multi_exp:
+        data["Near Expiration"] = result.get("near_exp", unique_exps[0])
+        data["Far Expiration"] = result.get("far_exp", unique_exps[-1])
+    else:
+        data["Expiration"] = unique_exps[0]
+
     if equity_position:
         data["Cost Basis"] = fmt_number(equity_position["cost_basis"])
         data["Shares"] = str(equity_position["shares"])
@@ -726,6 +766,9 @@ def analyze_option_strategy(
         data["If-Called Return"] = f"{result['if_called_return'] * 100:.2f}%"
     if result.get("static_return") is not None:
         data["Static Return"] = f"{result['static_return'] * 100:.2f}%"
+
+    if is_multi_exp:
+        data["Note"] = "P&L evaluated at near expiration using Black-Scholes for far-dated legs"
 
     sections = [
         f"## {symbol} {result.get('strategy_type', 'Strategy')} Analysis",
