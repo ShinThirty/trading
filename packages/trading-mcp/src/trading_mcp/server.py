@@ -493,47 +493,85 @@ def _safe_float(val: Any) -> float:
 
 
 def _webull_positions_to_dicts(pos_resp: Any) -> list[dict]:
-    """Convert Webull PositionsResponse to normalized position dicts."""
+    """Convert Webull PositionsResponse to normalized position dicts.
+
+    Mirrors the simple/multi-leg split in PositionsResponse.to_output():
+    - Simple (0-1 legs): equity or single-leg option (CSP, naked call)
+    - Multi-leg (2+ legs): covered stock, spreads — extract each leg separately
+    """
+    sf = _safe_float
     result: list[dict] = []
+
     for p in pos_resp.positions:
         legs = p.get("legs", [])
-        strategy = p.get("option_strategy", "")
         symbol = p.get("symbol", "")
-        qty = float(p.get("quantity") or 0)
-        cost = float(p.get("cost_price") or 0)
-        last = float(p.get("last_price") or 0)
-        mv = float(p.get("market_value") or 0)
-        pnl = float(p.get("unrealized_profit_loss") or 0)
         pnl_rate = p.get("unrealized_profit_loss_rate")
         pnl_pct = float(pnl_rate) * 100 if pnl_rate else 0.0
 
-        # Find the option leg (if any) — filter by instrument_type, not position index
-        option_leg = next(
-            (lg for lg in legs if lg.get("instrument_type") == "OPTION"),
-            None,
-        )
-        is_option = option_leg is not None
+        if len(legs) <= 1:
+            # Simple position: equity or single-leg option
+            option_leg = next(
+                (lg for lg in legs if lg.get("instrument_type") == "OPTION"),
+                None,
+            )
+            pos: dict = {
+                "symbol": symbol,
+                "quantity": sf(p.get("quantity")),
+                "last": sf(p.get("last_price")),
+                "cost": sf(p.get("cost_price")),
+                "value": sf(p.get("market_value")),
+                "pnl": sf(p.get("unrealized_profit_loss")),
+                "pnl_pct": pnl_pct,
+                "is_option": option_leg is not None,
+                "is_cash": False,
+            }
+            if option_leg:
+                pos["underlying"] = symbol
+                pos["option_type"] = (option_leg.get("option_type") or "").lower()
+                pos["strike"] = sf(option_leg.get("option_exercise_price"))
+                pos["expiration"] = option_leg.get("option_expire_date", "")
+                pos["strategy"] = p.get("option_strategy", "")
+            result.append(pos)
+        else:
+            # Multi-leg: emit separate entries for equity and option legs
+            strategy = p.get("option_strategy", "")
+            qty = sf(p.get("quantity"))
+            for lg in legs:
+                itype = lg.get("instrument_type", "")
+                if itype == "EQUITY":
+                    result.append(
+                        {
+                            "symbol": symbol,
+                            "quantity": qty * 100,
+                            "last": sf(lg.get("last_price")),
+                            "cost": sf(lg.get("cost")),
+                            "value": sf(lg.get("last_price")) * qty * 100,
+                            "pnl": sf(lg.get("unrealized_profit_loss")),
+                            "pnl_pct": 0.0,
+                            "is_option": False,
+                            "is_cash": False,
+                        }
+                    )
+                elif itype == "OPTION":
+                    result.append(
+                        {
+                            "symbol": symbol,
+                            "quantity": qty,
+                            "last": sf(lg.get("last_price")),
+                            "cost": sf(lg.get("cost")),
+                            "value": sf(lg.get("last_price")) * qty * -100,
+                            "pnl": sf(lg.get("unrealized_profit_loss")),
+                            "pnl_pct": 0.0,
+                            "is_option": True,
+                            "is_cash": False,
+                            "underlying": symbol,
+                            "option_type": (lg.get("option_type") or "").lower(),
+                            "strike": sf(lg.get("option_exercise_price")),
+                            "expiration": lg.get("option_expire_date", ""),
+                            "strategy": strategy,
+                        }
+                    )
 
-        pos: dict = {
-            "symbol": symbol,
-            "quantity": qty,
-            "last": last,
-            "cost": cost,
-            "value": mv,
-            "pnl": pnl,
-            "pnl_pct": pnl_pct,
-            "is_option": is_option,
-            "is_cash": False,
-        }
-
-        if option_leg:
-            pos["underlying"] = symbol
-            pos["option_type"] = (option_leg.get("option_type") or "").lower()
-            pos["strike"] = float(option_leg.get("option_exercise_price") or 0)
-            pos["expiration"] = option_leg.get("option_expire_date", "")
-            pos["strategy"] = strategy
-
-        result.append(pos)
     return result
 
 
