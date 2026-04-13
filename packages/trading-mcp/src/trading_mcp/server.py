@@ -445,7 +445,7 @@ def get_portfolio_summary(
 
         try:
             pos_resp = client.get(POSITIONS, AccountRequest(aid))
-            positions = _webull_positions_to_dicts(pos_resp)
+            positions = pos_resp.to_normalized()
         except Exception as e:
             positions = []
             errors[f"{label} (positions)"] = str(e)
@@ -490,89 +490,6 @@ def _safe_float(val: Any) -> float:
         return float(str(val).replace(",", ""))
     except (ValueError, TypeError):
         return 0.0
-
-
-def _webull_positions_to_dicts(pos_resp: Any) -> list[dict]:
-    """Convert Webull PositionsResponse to normalized position dicts.
-
-    Mirrors the simple/multi-leg split in PositionsResponse.to_output():
-    - Simple (0-1 legs): equity or single-leg option (CSP, naked call)
-    - Multi-leg (2+ legs): covered stock, spreads — extract each leg separately
-    """
-    sf = _safe_float
-    result: list[dict] = []
-
-    for p in pos_resp.positions:
-        legs = p.get("legs", [])
-        symbol = p.get("symbol", "")
-        pnl_rate = p.get("unrealized_profit_loss_rate")
-        pnl_pct = float(pnl_rate) * 100 if pnl_rate else 0.0
-
-        if len(legs) <= 1:
-            # Simple position: equity or single-leg option
-            option_leg = next(
-                (lg for lg in legs if lg.get("instrument_type") == "OPTION"),
-                None,
-            )
-            pos: dict = {
-                "symbol": symbol,
-                "quantity": sf(p.get("quantity")),
-                "last": sf(p.get("last_price")),
-                "cost": sf(p.get("cost_price")),
-                "value": sf(p.get("market_value")),
-                "pnl": sf(p.get("unrealized_profit_loss")),
-                "pnl_pct": pnl_pct,
-                "is_option": option_leg is not None,
-                "is_cash": False,
-            }
-            if option_leg:
-                pos["underlying"] = symbol
-                pos["option_type"] = (option_leg.get("option_type") or "").lower()
-                pos["strike"] = sf(option_leg.get("option_exercise_price"))
-                pos["expiration"] = option_leg.get("option_expire_date", "")
-                pos["strategy"] = p.get("option_strategy", "")
-            result.append(pos)
-        else:
-            # Multi-leg: emit separate entries for equity and option legs
-            strategy = p.get("option_strategy", "")
-            qty = sf(p.get("quantity"))
-            for lg in legs:
-                itype = lg.get("instrument_type", "")
-                if itype == "EQUITY":
-                    result.append(
-                        {
-                            "symbol": symbol,
-                            "quantity": qty * 100,
-                            "last": sf(lg.get("last_price")),
-                            "cost": sf(lg.get("cost")),
-                            "value": sf(lg.get("last_price")) * qty * 100,
-                            "pnl": sf(lg.get("unrealized_profit_loss")),
-                            "pnl_pct": 0.0,
-                            "is_option": False,
-                            "is_cash": False,
-                        }
-                    )
-                elif itype == "OPTION":
-                    result.append(
-                        {
-                            "symbol": symbol,
-                            "quantity": qty,
-                            "last": sf(lg.get("last_price")),
-                            "cost": sf(lg.get("cost")),
-                            "value": sf(lg.get("last_price")) * qty * -100,
-                            "pnl": sf(lg.get("unrealized_profit_loss")),
-                            "pnl_pct": 0.0,
-                            "is_option": True,
-                            "is_cash": False,
-                            "underlying": symbol,
-                            "option_type": (lg.get("option_type") or "").lower(),
-                            "strike": sf(lg.get("option_exercise_price")),
-                            "expiration": lg.get("option_expire_date", ""),
-                            "strategy": strategy,
-                        }
-                    )
-
-    return result
 
 
 # ── Webull Market Data ──────────────────────────────────────

@@ -6,6 +6,16 @@ from typing import Any
 from trading_clients.endpoint import BodyRequest, Endpoint, ParamsRequest
 from trading_clients.table_helpers import fmt_number, kv_table, list_table
 
+
+def _safe_float(val: Any) -> float:
+    if val is None or val == "":
+        return 0.0
+    try:
+        return float(str(val).replace(",", ""))
+    except (ValueError, TypeError):
+        return 0.0
+
+
 # ═══════════════════════════════════════════════════════════════
 # Request Models
 # ═══════════════════════════════════════════════════════════════
@@ -229,6 +239,90 @@ class PositionsResponse:
     @classmethod
     def from_response(cls, data: list[dict]) -> "PositionsResponse":
         return cls(positions=data or [])
+
+    def to_normalized(self) -> list[dict]:
+        """Convert positions to normalized dicts for aggregation.
+
+        Simple positions (0-1 legs) emit one entry.
+        Multi-leg positions (covered stock, spreads) emit separate entries
+        for each equity and option leg.
+
+        Each dict has: symbol, quantity, last, cost, value, pnl, pnl_pct,
+        is_option, is_cash. Option entries additionally have: underlying,
+        option_type, strike, expiration, strategy.
+        """
+        sf = _safe_float
+        result: list[dict] = []
+
+        for p in self.positions:
+            legs = p.get("legs", [])
+            symbol = p.get("symbol", "")
+            pnl_rate = p.get("unrealized_profit_loss_rate")
+            pnl_pct = float(pnl_rate) * 100 if pnl_rate else 0.0
+
+            if len(legs) <= 1:
+                option_leg = next(
+                    (lg for lg in legs if lg.get("instrument_type") == "OPTION"),
+                    None,
+                )
+                pos: dict[str, Any] = {
+                    "symbol": symbol,
+                    "quantity": sf(p.get("quantity")),
+                    "last": sf(p.get("last_price")),
+                    "cost": sf(p.get("cost_price")),
+                    "value": sf(p.get("market_value")),
+                    "pnl": sf(p.get("unrealized_profit_loss")),
+                    "pnl_pct": pnl_pct,
+                    "is_option": option_leg is not None,
+                    "is_cash": False,
+                }
+                if option_leg:
+                    pos["underlying"] = symbol
+                    pos["option_type"] = (option_leg.get("option_type") or "").lower()
+                    pos["strike"] = sf(option_leg.get("option_exercise_price"))
+                    pos["expiration"] = option_leg.get("option_expire_date", "")
+                    pos["strategy"] = p.get("option_strategy", "")
+                result.append(pos)
+            else:
+                strategy = p.get("option_strategy", "")
+                qty = sf(p.get("quantity"))
+                for lg in legs:
+                    itype = lg.get("instrument_type", "")
+                    if itype == "EQUITY":
+                        result.append(
+                            {
+                                "symbol": symbol,
+                                "quantity": qty * 100,
+                                "last": sf(lg.get("last_price")),
+                                "cost": sf(lg.get("cost")),
+                                "value": sf(lg.get("last_price")) * qty * 100,
+                                "pnl": sf(lg.get("unrealized_profit_loss")),
+                                "pnl_pct": 0.0,
+                                "is_option": False,
+                                "is_cash": False,
+                            }
+                        )
+                    elif itype == "OPTION":
+                        result.append(
+                            {
+                                "symbol": symbol,
+                                "quantity": qty,
+                                "last": sf(lg.get("last_price")),
+                                "cost": sf(lg.get("cost")),
+                                "value": sf(lg.get("last_price")) * qty * -100,
+                                "pnl": sf(lg.get("unrealized_profit_loss")),
+                                "pnl_pct": 0.0,
+                                "is_option": True,
+                                "is_cash": False,
+                                "underlying": symbol,
+                                "option_type": (lg.get("option_type") or "").lower(),
+                                "strike": sf(lg.get("option_exercise_price")),
+                                "expiration": lg.get("option_expire_date", ""),
+                                "strategy": strategy,
+                            }
+                        )
+
+        return result
 
     def to_output(self) -> str:
         if not self.positions:
