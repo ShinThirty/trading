@@ -433,7 +433,7 @@ def get_portfolio_summary(
         atype = acct.get("account_type", "")
 
         try:
-            bal = client.get(BALANCE, AccountRequest(aid))
+            bal = _webull_get_with_retry(client, BALANCE, AccountRequest(aid))
         except Exception as e:
             errors[label] = str(e)
             continue
@@ -444,7 +444,7 @@ def get_portfolio_summary(
         mv = sf(bal.market_value)
 
         try:
-            pos_resp = client.get(POSITIONS, AccountRequest(aid))
+            pos_resp = _webull_get_with_retry(client, POSITIONS, AccountRequest(aid))
             positions = pos_resp.to_normalized()
         except Exception as e:
             positions = []
@@ -481,6 +481,20 @@ def get_portfolio_summary(
     f.close()
 
     return compact_portfolio_summary(portfolio, f.name)
+
+
+def _webull_get_with_retry(client: Any, endpoint: Any, request: Any, retries: int = 2) -> Any:
+    """Call client.get with retry on 429 rate limit errors."""
+    import time
+
+    for attempt in range(retries + 1):
+        try:
+            return client.get(endpoint, request)
+        except Exception as e:
+            if "429" in str(e) and attempt < retries:
+                time.sleep(2)
+                continue
+            raise
 
 
 def _safe_float(val: Any) -> float:
@@ -522,12 +536,16 @@ def get_portfolio_greeks(
     # 1. Collect all positions across accounts
     all_positions: list[dict] = []
     account_list = webull.get(ACCOUNT_LIST, EmptyRequest())
+    errors: list[str] = []
     for acct in account_list.accounts:
         aid = acct.get("account_id", "")
+        label = acct.get("account_label", aid)
         try:
-            all_positions.extend(webull.get(POSITIONS, AccountRequest(aid)).to_normalized())
-        except Exception:
-            continue
+            all_positions.extend(
+                _webull_get_with_retry(webull, POSITIONS, AccountRequest(aid)).to_normalized()
+            )
+        except Exception as e:
+            errors.append(f"{label}: {e}")
 
     if fidelity_folder:
         for acct in parse_fidelity_folder(fidelity_folder):
@@ -557,7 +575,10 @@ def get_portfolio_greeks(
     f.write(format_greeks_detail(result["totals"], result["by_underlying"]))
     f.close()
 
-    return format_greeks_compact(result["totals"], len(option_positions), f.name)
+    output = format_greeks_compact(result["totals"], len(option_positions), f.name)
+    if errors:
+        output += "\nErrors: " + "; ".join(errors)
+    return output
 
 
 # ── Webull Market Data ──────────────────────────────────────
