@@ -247,11 +247,12 @@ class PositionsResponse:
                 "P&L": fmt_number(p.get("unrealized_profit_loss")),
                 "P&L %": pnl_pct,
             }
+            legs = p.get("legs", [])
+            equity_leg = next((lg for lg in legs if lg.get("instrument_type") == "EQUITY"), None)
+            option_leg = next((lg for lg in legs if lg.get("instrument_type") == "OPTION"), None)
+            row["Eq Cost"] = fmt_number(equity_leg.get("cost")) if equity_leg else ""
+            row["Opt Cost"] = fmt_number(option_leg.get("cost")) if option_leg else ""
             if has_options:
-                option_leg = next(
-                    (lg for lg in p.get("legs", []) if lg.get("instrument_type") == "OPTION"),
-                    None,
-                )
                 if option_leg:
                     row["Option"] = option_leg.get("option_type", "")
                     row["Strike"] = fmt_number(option_leg.get("option_exercise_price"))
@@ -262,7 +263,17 @@ class PositionsResponse:
                     row["Exp"] = ""
                 row["Strategy"] = p.get("option_strategy", "")
             rows.append(row)
-        cols = ["Symbol", "Qty", "Cost", "Last", "Mkt Val", "P&L", "P&L %"]
+        cols = [
+            "Symbol",
+            "Qty",
+            "Cost",
+            "Eq Cost",
+            "Opt Cost",
+            "Last",
+            "Mkt Val",
+            "P&L",
+            "P&L %",
+        ]
         if has_options:
             cols += ["Option", "Strike", "Exp", "Strategy"]
         return list_table(rows, cols)
