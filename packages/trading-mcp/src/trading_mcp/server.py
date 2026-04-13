@@ -565,6 +565,8 @@ def analyze_option_strategy(
     symbol: str,
     expiration: str,
     legs: list[dict],
+    shares: int | None = None,
+    cost_basis: float | None = None,
 ) -> str:
     """Analyze an option strategy's risk/reward profile.
 
@@ -578,11 +580,15 @@ def analyze_option_strategy(
       - option_type: 'call' or 'put'
       - side: 'buy' or 'sell'
       - quantity: number of contracts (default 1)
+    shares: number of shares held (e.g. 100 for covered call). Omit for option-only.
+    cost_basis: per-share cost basis (e.g. 150.00). Required when shares is provided.
 
     Premiums and deltas are auto-fetched from the live option chain.
 
     Common strategies:
       CSP: [{"strike": 250, "option_type": "put", "side": "sell"}]
+      Covered call: shares=100, cost_basis=150.00,
+                    [{"strike": 160, "option_type": "call", "side": "sell"}]
       Bull put spread: [{"strike": 250, "option_type": "put", "side": "sell"},
                         {"strike": 240, "option_type": "put", "side": "buy"}]
       Iron condor: 4 legs (2 puts + 2 calls, short inner / long outer)
@@ -592,6 +598,17 @@ def analyze_option_strategy(
     from trading_clients.table_helpers import fmt_number, kv_table
 
     tradier = _tradier(ctx)
+
+    # Validate equity params
+    equity_position = None
+    if shares is not None or cost_basis is not None:
+        if shares is None or cost_basis is None:
+            return "(both shares and cost_basis are required together)"
+        if shares <= 0:
+            return "(shares must be positive)"
+        if cost_basis <= 0:
+            return "(cost_basis must be positive)"
+        equity_position = {"shares": shares, "cost_basis": cost_basis}
 
     # Get current stock price
     quote = tradier.get(t.QUOTES, t.GetQuotesRequest(symbol, greeks=False))
@@ -634,12 +651,26 @@ def analyze_option_strategy(
         )
 
     # Run strategy analysis
-    result = opts.strategy_analysis(enriched_legs, stock_price)
+    result = opts.strategy_analysis(enriched_legs, stock_price, equity_position)
 
     # Build leg detail table
     from trading_clients.table_helpers import list_table
 
     leg_rows = []
+    if equity_position:
+        leg_rows.append(
+            {
+                "Side": "LONG",
+                "Type": "EQUITY",
+                "Strike": "",
+                "Bid": "",
+                "Ask": "",
+                "Mid": fmt_number(stock_price),
+                "Delta": "1.000",
+                "IV": "",
+                "Qty": str(equity_position["shares"]),
+            }
+        )
     for el in enriched_legs:
         leg_rows.append(
             {
@@ -649,8 +680,8 @@ def analyze_option_strategy(
                 "Bid": fmt_number(el["bid"]),
                 "Ask": fmt_number(el["ask"]),
                 "Mid": fmt_number(el["premium"]),
-                "Delta": fmt_number(el["delta"], 3) if el["delta"] else "",
-                "IV": f"{el['iv'] * 100:.1f}%" if el["iv"] else "",
+                "Delta": (fmt_number(el["delta"], 3) if el["delta"] else ""),
+                "IV": (f"{el['iv'] * 100:.1f}%" if el["iv"] else ""),
                 "Qty": str(el["quantity"]),
             }
         )
@@ -661,6 +692,9 @@ def analyze_option_strategy(
         "Stock Price": fmt_number(stock_price),
         "Expiration": expiration,
     }
+    if equity_position:
+        data["Cost Basis"] = fmt_number(equity_position["cost_basis"])
+        data["Shares"] = str(equity_position["shares"])
 
     net = result["net_premium"]
     if net >= 0:
@@ -680,6 +714,11 @@ def analyze_option_strategy(
 
     if result["probability_of_profit"] is not None:
         data["P(Profit)"] = f"{result['probability_of_profit'] * 100:.0f}%"
+
+    if result.get("if_called_return") is not None:
+        data["If-Called Return"] = f"{result['if_called_return'] * 100:.2f}%"
+    if result.get("static_return") is not None:
+        data["Static Return"] = f"{result['static_return'] * 100:.2f}%"
 
     sections = [
         f"## {symbol} {result.get('strategy_type', 'Strategy')} Analysis",
@@ -1057,13 +1096,15 @@ def get_price_target(ctx: Context, symbol: str) -> str:
     data = yfc.analyst_price_targets(symbol)
     if not data:
         return f"(no price targets for {symbol})"
-    return kv_table({
-        "Current": fmt_number(data.get("current")),
-        "Target Low": fmt_number(data.get("low")),
-        "Target Mean": fmt_number(data.get("mean")),
-        "Target Median": fmt_number(data.get("median")),
-        "Target High": fmt_number(data.get("high")),
-    })
+    return kv_table(
+        {
+            "Current": fmt_number(data.get("current")),
+            "Target Low": fmt_number(data.get("low")),
+            "Target Mean": fmt_number(data.get("mean")),
+            "Target Median": fmt_number(data.get("median")),
+            "Target High": fmt_number(data.get("high")),
+        }
+    )
 
 
 @mcp.tool()
