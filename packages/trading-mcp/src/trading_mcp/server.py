@@ -486,7 +486,7 @@ def _webull_positions_to_dicts(pos_resp: Any) -> list[dict]:
     result: list[dict] = []
     for p in pos_resp.positions:
         legs = p.get("legs", [])
-        is_option = p.get("instrument_type") == "OPTION" or bool(p.get("option_strategy"))
+        strategy = p.get("option_strategy", "")
         symbol = p.get("symbol", "")
         qty = float(p.get("quantity") or 0)
         cost = float(p.get("cost_price") or 0)
@@ -495,6 +495,13 @@ def _webull_positions_to_dicts(pos_resp: Any) -> list[dict]:
         pnl = float(p.get("unrealized_profit_loss") or 0)
         pnl_rate = p.get("unrealized_profit_loss_rate")
         pnl_pct = float(pnl_rate) * 100 if pnl_rate else 0.0
+
+        # Find the option leg (if any) — filter by instrument_type, not position index
+        option_leg = next(
+            (lg for lg in legs if lg.get("instrument_type") == "OPTION"),
+            None,
+        )
+        is_option = option_leg is not None
 
         pos: dict = {
             "symbol": symbol,
@@ -508,13 +515,12 @@ def _webull_positions_to_dicts(pos_resp: Any) -> list[dict]:
             "is_cash": False,
         }
 
-        if is_option and legs:
-            leg = legs[0]
+        if option_leg:
             pos["underlying"] = symbol
-            pos["option_type"] = (leg.get("option_type") or "").lower()
-            pos["strike"] = float(leg.get("strike_price") or 0)
-            pos["expiration"] = leg.get("option_expire_date", "")
-            pos["strategy"] = p.get("option_strategy", "")
+            pos["option_type"] = (option_leg.get("option_type") or "").lower()
+            pos["strike"] = float(option_leg.get("option_exercise_price") or 0)
+            pos["expiration"] = option_leg.get("option_expire_date", "")
+            pos["strategy"] = strategy
 
         result.append(pos)
     return result
