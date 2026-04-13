@@ -407,9 +407,12 @@ def get_portfolio_summary(
 
     Note: fetches Webull data sequentially to respect rate limits (~1 req/second).
     """
+    import tempfile
+
     from trading_clients.portfolio import (
         AccountSummary,
         PortfolioSummary,
+        compact_portfolio_summary,
         format_portfolio_summary,
         parse_fidelity_folder,
     )
@@ -469,7 +472,15 @@ def get_portfolio_summary(
         except Exception as e:
             errors["Fidelity"] = str(e)
 
-    return format_portfolio_summary(PortfolioSummary(summaries, errors))
+    portfolio = PortfolioSummary(summaries, errors)
+    full_output = format_portfolio_summary(portfolio)
+
+    # Save full details to temp file, return compact summary
+    f = tempfile.NamedTemporaryFile(mode="w", suffix=".md", prefix="portfolio_", delete=False)
+    f.write(full_output)
+    f.close()
+
+    return compact_portfolio_summary(portfolio, f.name)
 
 
 def _safe_float(val: Any) -> float:

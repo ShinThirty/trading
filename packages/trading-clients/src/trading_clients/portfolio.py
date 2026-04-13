@@ -180,6 +180,30 @@ def parse_fidelity_folder(folder: str) -> list[AccountSummary]:
     return [parse_fidelity_csv(str(p)) for p in csvs]
 
 
+def compact_portfolio_summary(summary: PortfolioSummary, file_path: str) -> str:
+    """Return a brief summary line with a pointer to the full details file."""
+    total_nlv = sum(a.nlv for a in summary.accounts)
+    total_day = sum(a.day_pnl for a in summary.accounts)
+    n_accounts = len(summary.accounts)
+    n_options = sum(1 for a in summary.accounts for p in a.positions if p.get("is_option"))
+    n_equity = sum(
+        1
+        for a in summary.accounts
+        for p in a.positions
+        if not p.get("is_option") and not p.get("is_cash")
+    )
+    sign = "+" if total_day >= 0 else ""
+    lines = [
+        f"Portfolio: ${fmt_number(total_nlv)} across {n_accounts} accounts"
+        f" ({sign}${fmt_number(total_day)} day)",
+        f"{n_options} option positions, {n_equity} equity positions",
+        f"Full details: {file_path}",
+    ]
+    if summary.errors:
+        lines.append(f"Errors: {', '.join(summary.errors.keys())}")
+    return "\n".join(lines)
+
+
 def format_portfolio_summary(summary: PortfolioSummary) -> str:
     """Format a multi-account portfolio summary as markdown."""
     sections: list[str] = ["## Portfolio Summary", ""]
