@@ -451,6 +451,15 @@ class OrderListResponse:
     def from_response(cls, data: list[dict]) -> "OrderListResponse":
         return cls(combos=data or [])
 
+    def filter_by_status(self, status: str) -> "OrderListResponse":
+        status_upper = status.upper()
+        filtered = []
+        for combo in self.combos:
+            matching = [o for o in combo.get("orders", []) if o.get("status") == status_upper]
+            if matching:
+                filtered.append({**combo, "orders": matching})
+        return OrderListResponse(combos=filtered)
+
     def to_output(self) -> str:
         if not self.combos:
             return "(no orders)"

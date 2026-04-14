@@ -194,6 +194,7 @@ def get_order_history(
     page_size: int = 50,
     start_date: str | None = None,
     end_date: str | None = None,
+    status: str | None = None,
     account_id: str | None = None,
 ) -> str:
     """Get order history including filled, cancelled, and pending orders.
@@ -203,15 +204,19 @@ def get_order_history(
     page_size: max number of orders to return (default 50).
     start_date: start date (YYYY-MM-DD). Defaults to today.
     end_date: end date (YYYY-MM-DD). Defaults to today.
+    status: filter by order status (FILLED, CANCELLED, FAILED, PENDING). Case-insensitive.
     account_id: Webull account ID. Omit to use the default from ~/.tradingrc.
     """
     client = _webull(ctx)
-    return client.get(
+    response = client.get(
         ORDER_HISTORY,
         GetOrderHistoryRequest(
             client.resolve_account_id(account_id), page_size, start_date, end_date
         ),
-    ).to_output()
+    )
+    if status:
+        response = response.filter_by_status(status)
+    return response.to_output()
 
 
 @mcp.tool()
