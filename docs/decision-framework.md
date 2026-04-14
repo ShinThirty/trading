@@ -30,7 +30,7 @@ Conviction drives intent. Intent drives strategy. Decide intent FIRST — everyt
 
 | Factor | High conviction | Low conviction |
 |--------|----------------|----------------|
-| **ROE** | >25% — elite capital efficiency (ADBE 62%) | <15% — mediocre returns don't justify premium P/E |
+| **ROE** | >25% — elite capital efficiency (ADBE 62%). If D/E >3x, ROE is inflated by leverage — discount it (GDDY 384% ROE is buyback engineering, not profitability). | <15% — mediocre returns don't justify premium P/E |
 | **Moat** | Monopoly/deep switching costs (ADBE creative suite) | Commodity, crowded market, active disruption threat |
 | **Growth durability** | Recurring revenue, expanding TAM, secular tailwinds | Cyclical, geopolitical-dependent, or AI-threatened |
 
