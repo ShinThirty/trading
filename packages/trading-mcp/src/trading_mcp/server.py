@@ -189,7 +189,7 @@ def get_open_orders(ctx: Context, page_size: int = 50, account_id: str | None = 
 
 
 @mcp.tool()
-def get_today_orders(
+def get_order_history(
     ctx: Context,
     page_size: int = 50,
     start_date: str | None = None,
@@ -198,6 +198,9 @@ def get_today_orders(
 ) -> str:
     """Get order history including filled, cancelled, and pending orders.
 
+    Supports any date range — use for reviewing past trades, not just today's orders.
+
+    page_size: max number of orders to return (default 50).
     start_date: start date (YYYY-MM-DD). Defaults to today.
     end_date: end date (YYYY-MM-DD). Defaults to today.
     account_id: Webull account ID. Omit to use the default from ~/.tradingrc.

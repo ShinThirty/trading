@@ -266,6 +266,9 @@ Base sizing on **valuation risk** (P/E) and **portfolio concentration**:
 - Always reserve cash for T2 scale-in (don't deploy 100% on T1)
 - If running multiple CSPs, total collateral should not exceed 60% of cash account
 - Spreads allow more positions — reallocate freed capital across pipeline names
+- **Limit new entries to 5-7 names per month.** In March 2026, 18 names were bought in 10 days — the shotgun approach diluted conviction and made it impossible to size properly. Run each name through Steps 1-4 before adding the next.
+
+**Size for the drawdown, not just the upside.** Before entering, ask: "If this drops 40% over 2 months, will the dollar loss force me to sell?" If yes, the position is too large. The ALAB lesson: a $182 entry on a volatile semi name should have been half-size or structured with a CC, because the eventual -45% drawdown created a $14K emotional breaking point that forced a thesis-correct exit. Size so that the worst-case drawdown is painful but survivable without triggering an emotional sell.
 
 ## Step 5: Set Management Rules
 
@@ -296,6 +299,46 @@ Base sizing on **valuation risk** (P/E) and **portfolio concentration**:
 ### All strategies:
 - **Exit signal:** Thesis broken (not price action). Revenue deceleration, margin collapse, competitive disruption, management change.
 - **Covered call overlay** once shares are held: sell 30-45 DTE calls at 10-15% OTM for income.
+
+### Thesis Checkpoint: When a Position Drops >15%
+
+Don't watch the ticker and feel pain. Run this checklist:
+
+1. **Is the end customer still spending?** Check the demand environment upstream of your company. If the buyers of your company's products are still deploying capital, the thesis is intact.
+2. **Is this company-specific or sector-wide?** When the entire sector is down, the problem is macro, not your stock. Company-specific drawdowns need more scrutiny. Sector-wide drawdowns are usually noise.
+3. **Has the competitive moat actually narrowed?** Check for concrete evidence: lost customers, cancelled contracts, actual product displacement by a competitor. A narrative shift in financial media is not the same as lost revenue. Narrative ≠ reality.
+4. **Is the thesis timeline still valid?** A 2-month drawdown inside an 18-month thesis is noise, not signal. If the thesis hasn't had time to play out, price action alone isn't a reason to exit.
+5. **Would I buy this at today's price if I had no position?** Strip away anchoring to your entry. If the thesis was buyable at $182, it's *more* buyable at $100. The only thing that changed is your P&L, not the company.
+
+If all five pass → hold or add. If any fail → exit regardless of price.
+
+**Example — ALAB (Apr 2026):** All five passed. Hyperscaler capex still growing, sector-wide drawdown (not ALAB-specific), no competitive moat change, thesis timeline intact (semi cycle through mid-2027), stock was cheaper by every metric. The exit at $125 was emotional, not analytical. Stock ripped 29% in the 4 days after selling.
+
+**Example — CRDO (Mar 2026):** Arguably harder — had a specific narrative headwind ("optical replaces copper"). But all five still passed: customers still shipping AECs, Nvidia said "both copper AND optical," patent settlements proved the tech was valuable, semi cycle timeline intact. Held through -30%. Recovered +53% from the low. DustPhotonics acquisition later removed the narrative risk entirely.
+
+### Selling Into Strength vs Selling Into Recovery
+
+These look similar on a chart but are psychologically opposite:
+
+**Selling into strength:** Your position is working. The stock is at or near highs, and you're taking profits because the price has reached a level where you're happy to sell. *You're selling because the stock went up.*
+
+- LITE: Bought $650 → sold tranches at $692, $780, $790, $910. Each sell was higher than the last.
+- XLE: Bought $56.60 → sold $60.30. Clean exit at a profit target.
+
+**Selling into recovery:** Your position was deeply underwater. The stock bounced partially, and you sell because the bounce gave you a "chance to get out" — not because you've reached a profit target. *You're selling because the stock stopped going down.*
+
+- ALAB: Bought $182 → ground to $100 (-45%) → bounced to $129 → sold. The recovery brought relief, not confidence. The sell was about exhaustion, not analysis.
+
+**The diagnostic test:** "Am I selling because I've won, or because I've survived?"
+
+| | Selling into strength | Selling into recovery |
+|---|---|---|
+| Position P&L | Green or solidly profitable | Still red or barely recovered |
+| Motivation | "I've hit my target" | "I can finally get out" |
+| Emotion | Confidence, maybe mild FOMO | Relief, exhaustion |
+| Usually right? | Yes — disciplined profit-taking | Usually wrong — you paid the full emotional cost of the drawdown but captured none of the recovery |
+
+**The rule:** If you held from $182 to $100 and survived the worst, a bounce to $129 should confirm the thesis, not trigger an exit. The crash is the tax. The recovery is the refund. Selling into a recovery is paying the tax and walking away before the refund arrives.
 
 ## Quick Reference: Case Studies
 
@@ -359,6 +402,8 @@ How many shares to cover determines how much upside you retain. This is the most
 - Upside participation if the stock rips (CRDO +12% today — 86 uncovered shares captured it)
 - Psychological comfort to hold the covered portion without second-guessing
 - Flexibility to write additional CCs later if conviction changes
+
+**CCs as emotional armor.** Beyond income and exit timing, CCs serve a critical psychological function: they make drawdowns survivable. CRDO with a $150C Jan '27 CC held through a -30% drawdown; ALAB with no CC was sold at -29% for a $14K loss. Same thesis quality, different outcome — because the CC premium cushioned the felt loss enough to prevent an emotional exit. For volatile positions where you intend to hold through a multi-month thesis, writing a CC at entry (or shortly after) isn't just about income — it's about ensuring you can stick to the plan.
 
 ### CC Step 4: Strike Selection
 
@@ -434,3 +479,60 @@ When you have a sector-level thesis (like the semi cycle), covered calls become 
 | SMH $410C May '26 | Liquidation | 100% (100/100) | Deep ITM ($444 current) | Near-term, one cycle | Getting called is the plan — premium was bonus on top of the exit |
 | MOS $29.50C May '26 | Income/wheel | 100% (200/200) | Range-bound commodity play | Monthly rolling cycle | Low conviction, full coverage, wheel candidate |
 | GDX $105C May '26 | Income | 88% (400/452) | 6% OTM on commodity position | Monthly cycle | Standard income CC on a non-growth holding |
+
+---
+
+## Retrospective: Feb-Apr 2026
+
+This framework was written in April 2026 after two months of learning by doing. The trades below — made before this framework existed — are the raw material it was built from.
+
+### The Three Defining Trades
+
+**ALAB — The $14K lesson that wrote Step 5**
+
+| Date | Event | Price |
+|------|-------|-------|
+| Feb 2026 | Bought ~251 shares, no research, no CC, no scale-in | $182 |
+| Mar 30 | Bottom — max drawdown -45% | $100 |
+| Apr 9 | Sold into recovery — emotional exit | $125 |
+| Apr 13 | Stock without you | $167 (+29% from sell) |
+
+What went wrong: Entry violated every rule in this framework — no intent determination (Step 1), no signal reading (Step 2), full-size single-tranche entry (violates Step 4), no CC for emotional armor. Two months of slow-bleed drawdown created an intolerable dollar loss. The bounce to $129 felt like an escape window, not a confirmation signal.
+
+What the framework would have done differently: Step 4 sizing (>35x P/E = reduced size). Scale-in with T2 reserved. CC written within 2 weeks of entry. Thesis checkpoint at -15% would have confirmed all five questions passed → hold or add.
+
+**CRDO — The hold that proved the framework**
+
+| Date | Event | Price |
+|------|-------|-------|
+| Mar 2-24 | Scaled in: 100 @ $103, 50 @ $103.50, 36 @ $99.70 | ~$102 avg |
+| Mar 17 | GTC: "optical replaces copper" narrative | $104 → crash |
+| Mar 30 | Bottom — max drawdown -30% from high | $88 |
+| Apr 2 | Wrote $110C May CC (emotional armor) | $101 |
+| Apr 13 | Recovery + DustPhotonics acquisition | $134 |
+
+What went right: Scale-in across 3 tranches over 3 weeks. CC written during drawdown cushioned the pain. Thesis checkpoint passed — customers still buying, sector-wide drawdown, competitive moat intact. Partial coverage (200/286) let 86 uncovered shares capture the full recovery.
+
+**LITE — The exit that showed how to sell**
+
+| Date | Event | Price |
+|------|-------|-------|
+| Mar 4 | Bought 8 shares | $650 |
+| Mar 10 | Sold 4 — first trim into strength | $692 |
+| Mar 24-25 | Sold 4 — second trim higher | $780-790 |
+| Apr 8 | Sold final 4 — last tranche at near-highs | $910 |
+
+What went right: Sold in 4 tranches over a month, each at a higher price than the last. Every sell was "selling into strength" — motivated by hitting a target, not by relief. Average exit ~$768 vs $650 entry = +18%. Contrast with ALAB: LITE exits were confident; ALAB exit was exhausted.
+
+### Patterns Across All Feb-Apr Trades
+
+| Pattern | Trades that showed it | Framework rule it became |
+|---------|----------------------|--------------------------|
+| Single-tranche entries hurt | ALAB ($182 all-in), SNDK (10 @ $582), AVGO (20 @ $309) | Step 4: Always reserve cash for T2 |
+| Scale-in entries work | CRDO (3 tranches), META (trimmed high, added low), PLTR (trimmed $155, rebought $130-141) | Step 4: Scale-in is default |
+| Too many names too fast | 18 names bought in 10 days (Mar 3-13) | Step 4: Limit to 5-7 names/month |
+| CCs prevent emotional exits | CRDO held through -30% with CC; ALAB sold at -29% without CC | CC Step 3: CCs as emotional armor |
+| Selling into strength works | LITE (+18%), XLE (+6.5%), COHR (+6%), ARM (+16%) | Step 5: Selling into strength vs recovery |
+| Selling into recovery fails | ALAB (sold $125, stock went to $167) | Step 5: The crash is the tax, the recovery is the refund |
+| Thesis exits beat price exits | ALAB thesis was intact at exit — pure emotional sell | Step 5: Thesis checkpoint at -15% |
+| ETFs are fine when you lack "which" | GLD, GDX, XLE — macro thesis without company-specific conviction | Which/When/How: ETFs for macro, stocks for conviction |
