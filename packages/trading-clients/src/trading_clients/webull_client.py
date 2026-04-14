@@ -103,15 +103,13 @@ class WebullClient(BaseClient):
         self._cache = TTLCache()
         self._limiter = RateLimiter(RATE_LIMITS)
 
-    def resolve_account_id(self, account_id: str | None = None) -> str:
-        """Resolve account_id from param, config default, or raise with instructions."""
-        aid = account_id or self._config.account_id
-        if not aid:
+    def ensure_account_id(self, account_id: str) -> str:
+        """Validate account_id. Always required to prevent wrong-account mistakes."""
+        if not account_id:
             raise RuntimeError(
-                "No account_id provided. Either set account_id in ~/.tradingrc [webull] "
-                "or pass it as a parameter. Use get_app_subscriptions() to list accounts."
+                "account_id is required. Use get_app_subscriptions() to list accounts."
             )
-        return aid
+        return account_id
 
     def _cache_key(self, path: str, params: dict[str, str] | None) -> str:
         parts = [path]
@@ -122,7 +120,7 @@ class WebullClient(BaseClient):
     def _create_token(self) -> str:
         """Create a new access token and save it to ~/.tradingrc."""
         body: dict[str, Any] = {
-            "account_id": self.resolve_account_id(),
+            "account_id": self._config.account_id,
         }
         path = "/openapi/auth/token/create"
         headers = _build_signature(
