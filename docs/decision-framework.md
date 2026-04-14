@@ -119,6 +119,31 @@ Conservative OTM strikes (>12%) on deeply drawdown stocks defeat the entry purpo
 | Earnings >60 days away | Standard 30-45 DTE |
 | Earnings just passed | 30-45 DTE from now (clean runway + residual IV) |
 
+**CSP Roll Mechanics:**
+
+Rolling CSPs follows the same principle as CCs — the decision comes before the economics. Ask: **should this CSP still exist?**
+
+| Situation | Right move | Wrong move |
+|-----------|-----------|------------|
+| Stock approaching strike, thesis intact, want lower entry | **Roll down and out** for credit | Letting assign when better entry exists below |
+| Stock approaching strike, you want assignment | **Let assign** — this was the plan | Rolling away from assignment when the CSP was an entry mechanism |
+| Thesis broken, stock falling | **Buy back and walk away** — don't own this name | Rolling down to a lower strike on a broken thesis |
+| Stock well above strike, CSP at >50% profit | **Buy back, write next cycle** | Holding for remaining pennies of premium |
+
+**Roll direction:**
+- **Roll down** when stock is falling toward strike and you want a better entry price
+- **Roll out** (same strike, later expiry) when you want more time for the thesis to develop
+- **Diagonal roll** (down + out) is most common — lower strike funded by additional time value
+
+**Roll timing — the credit sweet spot (same as CCs):**
+The best CSP roll credits happen when the stock is **near the put strike**. ATM puts have maximum extrinsic value — the old put is expensive to buy back, but the new put at a lower strike and later expiry collects enough premium from the extra time to produce a net credit. If the stock has already blown through the strike and is deep ITM, the roll becomes expensive or requires a debit.
+
+**CSP roll rules:**
+- **Always roll for a credit.** If the roll requires a debit, the stock moved too far — either take assignment or buy back and reassess.
+- **Roll before earnings** if the CSP goes through an earnings date and you want to avoid assignment on a gap down without knowing fundamentals.
+- **Don't roll a broken thesis.** Rolling down from $110P to $100P on a name you no longer want to own just moves the problem. Buy back and redeploy elsewhere.
+- **Use `analyze_roll` to compare scenarios** — check 2-3 strike/expiry combinations.
+
 ### Intent: Directional Leverage (high conviction, time-specific)
 
 The key difference from Accumulate/Enter at Discount: you have **timing conviction**, not just directional conviction. You believe a specific catalyst will move the stock within weeks, and you want leveraged exposure to that move without committing to long-term ownership.
@@ -456,6 +481,66 @@ Rolling a thesis-exit CC further out because the stock is doing well is not disc
 The one valid exception: when your fundamental thesis has genuinely evolved. AMZN $225C Jun → $250C Dec was a valid roll because the broader AI capex thesis strengthened and the roll was done for a credit. But "CRDO ripped 12% today" is not a thesis change — it's a data point that confirms the existing thesis is working, which means the CC is doing exactly what it was designed to do.
 
 **Practical test:** Before rolling a thesis-exit CC, ask: "Would I buy this stock at today's price with the same position size?" If the answer isn't an enthusiastic yes, let the CC do its job.
+
+### CC Step 6b: Roll Mechanics
+
+Rolling is a tool, not a reflex. Before looking at roll economics, ask: **should this CC still exist?**
+
+| Situation | Right move | Wrong move |
+|-----------|-----------|------------|
+| Thesis exit, stock approaching strike | **Let assign** — the strike was your exit price | Rolling because "it's going up" (thesis drift) |
+| Growth with income, stock approaching strike | **Roll up and out** — you want to keep the position | Letting assign when you still want the shares |
+| Thesis broken, stock falling | **Buy back CC, sell shares** — exit the whole position | Rolling down to a lower strike on a broken thesis |
+| Income/wheel, stock falling | **Roll down for credit** — reset the wheel at a lower strike | Holding a high strike that earns no premium |
+
+**When to roll (direction):**
+- **Roll up** when stock is rising and you want to keep the position (growth with income intent)
+- **Roll down** when stock has fallen and you want to reset premium income (income/wheel intent)
+- **Roll out** (same strike, later expiry) when you want more time for the thesis to play out
+- **Diagonal roll** (up + out) is the most common — gives both more upside room and more time
+
+**Roll timing — the credit sweet spot:**
+The best roll credits happen when the stock is **near the current strike**. ATM options have the highest extrinsic (time) value, so the old CC is expensive to buy back — but the new CC at a higher strike and later expiry is even more expensive because of the additional time. The net difference is your credit.
+
+If the stock is far below the strike, both the old and new CC are cheap OTM options — rolling from one cheap option to another produces a small credit. Don't wait for the stock to fall away from the strike before rolling; the economics get worse.
+
+**Roll rules:**
+- **Always roll for a credit** on CCs. If the roll requires a debit, the stock has moved too far past the strike — either let assign or accept the cap.
+- **Roll before earnings** if the CC goes through an earnings date and you expect a beat. After a gap up, the cost to close spikes and the roll credit shrinks or becomes a debit.
+- **Roll to a thesis-aligned expiry.** A roll that extends past your thesis end date is not a roll — it's a new position. Apply the practical test.
+- **Use `analyze_roll` to compare scenarios.** Check 2-3 strike targets and pick the one that balances credit received vs upside room.
+
+**Example — AMZN $225C Jun → $250C Dec (Apr 2026):** Rolled for $2.50/ct credit ($2,000 total on 8 contracts). Gained $25 of upside room and 6 months of additional time. Valid roll — thesis strengthened, credit received, new expiry aligned with Phase 1c exit.
+
+**Example — META $660C Jun → $720C Dec (planned Apr 2026):** $22/ct credit ($6,600 total on 3 contracts). Gains $60 of upside room before April 29 earnings. Rolled because earnings conviction is high and the June CC caps the expected beat. Dec expiry aligns with thesis timeline.
+
+### Chain P&L: The Hidden Cost of Rolling
+
+**The 50% rule on a rolled position can be misleading.** "50% profit on the current leg" is not the same as "profitable chain." When you roll multiple times, you must track the **total chain credits** — the sum of all net credits received across every roll — not just the current leg's premium.
+
+**Example — AMZN CC chain (8 contracts):**
+
+| Step | Cash Flow | Running Total |
+|------|-----------|---------------|
+| Sold $220C May | +$6.20/ct | +$6.20 |
+| Roll to $225C Jun (net credit) | +$2.18/ct | +$8.38 |
+| Roll to $250C Dec (net credit) | +$2.50/ct | +$10.88 |
+| **Total chain credits** | | **+$10.88/ct** |
+| Buy back $250C Dec at "50% profit" | -$13.00/ct | **-$2.12/ct** |
+
+The current CC shows "50% profit" ($26.05 → $13.00) — but the chain only collected $10.88/ct total. Buying back at $13.00 means the CC chain **lost** $2.12/ct. Webull's P&L on the current leg masks the total chain cost.
+
+**Why a chain loss isn't necessarily bad:** Each roll traded CC profit for share upside room. The AMZN rolls moved the cap from $220 → $250, gaining $30/share of upside on 800 shares ($24,000). The CC chain loss of $1,696 was the price of capturing that appreciation. Net benefit: +$22,304. The rolls were correct — but the CC side lost money.
+
+**Why it matters:** If you only look at the current leg, you think you're taking profit. If you track the chain, you realize you're closing at a loss — which might still be the right move (stopping the bleed), but you should know the true cost.
+
+**Chain P&L rules (applies to both CCs and CSPs):**
+
+1. **Track total chain credits** for every rolled position: sum of original premium + all net roll credits.
+2. **Chain breakeven** = total chain credits. If the buyback exceeds this, the option chain lost money regardless of what the current leg shows.
+3. **A losing CC chain is fine if shares won more.** The total covered position (shares + CC chain) is what matters. Rolling up means you chose share upside over CC profit — that's intentional, not a mistake.
+4. **A losing CSP chain is a warning.** Rolling a CSP down repeatedly means the stock kept falling through your strikes. If the total chain credits are less than the final buyback cost, you paid more to avoid assignment than you collected. Ask: would taking assignment at the original strike have been better?
+5. **When the chain loss exceeds the benefit, stop rolling.** If the CC chain loss is larger than the additional upside room captured (stock didn't actually rally to justify the rolls), the rolls were a mistake. Let the next CC assign or buy back and reassess.
 
 ### CC Step 7: Interaction with Macro Thesis
 
