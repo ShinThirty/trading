@@ -75,6 +75,35 @@ Collect these inputs — which ones matter depends on intent:
 
 **Earnings date cross-check.** The framework hinges on earnings timing ("always sell THROUGH the nearest earnings date"). Earnings dates from `get_iv_metrics` and `get_earnings_calendar` are estimates that can shift by a week. Before structuring a trade around an earnings date, cross-check both sources. If they disagree, use the later date to avoid expiring before the event.
 
+### Signal Conflict Resolution
+
+When signals conflict, **fundamentals override technicals, always.** Technicals tell you how much a stock moved; fundamentals tell you why. The "why" determines conviction; technicals only refine timing within an already-approved trade.
+
+**Priority hierarchy:**
+1. **Thesis / fundamentals** (conviction inputs, news, earnings, margins) — can kill a trade entirely
+2. **IV environment** (IV rank, IV-HV) — determines strategy structure (buy vs sell premium)
+3. **Technicals** (RSI, SMA) — timing refinement within an already-approved trade
+
+**Circuit breakers for specific conflicts:**
+
+**1. Value Trap (technicals bullish + fundamentals bearish)**
+
+Signals: `get_technical_indicators` shows RSI <30 (oversold) at a historical support level. But `get_income_statement` shows operating margins compressing for 2+ quarters, or `get_company_news` flags a severe headwind (lost customer, regulatory action, competitive displacement).
+
+Action: **Hard stop.** The stock is oversold for a reason — the business is deteriorating. Historical support is meaningless when the company is no longer the same company that established it. Drop to low conviction, reject Accumulate/Enter at discount.
+
+**2. Price Dislocation (technicals bearish + fundamentals bullish)**
+
+Signals: `get_technical_indicators` shows steep downtrend, below 200 SMA. But `get_income_statement` shows revenue growth accelerating and `get_basic_financials` confirms ROE >25%.
+
+Action: **Proceed — this is what the framework was built for.** Flag as high-conviction Accumulate. The bearish technicals dictate *how* to enter: favor the Hybrid (CSP-heavy) approach from the drawdown matrix to capture rich IV premium while the stock finds its floor.
+
+**3. FOMO Trap (technicals bullish + fundamentals overvalued)**
+
+Signals: Stock breaking to all-time highs, RSI >70, strong momentum. But Step 4 sizing calculates PEG >3.0 — you're overpaying for growth.
+
+Action: **Cap the size.** Allow the trade but force Reduced position size (1 contract / 50 shares) and limit to directional leverage (call spread) rather than full accumulation. Never full-size into a momentum chase.
+
 ## Step 3: Choose Strategy
 
 ### Intent: Accumulate (highest conviction)
