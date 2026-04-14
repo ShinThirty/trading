@@ -33,6 +33,9 @@ Conviction drives intent. Intent drives strategy. Decide intent FIRST — everyt
 | **ROE** | >25% — elite capital efficiency (ADBE 62%). If D/E >3x, ROE is inflated by leverage — discount it (GDDY 384% ROE is buyback engineering, not profitability). | <15% — mediocre returns don't justify premium P/E |
 | **Moat** | Monopoly/deep switching costs (ADBE creative suite) | Commodity, crowded market, active disruption threat |
 | **Growth durability** | Recurring revenue, expanding TAM, secular tailwinds | Cyclical, geopolitical-dependent, or AI-threatened |
+| **AI ROI** (for software/adopter names) | AI features driving revenue growth *with stable or expanding margins* — AI is monetized profitably (ADBE Firefly upsell) | AI spending is growing revenue but compressing operating margins — inference costs eating profits. Revenue growth without margin stability = burning cash to look like an AI company. Immediately drop to low conviction. |
+
+The AI ROI filter distinguishes **Builders** (semis/infra — revenue booms now but carries cycle risk) from **Adopters** (software — must prove AI monetization without margin destruction). A software company showing AI-driven revenue growth but compressing margins is failing the adopter test. The question evolves from "when will they stop spending?" to "where are they spending, and is it actually working?"
 
 A stock can have a 50% drawdown and still deserve low conviction if the ROE is mediocre and the moat is under attack (WDAY, NOW). Conversely, a 30% drawdown on a 62% ROE monopoly is high conviction (ADBE). Drawdown alone is not conviction — the business quality determines whether the drawdown is an opportunity or a warning.
 

@@ -4,6 +4,20 @@ By the time a hyperscaler CEO says "capex moderation" on an earnings call, AVGO 
 
 **Run this check monthly (around the 10th-15th). If 2+ signals flash yellow, execute the defensive playbook below.**
 
+## Key Thesis Nuances
+
+### The Custom Silicon Inflection (AVGO)
+
+The semi cycle thesis assumes NVDA and AVGO peak together, but that's wrong. Hyperscalers are actively pivoting from merchant silicon (Nvidia GPUs) toward custom ASICs for inference: Google TPU v7, Meta MTIA, Amazon Trainium 3. A massive chunk of their $600B+ 2026 capex is flowing to in-house chips.
+
+**Impact:** Broadcom is the primary design and networking partner for custom hyperscaler silicon (Google, Meta). If NVDA's data center revenue plateaus, don't assume the whole cycle is dead — it may be hyperscalers shifting capex internally, which *benefits* AVGO. **Decouple AVGO's thesis timeline from pure GPU metrics.** Track AVGO through custom silicon design wins and networking revenue, not NVDA sympathy.
+
+### The Physical Power Bottleneck (VRT)
+
+In 2026, the AI capex cycle is constrained not just by TSMC packaging capacity but by the electrical grid itself. Gas turbines and transformers are backlogged for years.
+
+**Impact:** The cycle might plateau because hyperscalers physically cannot procure the megawatts to plug in new clusters. If data center permitting slows due to grid constraints, hardware orders follow. This makes VRT potentially the *last* to roll over, not the first — its backlog stays full even after GPU orders slow. VRT is both a leading indicator for new construction AND a beneficiary of physical constraints that extend the power buildout timeline beyond the silicon cycle.
+
 ## Signal 1: Cloud Compute Spot Market (canary in the coal mine)
 
 Hyperscalers buy GPUs to rent them out. If rental demand softens, buying stops.
