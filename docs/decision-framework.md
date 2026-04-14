@@ -67,8 +67,13 @@ Collect these inputs — which ones matter depends on intent:
 | **Momentum** | RSI (14-day): <30 oversold/falling, >70 overbought. SMA 50 vs 200 for trend. | `get_technical_indicators` | Accumulate, Enter at discount |
 | **Headwinds** | Active stock-specific risk | `get_company_news` | All strategies |
 | **Expected move** | ATM straddle price at target expiry | `get_expected_move` | Vol bets, premium harvesting |
+| **Options liquidity** | Liquidity rating + bid/ask spread + open interest | `get_iv_metrics` (Liq 1-4) + `get_option_chain` | All option strategies |
 
 **Revenue growth and operating margin must be pulled from `get_income_statement`, not estimated from memory or articles.** These feed directly into PEG sizing (Step 4) and conviction (Step 1). Compare at least 2 quarters to identify the trend — a single quarter can mislead.
+
+**Options liquidity check before any spread or roll.** Before approving a spread, CSP, or roll, check the bid/ask spread and open interest on the target contracts via `get_option_chain`. Wide bid/ask spreads bleed out credit on rolls and spreads — if the spread is >10% of the contract price, the fill economics are poor. TastyTrade's liquidity rating (Liq 1-4 from `get_iv_metrics`) is a quick screen: Liq 1-2 = tight markets, Liq 3-4 = proceed with caution on multi-leg strategies.
+
+**Earnings date cross-check.** The framework hinges on earnings timing ("always sell THROUGH the nearest earnings date"). Earnings dates from `get_iv_metrics` and `get_earnings_calendar` are estimates that can shift by a week. Before structuring a trade around an earnings date, cross-check both sources. If they disagree, use the later date to avoid expiring before the event.
 
 ## Step 3: Choose Strategy
 
