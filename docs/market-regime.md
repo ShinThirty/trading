@@ -1,0 +1,62 @@
+# Market Regime Framework
+
+Use `get_market_regime` to get a quick snapshot before diving into individual signals. The tool classifies the market across 4 dimensions — each label maps to strategy preferences in the [decision framework](decision-framework.md).
+
+## Regime Dimensions
+
+### Volatility: Low / Normal / Elevated / Crisis
+
+Based on VIX level with a term structure override.
+
+| Label | VIX Range | What it means | Strategy implications |
+|-------|-----------|---------------|----------------------|
+| **Low** | <15 | Complacency, cheap options | Buy vol (straddles/strangles). Options are cheap. |
+| **Normal** | 15-25 | Typical trading environment | Default framework applies as-is |
+| **Elevated** | 25-35 | Fear rising, rich premiums | Sell premium (CSPs, iron condors). Options are expensive. |
+| **Crisis** | >=35 or backwardation | Active panic | Widen strikes, reduce size, favor defined-risk. Cash is a position. |
+
+**Backwardation override:** If the 30-day VIX exceeds the 3-month VIX (VXVCLS), the term structure is inverted — the market is pricing more risk in the near term than further out. This signals active panic and overrides to Crisis regardless of the absolute VIX level. A VIX of 22 in backwardation is more dangerous than a VIX of 28 in normal contango.
+
+### Trend: Uptrend / Sideways / Downtrend
+
+Based on SPY price relative to 50-day and 200-day simple moving averages.
+
+| Label | Condition | Strategy implications |
+|-------|-----------|----------------------|
+| **Uptrend** | Price > SMA50 > SMA200 | Accumulate intent favored, directional leverage works |
+| **Sideways** | Mixed SMA alignment | Harvest premium, iron condors, range-bound strategies |
+| **Downtrend** | Price < SMA50 < SMA200 | CSPs shine (rich IV + falling prices = entry at discount). Avoid directional long calls. |
+
+### Macro: Steep / Flat / Inverted
+
+Based on the 10-year minus 2-year Treasury yield spread, with Fed funds rate direction for context.
+
+| Label | Spread | What it means | Strategy implications |
+|-------|--------|---------------|----------------------|
+| **Steep** | >1.0% | Normal expansion, banks lending | Favor growth names, Accumulate intent |
+| **Flat** | 0.0-1.0% | Late cycle, tightening | Reduce concentration, favor defined-risk |
+| **Inverted** | <=0.0% | Recession signal | Defensive posture — hedges, collars, smaller sizes |
+
+Fed funds direction (rising / stable / falling) adds context: a falling rate in an inverted curve suggests the Fed is responding to recession risk.
+
+### Sectors: Risk-On / Rotation / Risk-Off
+
+Compares average daily performance of high-beta sectors (Tech, Consumer Cyclical, Comm Services) vs defensive sectors (Utilities, Consumer Defensive, Real Estate).
+
+| Label | Condition | Strategy implications |
+|-------|-----------|----------------------|
+| **Risk-On** | High-beta outperforming, positive | Growth and tech names favored, momentum strategies |
+| **Rotation** | Mixed or all negative | Be selective, don't chase sector momentum |
+| **Risk-Off** | Defensives outperforming, positive | Reduce tech exposure, favor hedges and income strategies |
+
+## Regime Combinations
+
+Some combinations are more actionable than others:
+
+| Combination | Interpretation | Action |
+|-------------|---------------|--------|
+| Elevated vol + Downtrend + Risk-Off | Classic fear environment | Best CSP window — sell rich premium on high-conviction drawdowns |
+| Low vol + Uptrend + Risk-On | Complacency rally | Ride momentum but buy cheap hedges (puts are cheap) |
+| Crisis + Inverted + Risk-Off | Recession unfolding | Cash is a position. Only deploy on highest conviction. |
+| Normal vol + Sideways + Rotation | Quiet chop | Harvest premium — iron condors, calendars |
+| Elevated vol + Uptrend + Risk-On | Climbing a wall of worry | Accumulate with CSP-heavy hybrids (rich premium + bullish trend) |

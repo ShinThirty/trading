@@ -1,10 +1,13 @@
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import date
 from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
 from trading_clients import indicators as ta
 from trading_clients import options as opts
+from trading_clients import regime
 from trading_clients.alphavantage_client import AlphaVantageClient
 from trading_clients.config import load_config
 from trading_clients.endpoints import alphavantage as av
@@ -70,6 +73,17 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
 
 
 mcp = FastMCP("trading-mcp", lifespan=lifespan)
+
+
+# ── Helpers ─────────────────────────────────────────────────
+
+
+def _year_ago(d: date) -> date:
+    """Return a date ~1 year before *d*, handling leap years."""
+    try:
+        return d.replace(year=d.year - 1)
+    except ValueError:
+        return d.replace(year=d.year - 1, day=28)
 
 
 # ── Client helpers ──────────────────────────────────────────
@@ -1724,6 +1738,140 @@ def search_fred_series(ctx: Context, query: str, limit: int = 10) -> str:
     Requires [fred] section in ~/.tradingrc.
     """
     return _fred(ctx).get(fred.SEARCH, fred.SearchRequest(query, limit)).to_output()
+
+
+# ═══════════════════════════════════════════════════════════════
+# MARKET REGIME — Cross-Provider Aggregation
+# ═══════════════════════════════════════════════════════════════
+
+
+@mcp.tool()
+async def get_market_regime(ctx: Context) -> str:
+    """Get current market regime classification across volatility, trend,
+    macro, and sector dimensions.
+
+    Aggregates FRED (VIX, yield curve, fed funds), Tradier (SPY technicals),
+    FMP (sector performance), and TastyTrade (IV enrichment) into simple
+    regime labels.
+
+    Returns regime labels with supporting data:
+    - Volatility: Low / Normal / Elevated / Crisis (VIX + term structure)
+    - Trend: Uptrend / Sideways / Downtrend (SPY RSI + SMA 50/200)
+    - Macro: Steep / Flat / Inverted yield curve (10Y-2Y + Fed funds)
+    - Sectors: Risk-On / Rotation / Risk-Off (high-beta vs defensive)
+
+    Requires [fred] and [tradier] sections in ~/.tradingrc.
+    FMP and TastyTrade are optional enrichments.
+    """
+    fred_client = _fred(ctx)
+    tradier = _tradier(ctx)
+    fmp_client = ctx.request_context.lifespan_context.get("fmp")
+    tt_client = ctx.request_context.lifespan_context.get("tastytrade")
+
+    # Fetch all required data concurrently
+    tasks: list = [
+        asyncio.to_thread(
+            fred_client.get, fred.OBSERVATIONS, fred.GetObservationsRequest("VIXCLS", 1)
+        ),
+        asyncio.to_thread(
+            fred_client.get, fred.OBSERVATIONS, fred.GetObservationsRequest("VXVCLS", 1)
+        ),
+        asyncio.to_thread(
+            fred_client.get, fred.OBSERVATIONS, fred.GetObservationsRequest("T10Y2Y", 1)
+        ),
+        asyncio.to_thread(
+            fred_client.get, fred.OBSERVATIONS, fred.GetObservationsRequest("FEDFUNDS", 2)
+        ),
+        asyncio.to_thread(
+            tradier.get,
+            t.HISTORY,
+            t.GetHistoryRequest("SPY", "daily", start=_year_ago(date.today()).isoformat()),
+        ),
+    ]
+
+    # Optional providers
+    if fmp_client:
+        tasks.append(
+            asyncio.to_thread(
+                fmp_client.get,
+                fmp.SECTOR_PERFORMANCE,
+                fmp.SectorPerformanceRequest(date.today().isoformat()),
+            )
+        )
+    if tt_client:
+        tasks.append(
+            asyncio.to_thread(tt_client.get, tt.MARKET_METRICS, tt.MarketMetricsRequest("SPY"))
+        )
+
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    # Unpack required results
+    vix_resp = results[0] if not isinstance(results[0], BaseException) else None
+    vix3m_resp = results[1] if not isinstance(results[1], BaseException) else None
+    spread_resp = results[2] if not isinstance(results[2], BaseException) else None
+    ff_resp = results[3] if not isinstance(results[3], BaseException) else None
+    spy_resp = results[4] if not isinstance(results[4], BaseException) else None
+
+    # Unpack optional results
+    idx = 5
+    sector_resp = None
+    if fmp_client:
+        sector_resp = results[idx] if not isinstance(results[idx], BaseException) else None
+        idx += 1
+    tt_resp = None
+    if tt_client:
+        tt_resp = results[idx] if not isinstance(results[idx], BaseException) else None
+
+    data: dict[str, str | None] = {}
+
+    # Volatility regime
+    vix_val, vix_date = regime.parse_fred_value(vix_resp.observations if vix_resp else [])
+    vix3m_val, _ = regime.parse_fred_value(vix3m_resp.observations if vix3m_resp else [])
+    if vix_val is not None:
+        label, detail = regime.classify_volatility(vix_val, vix3m_val)
+        date_suffix = f", {vix_date[5:]}" if vix_date else ""
+        data["Volatility"] = f"{label} ({detail}{date_suffix})"
+
+    # Trend regime
+    if spy_resp and spy_resp.days:
+        closes = [float(b["close"]) for b in spy_resp.days]
+        price = closes[-1]
+        rsi_vals = ta.rsi(closes)
+        sma50_vals = ta.sma(closes, 50)
+        sma200_vals = ta.sma(closes, 200)
+        label, detail = regime.classify_trend(price, rsi_vals[-1], sma50_vals[-1], sma200_vals[-1])
+        data["Trend"] = f"{label} ({detail})"
+
+    # Macro regime
+    spread_val, _ = regime.parse_fred_value(spread_resp.observations if spread_resp else [])
+    ff_observations = ff_resp.observations if ff_resp else []
+    ff_val, _ = regime.parse_fred_value(ff_observations)
+    prev_ff_obs = ff_observations[1:] if len(ff_observations) > 1 else []
+    prev_ff_val, _ = regime.parse_fred_value(prev_ff_obs)
+    label, detail = regime.classify_macro(spread_val, ff_val, prev_ff_val)
+    data["Macro"] = f"{label} ({detail})"
+
+    # Sector regime (optional)
+    if sector_resp and sector_resp.sectors:
+        label, detail = regime.classify_sectors(sector_resp.sectors)
+        data["Sectors"] = f"{label} ({detail})"
+
+    # IV enrichment (optional)
+    if tt_resp and tt_resp.items:
+        item = tt_resp.items[0]
+        iv_rank = item.get("tw-implied-volatility-index-rank")
+        iv_pctl = item.get("implied-volatility-percentile")
+        parts = []
+        if iv_rank is not None:
+            parts.append(f"IV Rank {float(iv_rank) * 100:.0f}%")
+        if iv_pctl is not None:
+            parts.append(f"IV Pctl {float(iv_pctl) * 100:.0f}%")
+        if parts:
+            data["IV Context"] = f"SPY {', '.join(parts)}"
+
+    from trading_clients.table_helpers import kv_table
+
+    return f"## Market Regime\n\n{kv_table(data)}"
 
 
 # ═══════════════════════════════════════════════════════════════

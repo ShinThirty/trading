@@ -52,6 +52,8 @@ A stock can have a 50% drawdown and still deserve low conviction if the ROE is m
 
 ## Step 2: Read the Signals
 
+**Quick start:** Run `get_market_regime` for a snapshot of volatility, trend, macro, and sector conditions before diving into individual signals. See [market-regime.md](market-regime.md) for how each regime label maps to strategy preferences.
+
 Collect these inputs — which ones matter depends on intent:
 
 | Signal | How to measure | Source | Used by |
