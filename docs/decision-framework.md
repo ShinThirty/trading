@@ -26,6 +26,16 @@ After screening confirms (or rejects) a thesis, run through these steps in order
 
 Conviction drives intent. Intent drives strategy. Decide intent FIRST — everything else follows.
 
+**Conviction inputs — what raises or lowers conviction:**
+
+| Factor | High conviction | Low conviction |
+|--------|----------------|----------------|
+| **ROE** | >25% — elite capital efficiency (ADBE 62%) | <15% — mediocre returns don't justify premium P/E |
+| **Moat** | Monopoly/deep switching costs (ADBE creative suite) | Commodity, crowded market, active disruption threat |
+| **Growth durability** | Recurring revenue, expanding TAM, secular tailwinds | Cyclical, geopolitical-dependent, or AI-threatened |
+
+A stock can have a 50% drawdown and still deserve low conviction if the ROE is mediocre and the moat is under attack (WDAY, NOW). Conversely, a 30% drawdown on a 62% ROE monopoly is high conviction (ADBE). Drawdown alone is not conviction — the business quality determines whether the drawdown is an opportunity or a warning.
+
 | Conviction | Intent | Goal | You're saying... |
 |-----------|--------|------|-----------------|
 | **Highest** | **Accumulate** | Own shares, full upside participation | "I want to own this stock now" |
@@ -44,12 +54,18 @@ Collect these inputs — which ones matter depends on intent:
 | Signal | How to measure | Source | Used by |
 |--------|---------------|--------|---------|
 | **Drawdown** | % below 52-week high | `get_quote` (52W High) | Accumulate, Enter at discount |
+| **Revenue growth** | YoY quarterly revenue growth % | `get_income_statement` | Conviction (Step 1), Sizing via PEG (Step 4) |
+| **Operating margin** | Operating income / revenue, and trend | `get_income_statement` | Conviction — expanding margins = moat, compressing = red flag |
+| **ROE** | Net income / shareholders' equity | `get_basic_financials` | Conviction (Step 1) |
+| **P/E** | Price / TTM earnings | `get_basic_financials` | Sizing via PEG (Step 4) |
 | **IV-HV spread** | IV 30d minus HV 30d | `get_iv_metrics` | All option strategies |
 | **IV Rank** | Current IV vs 52-week IV range | `get_iv_metrics` | Premium selling strategies |
 | **Earnings proximity** | Days to next report | `get_iv_metrics` (Earnings) | All strategies |
-| **Momentum** | Recent price action — falling, flat, bouncing | `get_quote` + multi-day context | Accumulate, Enter at discount |
+| **Momentum** | RSI (14-day): <30 oversold/falling, >70 overbought. SMA 50 vs 200 for trend. | `get_technical_indicators` | Accumulate, Enter at discount |
 | **Headwinds** | Active stock-specific risk | `get_company_news` | All strategies |
 | **Expected move** | ATM straddle price at target expiry | `get_expected_move` | Vol bets, premium harvesting |
+
+**Revenue growth and operating margin must be pulled from `get_income_statement`, not estimated from memory or articles.** These feed directly into PEG sizing (Step 4) and conviction (Step 1). Compare at least 2 quarters to identify the trend — a single quarter can mislead.
 
 ## Step 3: Choose Strategy
 
@@ -278,13 +294,22 @@ The key difference from Accumulate/Enter at Discount: you have **timing convicti
 
 ## Step 4: Size the Position
 
-Base sizing on **valuation risk** (P/E) and **portfolio concentration**:
+Base sizing on **growth-adjusted valuation** (PEG) and **portfolio concentration**:
 
-| P/E | Position size | Rationale |
+**How to calculate PEG:**
+1. Pull `get_income_statement` — get the most recent quarter's revenue and the same quarter from the prior year.
+2. Calculate YoY revenue growth: `(current_quarter - same_quarter_prior_year) / same_quarter_prior_year × 100`.
+3. PEG = P/E (from `get_basic_financials`) ÷ YoY revenue growth %.
+4. Use **revenue growth**, not earnings growth — earnings are volatile on high-growth names due to stock comp, one-time charges, and investment cycles. Revenue growth is the more stable signal.
+5. If growth is negative or near-zero, PEG is meaningless — fall back to raw P/E sizing (P/E <15x Full, 15-25x Standard, >25x Reduced).
+
+| PEG | Position size | Rationale |
 |-----|--------------|-----------|
-| <20x | **Full** (2 contracts / 200 shares) | Valuation provides margin of safety |
-| 20-35x | **Standard** (1 contract / 100 shares) | Fair value — standard risk |
-| >35x | **Reduced** (1 contract or 50 shares) | Paying a premium — limit exposure |
+| <1.5 | **Full** (2 contracts / 200 shares) | Paying less than fair value for growth (ADBE PEG ~1.2) |
+| 1.5-3.0 | **Standard** (1 contract / 100 shares) | Fair value for growth (NOW PEG ~2.4) |
+| >3.0 | **Reduced** (1 contract or 50 shares) | Overpaying for growth (PLTR PEG ~6.7) |
+
+**P/E hard cap:** Regardless of PEG, never full-size above 80x P/E — extreme multiples amplify downside on any growth deceleration.
 
 **Additional sizing rules:**
 - Never allocate >15% of portfolio to a single name at entry
