@@ -145,23 +145,6 @@ class WebullClient(BaseClient):
         self._token = token
         return token
 
-    def _check_token_error(self, resp: httpx.Response) -> None:
-        """On 401, create a new token and raise with verification instructions."""
-        if resp.status_code == 401:
-            try:
-                err = resp.json()
-                error_code = err.get("error_code", "")
-            except Exception:
-                error_code = ""
-            if error_code in ("", "INVALID_TOKEN", "TOKEN_EXPIRED"):
-                self._create_token()
-                raise RuntimeError(
-                    "Webull token was expired or invalid. A new token has been created and "
-                    "saved to ~/.tradingrc. Please verify it in your Webull App "
-                    "(Menu > Messages > OpenAPI Notifications), then retry."
-                )
-            raise RuntimeError(f"Webull API 401: {error_code} — {err.get('message', '')}")
-
     @staticmethod
     def _raise_for_status(resp: httpx.Response) -> None:
         """Like resp.raise_for_status() but includes Webull error body."""
@@ -215,7 +198,6 @@ class WebullClient(BaseClient):
         else:
             resp = self._http.get(url, headers=headers, params=params)
 
-        self._check_token_error(resp)
         self._raise_for_status(resp)
         data = resp.json()
 
