@@ -187,6 +187,10 @@ refresh_token = <your_oauth_refresh_token>
 webhook_url = <discord_webhook_url_for_option_monitor>
 ```
 
+## Google Workspace
+
+Use `xmxu00@gmail.com` as the `user_google_email` for all Google Workspace MCP tools (Drive, Docs, Sheets, Calendar).
+
 ## Webull API (v2)
 
 All Webull endpoints use the v2 API (`x-version: v2` header). Stock and option orders are unified into a single endpoint.
