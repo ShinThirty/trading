@@ -302,6 +302,7 @@ Base sizing on **growth-adjusted valuation** (PEG) and **portfolio concentration
 3. PEG = P/E (from `get_basic_financials`) ÷ YoY revenue growth %.
 4. Use **revenue growth**, not earnings growth — earnings are volatile on high-growth names due to stock comp, one-time charges, and investment cycles. Revenue growth is the more stable signal.
 5. If growth is negative or near-zero, PEG is meaningless — fall back to raw P/E sizing (P/E <15x Full, 15-25x Standard, >25x Reduced).
+6. **Margin compression invalidates PEG.** If operating margins are shrinking quarter-over-quarter, PEG is unreliable — the company may be buying revenue growth through heavy spend while destroying profitability. When margins are compressing, fall back to raw P/E sizing regardless of PEG. Revenue growth without margin stability (or expansion) is not durable growth.
 
 | PEG | Position size | Rationale |
 |-----|--------------|-----------|
@@ -355,7 +356,7 @@ Base sizing on **growth-adjusted valuation** (PEG) and **portfolio concentration
 Don't watch the ticker and feel pain. Run this checklist:
 
 1. **Is the end customer still spending?** Check the demand environment upstream of your company. If the buyers of your company's products are still deploying capital, the thesis is intact.
-2. **Is this company-specific or sector-wide?** When the entire sector is down, the problem is macro, not your stock. Company-specific drawdowns need more scrutiny. Sector-wide drawdowns are usually noise.
+2. **Is this company-specific or sector-wide?** Company-specific drawdowns need more scrutiny. Sector-wide drawdowns are *often* noise — but not always. **A sector-wide drawdown is also exactly what the beginning of a cycle turn looks like.** If you are actively timing a macro thesis (e.g., semi cycle peaking mid-2027), ask: "Is this the cycle turn I've been expecting, or a temporary pullback?" Check: are hyperscaler capex guides being cut? Are neocloud earnings missing? Is GPU rental rate compression showing up in data? If the sector drawdown aligns with your exit thesis signals, it's not noise — it's the signal you've been waiting for.
 3. **Has the competitive moat actually narrowed?** Check for concrete evidence: lost customers, cancelled contracts, actual product displacement by a competitor. A narrative shift in financial media is not the same as lost revenue. Narrative ≠ reality.
 4. **Is the thesis timeline still valid?** A 2-month drawdown inside an 18-month thesis is noise, not signal. If the thesis hasn't had time to play out, price action alone isn't a reason to exit.
 5. **Would I buy this at today's price if I had no position?** Strip away anchoring to your entry. If the thesis was buyable at $182, it's *more* buyable at $100. The only thing that changed is your P&L, not the company.
