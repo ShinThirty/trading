@@ -548,3 +548,5 @@ When you have a sector-level thesis (like the semi cycle), covered calls become 
 - **Don't roll past the thesis end date** — if AI capex peaks mid-2027, Jan 2027 is the latest CC expiry
 - **Accept that some names will run past the strike** — that's the price of discipline. You can't time the exact top.
 - **Redeploy proceeds into the next thesis** — when semis get called away, CSP into Phase 3 software/application winners
+
+See [cycle-health-check.md](cycle-health-check.md) for leading indicators that signal the capex turn before earnings announcements, and the defensive playbook to execute when 2+ signals flash yellow.
