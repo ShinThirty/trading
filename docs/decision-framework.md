@@ -68,6 +68,7 @@ Collect these inputs — which ones matter depends on intent:
 | **Earnings proximity** | Days to next report | `get_iv_metrics` (Earnings) | All strategies |
 | **Momentum** | RSI (14-day): <30 oversold/falling, >70 overbought. SMA 50 vs 200 for trend. | `get_technical_indicators` | Accumulate, Enter at discount |
 | **Headwinds** | Active stock-specific risk | `get_company_news` | All strategies |
+| **Market context** | SPY RSI, broad market proximity to ATH, recent rally magnitude | `get_market_regime` + `get_technical_indicators` (SPY) | All strategies (timing gate) |
 | **Expected move** | ATM straddle price at target expiry | `get_expected_move` | Vol bets, premium harvesting |
 | **Options liquidity** | Liquidity rating + bid/ask spread + open interest | `get_iv_metrics` (Liq 1-4) + `get_option_chain` | All option strategies |
 
@@ -105,6 +106,20 @@ Action: **Proceed — this is what the framework was built for.** Flag as high-c
 Signals: Stock breaking to all-time highs, RSI >70, strong momentum. But Step 4 sizing calculates PEG >3.0 — you're overpaying for growth.
 
 Action: **Cap the size.** Allow the trade but force Reduced position size (1 contract / 50 shares) and limit to directional leverage (call spread) rather than full accumulation. Never full-size into a momentum chase.
+
+**4. Front-Run Catalyst (conviction high + stock/market extended into catalyst)**
+
+Signals: High-conviction fundamentals (ROE >25%, strong moat, PEG <1.5). But `get_market_regime` shows SPY RSI >65 near ATH, and the stock itself has rallied >8% in the prior 2 weeks into a known catalyst (earnings). The good news is already in the price.
+
+Action: **Wait for the catalyst to pass.** Conviction is real but timing is poor — the stock has front-run the expected beat, and the broad market is extended. Mean-reversion risk is elevated on both. The asymmetry favors patience: in most post-catalyst scenarios (flat, sell-the-news, dip), waiting gives a better entry. The only cost is missing a blowout rip, and a high-conviction name with durable growth will offer another entry.
+
+Checklist before entering near ATH into a catalyst:
+1. Has the stock rallied >8% in the prior 2 weeks? If yes, the catalyst is front-run.
+2. Is SPY RSI >65? If yes, broad market mean-reversion risk is elevated.
+3. Is SPY IV Rank <25%? If yes, the market is complacent — any shock will be amplified.
+4. If all three: **wait for post-catalyst reaction before entering.** The name isn't running away.
+
+The distinction from FOMO Trap (#3): in a FOMO Trap, you're overpaying on *valuation* (PEG >3). Here, valuation is fair — you're overpaying on *timing*.
 
 ## Step 3: Choose Strategy
 
