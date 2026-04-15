@@ -652,6 +652,112 @@ async def get_csp_utilization(
     return "\n".join(sections)
 
 
+@mcp.tool()
+async def get_cc_chain_pnl(
+    ctx: Context,
+    account_id: str,
+    symbol: str,
+    option_type: str = "call",
+    start_date: str | None = None,
+) -> str:
+    """Calculate the running P&L of a covered call or CSP roll chain.
+
+    Traces all filled option orders for a symbol, sums credits (SELL) and
+    debits (BUY), and shows the chain P&L. Useful before rolling to see
+    whether the chain is profitable or underwater.
+
+    account_id: Webull account ID.
+    symbol: underlying ticker (e.g. 'AMZN').
+    option_type: 'call' for covered calls, 'put' for CSPs (default 'call').
+    start_date: earliest date to search (YYYY-MM-DD). Defaults to 90 days ago.
+    """
+    from trading_clients.table_helpers import fmt_number, kv_table, list_table
+
+    client = _webull(ctx)
+    aid = client.ensure_account_id(account_id)
+
+    if not start_date:
+        start_date = (date.today().replace(day=1) - __import__("datetime").timedelta(days=90)
+                       ).isoformat()
+
+    response = await client.get(
+        ORDER_HISTORY,
+        GetOrderHistoryRequest(
+            aid, page_size=100, start_date=start_date, end_date=date.today().isoformat()
+        ),
+    )
+
+    # Filter for filled option orders matching symbol and option_type
+    opt_type = option_type.lower()
+    chain_orders: list[dict] = []
+    for combo in response.combos:
+        for o in combo.get("orders", []):
+            if o.get("status") != "FILLED":
+                continue
+            if o.get("instrument_type") != "OPTION":
+                continue
+            if (o.get("symbol") or "").upper() != symbol.upper():
+                continue
+            legs = o.get("legs", [])
+            if not legs:
+                continue
+            leg = legs[0]
+            if (leg.get("option_type") or "").lower() != opt_type:
+                continue
+            chain_orders.append(o)
+
+    if not chain_orders:
+        return f"(no filled {opt_type} orders for {symbol} since {start_date})"
+
+    # Sort by fill time
+    chain_orders.sort(key=lambda o: o.get("filled_time_at") or o.get("place_time_at") or "")
+
+    # Build chain detail and compute P&L
+    rows: list[dict[str, str]] = []
+    total_credit = 0.0
+    total_debit = 0.0
+
+    for o in chain_orders:
+        side = o.get("side", "")
+        qty = _safe_float(o.get("filled_quantity"))
+        price = _safe_float(o.get("filled_price"))
+        amount = price * qty * 100  # options are per-share, 100 shares per contract
+        leg = o.get("legs", [{}])[0]
+
+        if side == "SELL":
+            total_credit += amount
+        else:
+            total_debit += amount
+
+        rows.append({
+            "Date": (o.get("filled_time_at") or o.get("place_time_at") or "")[:10],
+            "Side": side,
+            "Strike": fmt_number(leg.get("strike_price")),
+            "Exp": leg.get("option_expire_date", ""),
+            "Qty": fmt_number(qty, 0),
+            "Fill": fmt_number(price),
+            "Amount": f"{'+' if side == 'SELL' else '-'}${fmt_number(amount)}",
+        })
+
+    chain_pnl = total_credit - total_debit
+    pnl_sign = "+" if chain_pnl >= 0 else ""
+
+    type_label = "Covered Call" if opt_type == "call" else "CSP"
+    summary = kv_table({
+        "Symbol": symbol.upper(),
+        "Chain Type": type_label,
+        "Total Credits (SELL)": f"+${fmt_number(total_credit)}",
+        "Total Debits (BUY)": f"-${fmt_number(total_debit)}",
+        "Chain P&L": f"{pnl_sign}${fmt_number(chain_pnl)}",
+        "Orders": str(len(chain_orders)),
+    })
+
+    sections = [f"## {symbol.upper()} {type_label} Chain P&L\n\n{summary}"]
+    sections.append(f"\n### Order History\n\n{list_table(rows)}")
+
+    return "\n".join(sections)
+
+
 async def _webull_get_with_retry(client: Any, endpoint: Any, request: Any, retries: int = 2) -> Any:
     """Call client.get with retry on 429 rate limit errors."""
     for attempt in range(retries + 1):
