@@ -115,9 +115,10 @@ Action: **Wait for the catalyst to pass.** Conviction is real but timing is poor
 
 Checklist before entering near ATH into a catalyst:
 1. Has the stock rallied >8% in the prior 2 weeks? If yes, the catalyst is front-run.
-2. Is SPY RSI >65? If yes, broad market mean-reversion risk is elevated.
-3. Is SPY IV Rank <25%? If yes, the market is complacent — any shock will be amplified.
-4. If all three: **wait for post-catalyst reaction before entering.** The name isn't running away.
+2. Has the catalyst's information content already leaked? Pre-announced revenue, pre-released guidance, or channel checks that went viral — if the market already knows the number, the "beat" is priced in and the bar for a positive reaction is higher than the headline suggests.
+3. Is SPY RSI >65? If yes, broad market mean-reversion risk is elevated.
+4. Is SPY IV Rank <25%? If yes, the market is complacent — any shock will be amplified.
+5. If three or more trigger: **wait for post-catalyst reaction before entering.** The name isn't running away.
 
 The distinction from FOMO Trap (#3): in a FOMO Trap, you're overpaying on *valuation* (PEG >3). Here, valuation is fair — you're overpaying on *timing*.
 
