@@ -14,11 +14,11 @@ from trading_clients.table_helpers import fmt_number, list_table
 
 
 def _safe_float(val: Any) -> float:
-    """Parse a value to float, stripping commas and dollar signs."""
+    """Parse a value to float, stripping commas, dollar signs, and percent signs."""
     if val is None or val == "" or val == "--":
         return 0.0
     try:
-        return float(str(val).replace(",", "").replace("$", "").replace("+", ""))
+        return float(str(val).replace(",", "").replace("$", "").replace("+", "").replace("%", ""))
     except (ValueError, TypeError):
         return 0.0
 
@@ -63,68 +63,85 @@ class PortfolioSummary:
     errors: dict[str, str] = field(default_factory=dict)
 
 
-_SKIP_SYMBOLS = {"BROKERAGELINK", "Totals", "Disclosure", ""}
+_FIDELITY_REQUIRED_COLUMNS = {
+    "Account Number",
+    "Account Name",
+    "Symbol",
+    "Quantity",
+    "Last Price",
+    "Current Value",
+    "Average Cost Basis",
+    "Total Gain/Loss Dollar",
+    "Total Gain/Loss Percent",
+    "Today's Gain/Loss Dollar",
+}
+
+
+class FidelityFormatError(ValueError):
+    """Raised when a Fidelity CSV doesn't match the expected format."""
 
 
 def parse_fidelity_csv(path: str) -> AccountSummary:
     """Parse a single-account Fidelity positions CSV.
 
-    Expected format:
-    - Lines 1-3: title block (line 2 has account label)
-    - Line 4: blank
-    - Line 5: CSV header
-    - Data rows until Totals
-    - Totals row (Value column = NLV)
-    - Disclosure section (ignored)
+    Handles the current Fidelity export format:
+    - Row 1: CSV header (Account Number, Account Name, Symbol, ...)
+    - Data rows with account info in each row
+    - Disclaimer text at bottom (ignored)
+
+    Raises FidelityFormatError if the CSV format is unrecognized.
     """
-    lines = Path(path).read_text().splitlines()
+    text = Path(path).read_text(encoding="utf-8-sig").splitlines()
 
-    # Extract account label from line 2
-    label = lines[1].strip().strip('"') if len(lines) > 1 else Path(path).stem
-
-    # Find header row (first row with "Symbol,")
+    # Find header row
     header_idx = -1
-    for i, line in enumerate(lines):
-        if line.startswith("Symbol,"):
+    for i, line in enumerate(text):
+        if "Symbol" in line and "," in line:
             header_idx = i
             break
     if header_idx < 0:
-        return AccountSummary(
-            account_id=Path(path).stem, label=label, broker="Fidelity", account_type="CASH"
+        raise FidelityFormatError(
+            f"No CSV header row found in {Path(path).name}. "
+            "Expected a row containing 'Symbol' and other column headers."
         )
 
-    # Parse CSV from header row onward
-    reader = csv.DictReader(lines[header_idx:])
+    reader = csv.DictReader(text[header_idx:])
+    columns = set(reader.fieldnames or [])
+    missing = _FIDELITY_REQUIRED_COLUMNS - columns
+    if missing:
+        raise FidelityFormatError(
+            f"Fidelity CSV format changed — {Path(path).name} is missing columns: "
+            f"{', '.join(sorted(missing))}. "
+            f"Found columns: {', '.join(sorted(columns))}"
+        )
     positions: list[dict] = []
     cash = 0.0
-    nlv = 0.0
     day_pnl = 0.0
     unrealized_pnl = 0.0
+    label = ""
+    account_id = ""
 
     for row in reader:
         symbol = (row.get("Symbol") or "").strip()
-        if symbol in _SKIP_SYMBOLS or symbol.startswith('"'):
-            if symbol == "Totals":
-                nlv = _safe_float(row.get("Value"))
-                day_pnl = _safe_float(row.get("$ Day G/L"))
-                unrealized_pnl = _safe_float(row.get("$ Total G/L"))
-            break  # Stop at Totals or Disclosure
+        # Stop at blank lines or disclaimer text
+        if not symbol or symbol.startswith('"'):
+            break
 
-        value = _safe_float(row.get("Value"))
-        qty = _safe_float(row.get("Quantity"))
-        last = _safe_float(row.get("Last"))
-        cost = _safe_float(row.get("$ Avg Cost"))
-        pnl = _safe_float(row.get("$ Total G/L"))
-        pnl_pct = _safe_float(row.get("% Total G/L"))
+        # Extract account info from first data row
+        if not label:
+            label = (row.get("Account Name") or Path(path).stem).strip()
+            account_id = (row.get("Account Number") or Path(path).stem).strip()
 
-        if symbol == "Cash (FDRXX)":
+        # Handle cash / money market
+        if "FDRXX" in symbol:
+            value = _safe_float(row.get("Current Value"))
             cash = value
             positions.append(
                 {
-                    "symbol": "Cash (FDRXX)",
-                    "quantity": qty,
-                    "last": last,
-                    "cost": cost,
+                    "symbol": "FDRXX",
+                    "quantity": 0,
+                    "last": 0.0,
+                    "cost": 0.0,
                     "value": value,
                     "pnl": 0.0,
                     "pnl_pct": 0.0,
@@ -134,10 +151,21 @@ def parse_fidelity_csv(path: str) -> AccountSummary:
             )
             continue
 
-        # Check if option
-        opt = parse_fidelity_option(symbol)
+        # Strip leading " -" prefix on short option symbols
+        clean_symbol = symbol.lstrip(" -")
+
+        value = _safe_float(row.get("Current Value"))
+        qty = _safe_float(row.get("Quantity"))
+        last = _safe_float(row.get("Last Price"))
+        cost = _safe_float(row.get("Average Cost Basis"))
+        pnl = _safe_float(row.get("Total Gain/Loss Dollar"))
+        pnl_pct = _safe_float(row.get("Total Gain/Loss Percent"))
+        day_pnl += _safe_float(row.get("Today's Gain/Loss Dollar"))
+        unrealized_pnl += pnl
+
+        opt = parse_fidelity_option(clean_symbol)
         pos: dict[str, Any] = {
-            "symbol": symbol,
+            "symbol": clean_symbol,
             "quantity": qty,
             "last": last,
             "cost": cost,
@@ -153,18 +181,20 @@ def parse_fidelity_csv(path: str) -> AccountSummary:
             pos["expiration"] = exp
             pos["option_type"] = option_type
             pos["strike"] = strike
-            pos["earnings"] = row.get("Earnings Date", "").strip()
 
         positions.append(pos)
 
+    market_value = sum(p.get("value", 0.0) for p in positions if not p.get("is_cash"))
+    nlv = cash + market_value
+
     return AccountSummary(
-        account_id=Path(path).stem,
-        label=label,
+        account_id=account_id or Path(path).stem,
+        label=label or Path(path).stem,
         broker="Fidelity",
         account_type="CASH",
         nlv=nlv,
         cash=cash,
-        market_value=nlv - cash,
+        market_value=market_value,
         day_pnl=day_pnl,
         unrealized_pnl=unrealized_pnl,
         positions=positions,
