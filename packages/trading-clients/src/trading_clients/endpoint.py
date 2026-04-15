@@ -10,10 +10,13 @@ Request mixins define the three ways data is sent in HTTP:
   - BodyRequest: JSON or form-encoded request body
 """
 
+import asyncio
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
+
+_DEFAULT_CONCURRENCY = 1
 
 # ── Request mixins ──────────────────────────────────────────
 
@@ -78,38 +81,50 @@ class Endpoint:
 
 
 class BaseClient(ABC):
-    """Base class for API clients. Subclasses implement _request() with provider-specific
-    auth, HTTP transport, caching, and rate limiting."""
+    """Base class for async API clients. Subclasses implement _request() with
+    provider-specific auth, HTTP transport, caching, and rate limiting.
 
-    _http: Any  # httpx.Client — declared here so close() works generically
+    Each client holds an asyncio.Semaphore that serializes concurrent calls.
+    The semaphore is acquired in get/post/put/delete (not _request), so internal
+    HTTP calls (e.g. token refresh) don't double-acquire.
+    """
 
-    def close(self) -> None:
-        """Close the underlying HTTP client."""
-        self._http.close()
+    _http: Any  # httpx.AsyncClient
+    _semaphore: asyncio.Semaphore
 
-    def get(self, endpoint: Endpoint, request: ParamsRequest) -> Any:
+    async def aclose(self) -> None:
+        """Close the underlying async HTTP client."""
+        await self._http.aclose()
+
+    async def get(self, endpoint: Endpoint, request: ParamsRequest) -> Any:
         """Send a GET request and return the typed response model."""
-        path = self._resolve_path(endpoint, request)
-        data = self._request("GET", endpoint, path=path, params=request.to_params())
-        return self._decode(endpoint, data)
+        async with self._semaphore:
+            path = self._resolve_path(endpoint, request)
+            data = await self._request("GET", endpoint, path=path, params=request.to_params())
+            return self._decode(endpoint, data)
 
-    def post(self, endpoint: Endpoint, request: BodyRequest) -> Any:
+    async def post(self, endpoint: Endpoint, request: BodyRequest) -> Any:
         """Send a POST request and return the typed response model."""
-        path = self._resolve_path(endpoint, request)
-        data = self._request("POST", endpoint, path=path, body=request.to_body())
-        return self._decode(endpoint, data)
+        async with self._semaphore:
+            path = self._resolve_path(endpoint, request)
+            data = await self._request("POST", endpoint, path=path, body=request.to_body())
+            return self._decode(endpoint, data)
 
-    def put(self, endpoint: Endpoint, request: BodyRequest) -> Any:
+    async def put(self, endpoint: Endpoint, request: BodyRequest) -> Any:
         """Send a PUT request and return the typed response model."""
-        path = self._resolve_path(endpoint, request)
-        data = self._request("PUT", endpoint, path=path, body=request.to_body())
-        return self._decode(endpoint, data)
+        async with self._semaphore:
+            path = self._resolve_path(endpoint, request)
+            data = await self._request("PUT", endpoint, path=path, body=request.to_body())
+            return self._decode(endpoint, data)
 
-    def delete(self, endpoint: Endpoint, request: ParamsRequest) -> Any:
+    async def delete(self, endpoint: Endpoint, request: ParamsRequest) -> Any:
         """Send a DELETE request and return the typed response model."""
-        path = self._resolve_path(endpoint, request)
-        data = self._request("DELETE", endpoint, path=path, params=request.to_params())
-        return self._decode(endpoint, data)
+        async with self._semaphore:
+            path = self._resolve_path(endpoint, request)
+            data = await self._request(
+                "DELETE", endpoint, path=path, params=request.to_params()
+            )
+            return self._decode(endpoint, data)
 
     @staticmethod
     def _resolve_path(endpoint: Endpoint, request: object) -> str:
@@ -128,7 +143,7 @@ class BaseClient(ABC):
         return data
 
     @abstractmethod
-    def _request(
+    async def _request(
         self,
         method: str,
         endpoint: Endpoint,

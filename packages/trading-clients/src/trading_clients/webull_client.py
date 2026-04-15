@@ -1,5 +1,6 @@
 """Webull API v2 HTTP transport with HMAC-SHA1 authentication."""
 
+import asyncio
 import base64
 import hashlib
 import hmac
@@ -14,7 +15,7 @@ import httpx
 
 from trading_clients.cache import TTLCache
 from trading_clients.config import WebullConfig, save_webull_token
-from trading_clients.endpoint import BaseClient, Endpoint
+from trading_clients.endpoint import _DEFAULT_CONCURRENCY, BaseClient, Endpoint
 from trading_clients.rate_limit import RateLimiter
 
 API_HOST = "api.webull.com"
@@ -99,7 +100,8 @@ class WebullClient(BaseClient):
     def __init__(self, config: WebullConfig) -> None:
         self._config = config
         self._token: str | None = config.token
-        self._http = httpx.Client(timeout=15, http2=True)
+        self._http = httpx.AsyncClient(timeout=15, http2=True)
+        self._semaphore = asyncio.Semaphore(_DEFAULT_CONCURRENCY)
         self._cache = TTLCache()
         self._limiter = RateLimiter(RATE_LIMITS)
 
@@ -117,7 +119,7 @@ class WebullClient(BaseClient):
             parts.extend(f"{k}={v}" for k, v in sorted(params.items()))
         return "&".join(parts)
 
-    def _create_token(self) -> str:
+    async def _create_token(self) -> str:
         """Create a new access token and save it to ~/.tradingrc."""
         body: dict[str, Any] = {
             "account_id": self._config.account_id,
@@ -131,7 +133,7 @@ class WebullClient(BaseClient):
             body_params=body,
         )
         headers["Content-Type"] = "application/json"
-        resp = self._http.post(f"https://{API_HOST}{path}", headers=headers, json=body)
+        resp = await self._http.post(f"https://{API_HOST}{path}", headers=headers, json=body)
         if not resp.is_success:
             try:
                 err = resp.json()
@@ -157,7 +159,7 @@ class WebullClient(BaseClient):
             detail = resp.text
         raise RuntimeError(f"Webull API {resp.status_code}: {detail}")
 
-    def _request(
+    async def _request(
         self,
         method: str,
         endpoint: Endpoint,
@@ -176,7 +178,7 @@ class WebullClient(BaseClient):
                 return cached
 
         # Rate limit
-        self._limiter.acquire(endpoint.rate_key)
+        await self._limiter.acquire(endpoint.rate_key)
 
         # Build auth headers
         headers = _build_signature(
@@ -194,9 +196,9 @@ class WebullClient(BaseClient):
 
         if method == "POST":
             headers["Content-Type"] = "application/json"
-            resp = self._http.post(url, headers=headers, params=params, json=body)
+            resp = await self._http.post(url, headers=headers, params=params, json=body)
         else:
-            resp = self._http.get(url, headers=headers, params=params)
+            resp = await self._http.get(url, headers=headers, params=params)
 
         self._raise_for_status(resp)
         data = resp.json()

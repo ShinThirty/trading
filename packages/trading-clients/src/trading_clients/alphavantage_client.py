@@ -1,12 +1,13 @@
 """Alpha Vantage API HTTP transport with API key authentication."""
 
+import asyncio
 from typing import Any
 
 import httpx
 
 from trading_clients.cache import TTLCache
 from trading_clients.config import AlphaVantageConfig
-from trading_clients.endpoint import BaseClient, Endpoint
+from trading_clients.endpoint import _DEFAULT_CONCURRENCY, BaseClient, Endpoint
 from trading_clients.rate_limit import RateLimiter
 
 BASE_URL = "https://www.alphavantage.co/query"
@@ -19,7 +20,8 @@ RATE_LIMITS: dict[str, tuple[int, float]] = {
 class AlphaVantageClient(BaseClient):
     def __init__(self, config: AlphaVantageConfig) -> None:
         self._api_key = config.api_key
-        self._http = httpx.Client(timeout=15)
+        self._http = httpx.AsyncClient(timeout=15)
+        self._semaphore = asyncio.Semaphore(_DEFAULT_CONCURRENCY)
         self._cache = TTLCache()
         self._limiter = RateLimiter(RATE_LIMITS)
 
@@ -28,7 +30,7 @@ class AlphaVantageClient(BaseClient):
             return ""
         return "&".join(f"{k}={v}" for k, v in sorted(params.items()) if k != "apikey")
 
-    def _request(
+    async def _request(
         self,
         method: str,
         endpoint: Endpoint,
@@ -46,8 +48,8 @@ class AlphaVantageClient(BaseClient):
             if cached is not None:
                 return cached
 
-        self._limiter.acquire()
-        resp = self._http.get(BASE_URL, params=params)
+        await self._limiter.acquire()
+        resp = await self._http.get(BASE_URL, params=params)
         resp.raise_for_status()
         data = resp.json()
 

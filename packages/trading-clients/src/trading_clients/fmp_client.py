@@ -1,12 +1,13 @@
 """FMP API HTTP transport with API key authentication."""
 
+import asyncio
 from typing import Any
 
 import httpx
 
 from trading_clients.cache import TTLCache
 from trading_clients.config import FmpConfig
-from trading_clients.endpoint import BaseClient, Endpoint
+from trading_clients.endpoint import _DEFAULT_CONCURRENCY, BaseClient, Endpoint
 from trading_clients.rate_limit import RateLimiter
 
 BASE_URL = "https://financialmodelingprep.com/stable"
@@ -19,7 +20,8 @@ RATE_LIMITS: dict[str, tuple[int, float]] = {
 class FmpClient(BaseClient):
     def __init__(self, config: FmpConfig) -> None:
         self._api_key = config.api_key
-        self._http = httpx.Client(timeout=15)
+        self._http = httpx.AsyncClient(timeout=15)
+        self._semaphore = asyncio.Semaphore(_DEFAULT_CONCURRENCY)
         self._cache = TTLCache()
         self._limiter = RateLimiter(RATE_LIMITS)
 
@@ -29,7 +31,7 @@ class FmpClient(BaseClient):
             parts.extend(f"{k}={v}" for k, v in sorted(params.items()) if k != "apikey")
         return "&".join(parts)
 
-    def _request(
+    async def _request(
         self,
         method: str,
         endpoint: Endpoint,
@@ -48,8 +50,8 @@ class FmpClient(BaseClient):
             if cached is not None:
                 return cached
 
-        self._limiter.acquire()
-        resp = self._http.get(f"{BASE_URL}{resolved}", params=params)
+        await self._limiter.acquire()
+        resp = await self._http.get(f"{BASE_URL}{resolved}", params=params)
         if resp.status_code == 402:
             detail = resp.text[:200].strip() if resp.text else "no details"
             raise ValueError(

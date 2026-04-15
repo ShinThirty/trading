@@ -1,5 +1,6 @@
 """Tradier API HTTP transport with Bearer token authentication."""
 
+import asyncio
 from typing import Any
 
 import httpx
@@ -16,12 +17,15 @@ RATE_LIMITS: dict[str, tuple[int, float]] = {
     "default": (5, 2.0),  # 120 req/min — conservative burst
 }
 
+MAX_CONCURRENT = 5
+
 
 class TradierClient(BaseClient):
     def __init__(self, config: TradierConfig) -> None:
         self._base = SANDBOX_HOST if config.sandbox else PRODUCTION_HOST
         self._account_id = config.account_id
-        self._http = httpx.Client(timeout=15)
+        self._http = httpx.AsyncClient(timeout=15)
+        self._semaphore = asyncio.Semaphore(MAX_CONCURRENT)
         self._headers = {
             "Authorization": f"Bearer {config.api_token}",
             "Accept": "application/json",
@@ -45,7 +49,7 @@ class TradierClient(BaseClient):
             parts.extend(f"{k}={v}" for k, v in sorted(params.items()))
         return "&".join(parts)
 
-    def _request(
+    async def _request(
         self,
         method: str,
         endpoint: Endpoint,
@@ -63,17 +67,17 @@ class TradierClient(BaseClient):
             if cached is not None:
                 return cached
 
-        self._limiter.acquire()
+        await self._limiter.acquire()
         url = f"{self._base}{resolved}"
 
         if method == "GET":
-            resp = self._http.get(url, headers=self._headers, params=params)
+            resp = await self._http.get(url, headers=self._headers, params=params)
         elif method == "POST":
-            resp = self._http.post(url, headers=self._headers, data=body)
+            resp = await self._http.post(url, headers=self._headers, data=body)
         elif method == "PUT":
-            resp = self._http.put(url, headers=self._headers, data=body)
+            resp = await self._http.put(url, headers=self._headers, data=body)
         elif method == "DELETE":
-            resp = self._http.delete(url, headers=self._headers)
+            resp = await self._http.delete(url, headers=self._headers)
         else:
             raise ValueError(f"Unsupported method: {method}")
 

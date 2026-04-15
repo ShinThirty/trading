@@ -1,6 +1,6 @@
 """TastyTrade API HTTP transport with OAuth2 refresh token authentication."""
 
-import threading
+import asyncio
 import time
 from typing import Any
 
@@ -8,7 +8,7 @@ import httpx
 
 from trading_clients.cache import TTLCache
 from trading_clients.config import TastyTradeConfig
-from trading_clients.endpoint import BaseClient, Endpoint
+from trading_clients.endpoint import _DEFAULT_CONCURRENCY, BaseClient, Endpoint
 from trading_clients.rate_limit import RateLimiter
 
 BASE_URL = "https://api.tastyworks.com"
@@ -22,28 +22,29 @@ class TastyTradeClient(BaseClient):
     def __init__(self, config: TastyTradeConfig) -> None:
         self._client_secret = config.client_secret
         self._refresh_token = config.refresh_token
-        self._http = httpx.Client(timeout=15)
+        self._http = httpx.AsyncClient(timeout=15)
+        self._semaphore = asyncio.Semaphore(_DEFAULT_CONCURRENCY)
         self._cache = TTLCache()
         self._limiter = RateLimiter(RATE_LIMITS)
 
         # Token state
         self._access_token: str | None = None
         self._token_expires_at: float = 0.0
-        self._token_lock = threading.Lock()
+        self._token_lock = asyncio.Lock()
 
-    def _ensure_token(self) -> str:
+    async def _ensure_token(self) -> str:
         """Return a valid access token, refreshing if expired or missing."""
         if self._access_token and time.monotonic() < self._token_expires_at:
             return self._access_token
-        with self._token_lock:
+        async with self._token_lock:
             # Double-check after acquiring lock
             if self._access_token and time.monotonic() < self._token_expires_at:
                 return self._access_token
-            return self._do_refresh()
+            return await self._do_refresh()
 
-    def _do_refresh(self) -> str:
+    async def _do_refresh(self) -> str:
         """Exchange refresh token for a new access token."""
-        resp = self._http.post(
+        resp = await self._http.post(
             f"{BASE_URL}/oauth/token",
             json={
                 "grant_type": "refresh_token",
@@ -63,7 +64,7 @@ class TastyTradeClient(BaseClient):
             parts.extend(f"{k}={v}" for k, v in sorted(params.items()))
         return "&".join(parts)
 
-    def _request(
+    async def _request(
         self,
         method: str,
         endpoint: Endpoint,
@@ -80,15 +81,15 @@ class TastyTradeClient(BaseClient):
             if cached is not None:
                 return cached
 
-        self._limiter.acquire()
-        token = self._ensure_token()
+        await self._limiter.acquire()
+        token = await self._ensure_token()
         base = endpoint.base_url or BASE_URL
         headers = {
             "Authorization": f"Bearer {token}",
             "Accept": "application/json",
             "Content-Type": "application/json",
         }
-        resp = self._http.request(
+        resp = await self._http.request(
             method, f"{base}{resolved}", params=params, json=body, headers=headers
         )
         resp.raise_for_status()

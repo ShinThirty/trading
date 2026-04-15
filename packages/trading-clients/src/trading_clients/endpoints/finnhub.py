@@ -1,6 +1,7 @@
 """Finnhub API endpoint definitions with typed request/response models."""
 
 from dataclasses import dataclass
+from typing import Any
 
 from trading_clients.endpoint import Endpoint, ParamsRequest
 from trading_clients.table_helpers import (
@@ -357,6 +358,35 @@ class FinancialsReportedResponse:
                     row[display_name] = ""
             rows.append(row)
         return list_table(rows)
+
+    def _extract_numeric(
+        self, section: str, items: list[tuple[str, list[str]]], limit: int
+    ) -> list[dict[str, Any]]:
+        """Extract raw numeric values (not formatted strings) for computation."""
+        if not self.reports:
+            return []
+        rows: list[dict[str, Any]] = []
+        for r in self.reports[:limit]:
+            report = r.get("report", {})
+            concepts = self._build_concept_map(report.get(section, []))
+            row: dict[str, Any] = {
+                "period": r.get("endDate", "")[:10],
+                "form": r.get("form", ""),
+            }
+            for display_name, concept_names in items:
+                for cn in concept_names:
+                    if cn in concepts:
+                        val = concepts[cn].get("value")
+                        row[display_name] = val if isinstance(val, int | float) else None
+                        break
+                else:
+                    row[display_name] = None
+            rows.append(row)
+        return rows
+
+    def income_numeric(self, limit: int = 8) -> list[dict[str, Any]]:
+        """Return raw income statement numbers for computation (revenue, operating income, etc)."""
+        return self._extract_numeric("ic", _IC_ITEMS, limit)
 
     def income_markdown(self, limit: int = 4) -> str:
         return self._extract_section("ic", _IC_ITEMS, limit)

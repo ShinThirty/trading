@@ -69,7 +69,7 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
         yield ctx
     finally:
         for client in ctx.values():
-            client.close()
+            await client.aclose()
 
 
 mcp = FastMCP("trading-mcp", lifespan=lifespan)
@@ -140,12 +140,12 @@ def _tastytrade(ctx: Context) -> TastyTradeClient:
     return client
 
 
-def _check_market(ctx: Context, order_type: str, extended_hours: bool) -> None:
+async def _check_market(ctx: Context, order_type: str, extended_hours: bool) -> None:
     """Validate market state before placing an order."""
     tradier = ctx.request_context.lifespan_context.get("tradier")
     if tradier is None:
         return  # skip check if Tradier not configured
-    clock = tradier.get(t.CLOCK, t.EmptyRequest())
+    clock = await tradier.get(t.CLOCK, t.EmptyRequest())
     state = clock.data.get("state", "closed")
     if order_type == "MARKET" and state != "open" and not extended_hours:
         raise RuntimeError(
@@ -162,18 +162,19 @@ def _check_market(ctx: Context, order_type: str, extended_hours: bool) -> None:
 
 
 @mcp.tool()
-def get_account_balance(ctx: Context, account_id: str) -> str:
+async def get_account_balance(ctx: Context, account_id: str) -> str:
     """Get account balance: net liquidation, cash, buying power, market value, day P&L,
     unrealized P&L, margin info.
 
     account_id: Webull account ID (use get_app_subscriptions to find it).
     """
     client = _webull(ctx)
-    return client.get(BALANCE, AccountRequest(client.ensure_account_id(account_id))).to_output()
+    resp = await client.get(BALANCE, AccountRequest(client.ensure_account_id(account_id)))
+    return resp.to_output()
 
 
 @mcp.tool()
-def get_account_positions(ctx: Context, account_id: str) -> str:
+async def get_account_positions(ctx: Context, account_id: str) -> str:
     """Get all current portfolio holdings including option positions with full leg details
     (strike, expiration, option type, strategy). Returns each position's symbol, type,
     quantity, cost, last price, and unrealized P&L.
@@ -181,14 +182,15 @@ def get_account_positions(ctx: Context, account_id: str) -> str:
     account_id: Webull account ID (use get_app_subscriptions to find it).
     """
     client = _webull(ctx)
-    return client.get(POSITIONS, AccountRequest(client.ensure_account_id(account_id))).to_output()
+    resp = await client.get(POSITIONS, AccountRequest(client.ensure_account_id(account_id)))
+    return resp.to_output()
 
 
 # ── Orders ───────────────────────────────────────────────────
 
 
 @mcp.tool()
-def get_open_orders(ctx: Context, account_id: str, page_size: int = 50) -> str:
+async def get_open_orders(ctx: Context, account_id: str, page_size: int = 50) -> str:
     """Get all currently open/pending orders (stocks, options, futures, crypto).
     Returns symbol, side, order_type, quantity, filled_quantity, price, status,
     and option leg details if applicable.
@@ -196,14 +198,16 @@ def get_open_orders(ctx: Context, account_id: str, page_size: int = 50) -> str:
     account_id: Webull account ID (use get_app_subscriptions to find it).
     """
     client = _webull(ctx)
-    return client.get(
-        OPEN_ORDERS,
-        GetOpenOrdersRequest(client.ensure_account_id(account_id), page_size),
+    return (
+        await client.get(
+            OPEN_ORDERS,
+            GetOpenOrdersRequest(client.ensure_account_id(account_id), page_size),
+        )
     ).to_output()
 
 
 @mcp.tool()
-def get_order_history(
+async def get_order_history(
     ctx: Context,
     account_id: str,
     page_size: int = 50,
@@ -222,7 +226,7 @@ def get_order_history(
     status: filter by order status (FILLED, CANCELLED, FAILED, PENDING). Case-insensitive.
     """
     client = _webull(ctx)
-    response = client.get(
+    response = await client.get(
         ORDER_HISTORY,
         GetOrderHistoryRequest(
             client.ensure_account_id(account_id), page_size, start_date, end_date
@@ -234,7 +238,7 @@ def get_order_history(
 
 
 @mcp.tool()
-def get_order_detail(ctx: Context, client_order_id: str, account_id: str) -> str:
+async def get_order_detail(ctx: Context, client_order_id: str, account_id: str) -> str:
     """Get full detail for a specific order including status, fill info, timestamps,
     and option leg details.
 
@@ -243,9 +247,11 @@ def get_order_detail(ctx: Context, client_order_id: str, account_id: str) -> str
     account_id: Webull account ID (use get_app_subscriptions to find it).
     """
     client = _webull(ctx)
-    return client.get(
-        ORDER_DETAIL,
-        GetOrderDetailRequest(client.ensure_account_id(account_id), client_order_id),
+    return (
+        await client.get(
+            ORDER_DETAIL,
+            GetOrderDetailRequest(client.ensure_account_id(account_id), client_order_id),
+        )
     ).to_output()
 
 
@@ -253,7 +259,7 @@ def get_order_detail(ctx: Context, client_order_id: str, account_id: str) -> str
 
 
 @mcp.tool()
-def preview_order(ctx: Context, new_orders: list[dict], account_id: str) -> str:
+async def preview_order(ctx: Context, new_orders: list[dict], account_id: str) -> str:
     """Preview an order before placing it. Returns estimated cost and transaction fees.
     Supports stocks, options (single-leg and multi-leg), futures, and crypto.
 
@@ -284,11 +290,11 @@ def preview_order(ctx: Context, new_orders: list[dict], account_id: str) -> str:
     client = _webull(ctx)
     # Preview uses the same request structure as place_order but via preview endpoint
     req = PreviewOrderRequest(account_id=client.ensure_account_id(account_id), **new_orders[0])
-    return client.post(PREVIEW_ORDER, req).to_output()
+    return (await client.post(PREVIEW_ORDER, req)).to_output()
 
 
 @mcp.tool()
-def place_order(
+async def place_order(
     ctx: Context,
     account_id: str,
     symbol: str,
@@ -331,7 +337,7 @@ def place_order(
 
     account_id: Webull account ID (use get_app_subscriptions to find it).
     """
-    _check_market(ctx, order_type, trading_session == "ALL")
+    await _check_market(ctx, order_type, trading_session == "ALL")
     client = _webull(ctx)
     req = PlaceOrderRequest(
         account_id=client.ensure_account_id(account_id),
@@ -351,11 +357,11 @@ def place_order(
         position_intent=position_intent,
         legs=legs,
     )
-    return client.post(PLACE_ORDER, req).to_output()
+    return (await client.post(PLACE_ORDER, req)).to_output()
 
 
 @mcp.tool()
-def replace_order(
+async def replace_order(
     ctx: Context,
     account_id: str,
     client_order_id: str,
@@ -389,11 +395,11 @@ def replace_order(
         trailing_type=trailing_type,
         trailing_stop_step=trailing_stop_step,
     )
-    return client.post(REPLACE_ORDER, req).to_output()
+    return (await client.post(REPLACE_ORDER, req)).to_output()
 
 
 @mcp.tool()
-def cancel_order(ctx: Context, account_id: str, client_order_id: str) -> str:
+async def cancel_order(ctx: Context, account_id: str, client_order_id: str) -> str:
     """Cancel a pending order (stock or option). The order must still be open/unfilled.
 
     account_id: Webull account ID (use get_app_subscriptions to find it).
@@ -402,22 +408,43 @@ def cancel_order(ctx: Context, account_id: str, client_order_id: str) -> str:
     """
     client = _webull(ctx)
     req = CancelOrderRequest(client.ensure_account_id(account_id), client_order_id)
-    return client.post(CANCEL_ORDER, req).to_output()
+    return (await client.post(CANCEL_ORDER, req)).to_output()
 
 
 @mcp.tool()
-def get_app_subscriptions(ctx: Context) -> str:
+async def refresh_webull_token(ctx: Context) -> str:
+    """Create a new Webull API access token and save it to ~/.tradingrc.
+
+    Use this when Webull tools fail with 401 errors (token expired after 15 days
+    of inactivity). After running this tool, the new token must be verified in the
+    Webull App: Menu > Messages > OpenAPI Notifications.
+
+    The token status will be PENDING until verified. Webull tools will fail until
+    verification is complete.
+    """
+    client = _webull(ctx)
+    token = await client._create_token()
+    return (
+        f"New token created: {token[:8]}...\n\n"
+        "**Action required:** Verify this token in the Webull App:\n"
+        "Menu > Messages > OpenAPI Notifications\n\n"
+        "Token is PENDING until verified. Webull tools will fail until then."
+    )
+
+
+@mcp.tool()
+async def get_app_subscriptions(ctx: Context) -> str:
     """Get all Webull accounts linked to this API key.
 
     Returns Account ID, Account Number, Type, and Label for each account.
     IMPORTANT: Use the 'Account ID' column (not 'Account Number') as the account_id
     parameter for all other Webull tools.
     """
-    return _webull(ctx).get(ACCOUNT_LIST, EmptyRequest()).to_output()
+    return (await _webull(ctx).get(ACCOUNT_LIST, EmptyRequest())).to_output()
 
 
 @mcp.tool()
-def get_portfolio_summary(
+async def get_portfolio_summary(
     ctx: Context,
     fidelity_folder: str | None = None,
 ) -> str:
@@ -447,7 +474,7 @@ def get_portfolio_summary(
     errors: dict[str, str] = {}
 
     # 1. Discover all Webull accounts
-    account_list = client.get(ACCOUNT_LIST, EmptyRequest())
+    account_list = await client.get(ACCOUNT_LIST, EmptyRequest())
     if not account_list.accounts:
         errors["Webull"] = "No accounts found"
 
@@ -458,7 +485,7 @@ def get_portfolio_summary(
         atype = acct.get("account_type", "")
 
         try:
-            bal = _webull_get_with_retry(client, BALANCE, AccountRequest(aid))
+            bal = await _webull_get_with_retry(client, BALANCE, AccountRequest(aid))
         except Exception as e:
             errors[label] = str(e)
             continue
@@ -469,7 +496,7 @@ def get_portfolio_summary(
         mv = sf(bal.market_value)
 
         try:
-            pos_resp = _webull_get_with_retry(client, POSITIONS, AccountRequest(aid))
+            pos_resp = await _webull_get_with_retry(client, POSITIONS, AccountRequest(aid))
             positions = pos_resp.to_normalized()
         except Exception as e:
             positions = []
@@ -513,16 +540,14 @@ def get_portfolio_summary(
     return compact_portfolio_summary(portfolio, f.name)
 
 
-def _webull_get_with_retry(client: Any, endpoint: Any, request: Any, retries: int = 2) -> Any:
+async def _webull_get_with_retry(client: Any, endpoint: Any, request: Any, retries: int = 2) -> Any:
     """Call client.get with retry on 429 rate limit errors."""
-    import time
-
     for attempt in range(retries + 1):
         try:
-            return client.get(endpoint, request)
+            return await client.get(endpoint, request)
         except Exception as e:
             if "429" in str(e) and attempt < retries:
-                time.sleep(2)
+                await asyncio.sleep(2)
                 continue
             raise
 
@@ -537,7 +562,7 @@ def _safe_float(val: Any) -> float:
 
 
 @mcp.tool()
-def get_portfolio_greeks(
+async def get_portfolio_greeks(
     ctx: Context,
     fidelity_folder: str | None = None,
 ) -> str:
@@ -565,15 +590,14 @@ def get_portfolio_greeks(
 
     # 1. Collect all positions across accounts
     all_positions: list[dict] = []
-    account_list = webull.get(ACCOUNT_LIST, EmptyRequest())
+    account_list = await webull.get(ACCOUNT_LIST, EmptyRequest())
     errors: list[str] = []
     for acct in account_list.accounts:
         aid = acct.get("account_id", "")
         label = acct.get("account_label", aid)
         try:
-            all_positions.extend(
-                _webull_get_with_retry(webull, POSITIONS, AccountRequest(aid)).to_normalized()
-            )
+            pos_resp = await _webull_get_with_retry(webull, POSITIONS, AccountRequest(aid))
+            all_positions.extend(pos_resp.to_normalized())
         except Exception as e:
             errors.append(f"{label}: {e}")
 
@@ -592,7 +616,7 @@ def get_portfolio_greeks(
 
     # 3. Batch quote Greeks from Tradier
     greeks_by_symbol: dict[str, dict] = {}
-    quote_resp = tradier.get(t.QUOTES, t.GetQuotesRequest(",".join(occ_set), greeks=True))
+    quote_resp = await tradier.get(t.QUOTES, t.GetQuotesRequest(",".join(occ_set), greeks=True))
     for q in quote_resp.quotes:
         greeks = q.get("greeks") or {}
         if greeks:
@@ -615,14 +639,15 @@ def get_portfolio_greeks(
 
 
 @mcp.tool()
-def get_instruments(ctx: Context, symbols: str, category: str = "US_STOCK") -> str:
+async def get_instruments(ctx: Context, symbols: str, category: str = "US_STOCK") -> str:
     """Look up instrument details for symbols: instrument_id, exchange, currency,
     and trading attributes (shortable, fractionable, marginable).
 
     symbols: comma-separated ticker symbols (e.g. 'AAPL,TSLA'). Max 100.
     category: 'US_STOCK' (default) or 'US_ETF'.
     """
-    return _webull(ctx).get(INSTRUMENTS, GetInstrumentsRequest(symbols, category)).to_output()
+    resp = await _webull(ctx).get(INSTRUMENTS, GetInstrumentsRequest(symbols, category))
+    return resp.to_output()
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -631,7 +656,7 @@ def get_instruments(ctx: Context, symbols: str, category: str = "US_STOCK") -> s
 
 
 @mcp.tool()
-def get_option_expirations(ctx: Context, symbol: str) -> str:
+async def get_option_expirations(ctx: Context, symbol: str) -> str:
     """Get all available option expiration dates for an underlying symbol.
     Use this first to discover which expirations are available before fetching
     the full chain.
@@ -641,11 +666,11 @@ def get_option_expirations(ctx: Context, symbol: str) -> str:
 
     Requires [tradier] section in ~/.tradingrc.
     """
-    return _tradier(ctx).get(t.EXPIRATIONS, t.GetExpirationsRequest(symbol)).to_output()
+    return (await _tradier(ctx).get(t.EXPIRATIONS, t.GetExpirationsRequest(symbol))).to_output()
 
 
 @mcp.tool()
-def get_option_strikes(ctx: Context, symbol: str, expiration: str) -> str:
+async def get_option_strikes(ctx: Context, symbol: str, expiration: str) -> str:
     """Get all available strike prices for an underlying symbol at a specific expiration.
 
     symbol: underlying ticker symbol (e.g. 'AAPL').
@@ -654,11 +679,11 @@ def get_option_strikes(ctx: Context, symbol: str, expiration: str) -> str:
 
     Requires [tradier] section in ~/.tradingrc.
     """
-    return _tradier(ctx).get(t.STRIKES, t.GetStrikesRequest(symbol, expiration)).to_output()
+    return (await _tradier(ctx).get(t.STRIKES, t.GetStrikesRequest(symbol, expiration))).to_output()
 
 
 @mcp.tool()
-def get_option_chain(
+async def get_option_chain(
     ctx: Context,
     symbol: str,
     expiration: str,
@@ -683,7 +708,7 @@ def get_option_chain(
 
     Requires [tradier] section in ~/.tradingrc.
     """
-    resp = _tradier(ctx).get(t.CHAIN, t.GetChainRequest(symbol, expiration, greeks))
+    resp = await _tradier(ctx).get(t.CHAIN, t.GetChainRequest(symbol, expiration, greeks))
     if resp.options and strike_count > 0:
         strikes = sorted({o["strike"] for o in resp.options})
         mid = (strikes[0] + strikes[-1]) / 2
@@ -697,7 +722,7 @@ def get_option_chain(
 
 
 @mcp.tool()
-def get_option_lookup(ctx: Context, underlying: str) -> str:
+async def get_option_lookup(ctx: Context, underlying: str) -> str:
     """Get all option symbols for an underlying, including alternate roots (e.g. SPXW
     for SPX weeklies). Useful for discovering available option contracts before pulling
     historical data with get_tradier_history.
@@ -707,14 +732,14 @@ def get_option_lookup(ctx: Context, underlying: str) -> str:
 
     Requires [tradier] section in ~/.tradingrc.
     """
-    return _tradier(ctx).get(t.OPTION_LOOKUP, t.GetLookupRequest(underlying)).to_output()
+    return (await _tradier(ctx).get(t.OPTION_LOOKUP, t.GetLookupRequest(underlying))).to_output()
 
 
 # ── Options Analytics ──────────────────────────────────────
 
 
 @mcp.tool()
-def get_expected_move(ctx: Context, symbol: str, expiration: str) -> str:
+async def get_expected_move(ctx: Context, symbol: str, expiration: str) -> str:
     """Compute the expected move for a stock at a given option expiration.
 
     Shows the ATM straddle price (expected 1-sigma move), implied volatility,
@@ -730,22 +755,23 @@ def get_expected_move(ctx: Context, symbol: str, expiration: str) -> str:
 
     tradier = _tradier(ctx)
 
-    # Get current stock price
-    quote = tradier.get(t.QUOTES, t.GetQuotesRequest(symbol, greeks=False))
+    # Fetch quote, chain, and history concurrently
+    quote, chain, history = await asyncio.gather(
+        tradier.get(t.QUOTES, t.GetQuotesRequest(symbol, greeks=False)),
+        tradier.get(t.CHAIN, t.GetChainRequest(symbol, expiration, greeks=True)),
+        tradier.get(t.HISTORY, t.GetHistoryRequest(symbol, "daily")),
+    )
+
     if not quote.quotes:
         return f"(no quote for {symbol})"
     stock_price = float(quote.quotes[0].get("last") or quote.quotes[0].get("close", 0))
 
-    # Get option chain with greeks
-    chain = tradier.get(t.CHAIN, t.GetChainRequest(symbol, expiration, greeks=True))
     if not chain.options:
         return f"(no option chain for {symbol} at {expiration})"
 
     # Expected move from ATM straddle
     em = opts.expected_move(chain.options, stock_price)
 
-    # Historical volatility from price data
-    history = tradier.get(t.HISTORY, t.GetHistoryRequest(symbol, "daily"))
     closes = [float(b["close"]) for b in history.days] if history.days else []
     hv20 = opts.historical_volatility(closes, 20)
     hv50 = opts.historical_volatility(closes, 50)
@@ -780,7 +806,7 @@ def get_expected_move(ctx: Context, symbol: str, expiration: str) -> str:
 
 
 @mcp.tool()
-def analyze_option_strategy(
+async def analyze_option_strategy(
     ctx: Context,
     symbol: str,
     legs: list[dict],
@@ -851,7 +877,7 @@ def analyze_option_strategy(
         equity_position = {"shares": shares, "cost_basis": cost_basis}
 
     # Get current stock price
-    quote = tradier.get(t.QUOTES, t.GetQuotesRequest(symbol, greeks=False))
+    quote = await tradier.get(t.QUOTES, t.GetQuotesRequest(symbol, greeks=False))
     if not quote.quotes:
         return f"(no quote for {symbol})"
     stock_price = float(quote.quotes[0].get("last") or quote.quotes[0].get("close", 0))
@@ -860,7 +886,7 @@ def analyze_option_strategy(
     unique_exps = sorted({leg["expiration"] for leg in legs})
     chains: dict[str, list[dict]] = {}
     for exp in unique_exps:
-        chain = tradier.get(t.CHAIN, t.GetChainRequest(symbol, exp, greeks=True))
+        chain = await tradier.get(t.CHAIN, t.GetChainRequest(symbol, exp, greeks=True))
         if not chain.options:
             return f"(no option chain for {symbol} at {exp})"
         chains[exp] = chain.options
@@ -1003,7 +1029,7 @@ def analyze_option_strategy(
 
 
 @mcp.tool()
-def analyze_roll(
+async def analyze_roll(
     ctx: Context,
     current_symbol: str,
     target_expiration: str,
@@ -1039,19 +1065,22 @@ def analyze_roll(
     if target_strike is None:
         target_strike = current_strike
 
-    # Fetch: current option quote, stock price, target chain
-    cur_resp = tradier.get(t.QUOTES, t.GetQuotesRequest(current_symbol, greeks=True))
+    # Fetch current option quote, stock price, and target chain concurrently
+    cur_resp, stock_resp, chain = await asyncio.gather(
+        tradier.get(t.QUOTES, t.GetQuotesRequest(current_symbol, greeks=True)),
+        tradier.get(t.QUOTES, t.GetQuotesRequest(underlying, greeks=False)),
+        tradier.get(t.CHAIN, t.GetChainRequest(underlying, target_expiration, greeks=True)),
+    )
+
     if not cur_resp.quotes:
         return f"(no quote for {current_symbol})"
 
-    stock_resp = tradier.get(t.QUOTES, t.GetQuotesRequest(underlying, greeks=False))
     stock_price = 0.0
     if stock_resp.quotes:
         stock_price = float(
             stock_resp.quotes[0].get("last") or stock_resp.quotes[0].get("close", 0)
         )
 
-    chain = tradier.get(t.CHAIN, t.GetChainRequest(underlying, target_expiration, greeks=True))
     if not chain.options:
         return f"(no option chain for {underlying} at {target_expiration})"
 
@@ -1164,7 +1193,7 @@ def analyze_roll(
 
 
 @mcp.tool()
-def get_tradier_history(
+async def get_tradier_history(
     ctx: Context,
     symbol: str,
     interval: str = "daily",
@@ -1185,14 +1214,14 @@ def get_tradier_history(
 
     Requires [tradier] section in ~/.tradingrc.
     """
-    resp = _tradier(ctx).get(t.HISTORY, t.GetHistoryRequest(symbol, interval, start, end))
+    resp = await _tradier(ctx).get(t.HISTORY, t.GetHistoryRequest(symbol, interval, start, end))
     if limit and resp.days:
         resp.days = resp.days[-limit:]
     return resp.to_output()
 
 
 @mcp.tool()
-def search_symbols(ctx: Context, query: str, indexes: bool = False) -> str:
+async def search_symbols(ctx: Context, query: str, indexes: bool = False) -> str:
     """Search for stocks and ETFs by company name or partial symbol. Results are sorted
     by average volume (most liquid first). Useful for stock discovery.
 
@@ -1201,11 +1230,11 @@ def search_symbols(ctx: Context, query: str, indexes: bool = False) -> str:
 
     Requires [tradier] section in ~/.tradingrc.
     """
-    return _tradier(ctx).get(t.SEARCH, t.SearchRequest(query, indexes)).to_output()
+    return (await _tradier(ctx).get(t.SEARCH, t.SearchRequest(query, indexes))).to_output()
 
 
 @mcp.tool()
-def get_quote(ctx: Context, symbols: str, greeks: bool = False) -> str:
+async def get_quote(ctx: Context, symbols: str, greeks: bool = False) -> str:
     """Get real-time quotes for stocks and/or option contracts.
 
     For stocks: last price, bid/ask with sizes, volume, day change/%, prev close,
@@ -1223,11 +1252,11 @@ def get_quote(ctx: Context, symbols: str, greeks: bool = False) -> str:
 
     Requires [tradier] section in ~/.tradingrc.
     """
-    return _tradier(ctx).get(t.QUOTES, t.GetQuotesRequest(symbols, greeks)).to_output()
+    return (await _tradier(ctx).get(t.QUOTES, t.GetQuotesRequest(symbols, greeks))).to_output()
 
 
 @mcp.tool()
-def get_timesales(
+async def get_timesales(
     ctx: Context,
     symbol: str,
     interval: str = "5min",
@@ -1247,27 +1276,25 @@ def get_timesales(
     Requires [tradier] section in ~/.tradingrc.
     """
     return (
-        _tradier(ctx)
-        .get(t.TIMESALES, t.GetTimesalesRequest(symbol, interval, start, end))
-        .to_output()
-    )
+        await _tradier(ctx).get(t.TIMESALES, t.GetTimesalesRequest(symbol, interval, start, end))
+    ).to_output()
 
 
 @mcp.tool()
-def get_market_clock(ctx: Context) -> str:
+async def get_market_clock(ctx: Context) -> str:
     """Get current market status: whether the market is open, in pre-market, post-market,
     or closed, plus the time of the next state change.
 
     Requires [tradier] section in ~/.tradingrc.
     """
-    return _tradier(ctx).get(t.CLOCK, t.EmptyRequest()).to_output()
+    return (await _tradier(ctx).get(t.CLOCK, t.EmptyRequest())).to_output()
 
 
 # ── Technical Analysis ─────────────────────────────────────
 
 
 @mcp.tool()
-def get_technical_indicators(
+async def get_technical_indicators(
     ctx: Context,
     symbol: str,
     indicators: list[str] | None = None,
@@ -1292,7 +1319,7 @@ def get_technical_indicators(
         indicators = ["sma", "ema", "rsi", "macd", "bbands", "atr"]
 
     # Fetch enough history for warmup (60 bars covers all indicator needs)
-    resp = _tradier(ctx).get(t.HISTORY, t.GetHistoryRequest(symbol, period))
+    resp = await _tradier(ctx).get(t.HISTORY, t.GetHistoryRequest(symbol, period))
     bars = resp.days
     if not bars:
         return "(no historical data)"
@@ -1402,7 +1429,7 @@ def get_technical_indicators(
 
 
 @mcp.tool()
-def get_company_news(
+async def get_company_news(
     ctx: Context, symbol: str, from_date: str, to_date: str, limit: int = 20
 ) -> str:
     """Get recent news articles for a specific company.
@@ -1415,14 +1442,12 @@ def get_company_news(
     Requires [finnhub] section in ~/.tradingrc.
     """
     return (
-        _finnhub(ctx)
-        .get(fh.COMPANY_NEWS, fh.CompanyNewsRequest(symbol, from_date, to_date))
-        .to_output()
-    )
+        await _finnhub(ctx).get(fh.COMPANY_NEWS, fh.CompanyNewsRequest(symbol, from_date, to_date))
+    ).to_output()
 
 
 @mcp.tool()
-def get_market_news(ctx: Context, category: str = "general", limit: int = 20) -> str:
+async def get_market_news(ctx: Context, category: str = "general", limit: int = 20) -> str:
     """Get general market news headlines.
 
     category: 'general', 'forex', 'crypto', or 'merger'.
@@ -1430,11 +1455,11 @@ def get_market_news(ctx: Context, category: str = "general", limit: int = 20) ->
 
     Requires [finnhub] section in ~/.tradingrc.
     """
-    return _finnhub(ctx).get(fh.MARKET_NEWS, fh.MarketNewsRequest(category)).to_output()
+    return (await _finnhub(ctx).get(fh.MARKET_NEWS, fh.MarketNewsRequest(category))).to_output()
 
 
 @mcp.tool()
-def get_earnings_calendar(
+async def get_earnings_calendar(
     ctx: Context,
     from_date: str,
     to_date: str,
@@ -1451,7 +1476,7 @@ def get_earnings_calendar(
 
     Requires [finnhub] section in ~/.tradingrc.
     """
-    resp = _finnhub(ctx).get(fh.EARNINGS_CALENDAR, fh.DateRangeRequest(from_date, to_date))
+    resp = await _finnhub(ctx).get(fh.EARNINGS_CALENDAR, fh.DateRangeRequest(from_date, to_date))
     if symbol:
         resp.earnings = [e for e in resp.earnings if e.get("symbol", "").upper() == symbol.upper()]
     resp.earnings = resp.earnings[:limit]
@@ -1459,7 +1484,7 @@ def get_earnings_calendar(
 
 
 @mcp.tool()
-def get_basic_financials(ctx: Context, symbol: str) -> str:
+async def get_basic_financials(ctx: Context, symbol: str) -> str:
     """Get key financial metrics: P/E, P/B, EPS, dividend yield, 52-week high/low,
     market cap, beta, ROE, debt/equity.
 
@@ -1467,7 +1492,8 @@ def get_basic_financials(ctx: Context, symbol: str) -> str:
 
     Requires [finnhub] section in ~/.tradingrc.
     """
-    return _finnhub(ctx).get(fh.BASIC_FINANCIALS, fh.BasicFinancialsRequest(symbol)).to_output()
+    resp = await _finnhub(ctx).get(fh.BASIC_FINANCIALS, fh.BasicFinancialsRequest(symbol))
+    return resp.to_output()
 
 
 @mcp.tool()
@@ -1502,7 +1528,7 @@ def get_eps_estimates(ctx: Context, symbol: str) -> str:
 
 
 @mcp.tool()
-def get_recommendation_trends(ctx: Context, symbol: str) -> str:
+async def get_recommendation_trends(ctx: Context, symbol: str) -> str:
     """Get analyst recommendation trends: counts of strong buy, buy, hold, sell, and
     strong sell ratings by month.
 
@@ -1510,7 +1536,7 @@ def get_recommendation_trends(ctx: Context, symbol: str) -> str:
 
     Requires [finnhub] section in ~/.tradingrc.
     """
-    return _finnhub(ctx).get(fh.RECOMMENDATIONS, fh.SymbolRequest(symbol)).to_output()
+    return (await _finnhub(ctx).get(fh.RECOMMENDATIONS, fh.SymbolRequest(symbol))).to_output()
 
 
 @mcp.tool()
@@ -1539,7 +1565,7 @@ def get_price_target(ctx: Context, symbol: str) -> str:
 
 
 @mcp.tool()
-def get_insider_transactions(ctx: Context, symbol: str, limit: int = 20) -> str:
+async def get_insider_transactions(ctx: Context, symbol: str, limit: int = 20) -> str:
     """Get recent insider transactions: buys, sells, and grants by company officers
     and directors.
 
@@ -1548,20 +1574,20 @@ def get_insider_transactions(ctx: Context, symbol: str, limit: int = 20) -> str:
 
     Requires [finnhub] section in ~/.tradingrc.
     """
-    resp = _finnhub(ctx).get(fh.INSIDER_TRANSACTIONS, fh.SymbolRequest(symbol))
+    resp = await _finnhub(ctx).get(fh.INSIDER_TRANSACTIONS, fh.SymbolRequest(symbol))
     resp.transactions = resp.transactions[:limit]
     return resp.to_output()
 
 
 @mcp.tool()
-def get_company_peers(ctx: Context, symbol: str) -> str:
+async def get_company_peers(ctx: Context, symbol: str) -> str:
     """Get a list of peer/competitor symbols for a company.
 
     symbol: ticker symbol (e.g. 'AAPL').
 
     Requires [finnhub] section in ~/.tradingrc.
     """
-    return _finnhub(ctx).get(fh.PEERS, fh.SymbolRequest(symbol)).to_output()
+    return (await _finnhub(ctx).get(fh.PEERS, fh.SymbolRequest(symbol))).to_output()
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1570,18 +1596,20 @@ def get_company_peers(ctx: Context, symbol: str) -> str:
 
 
 @mcp.tool()
-def get_company_profile(ctx: Context, symbol: str) -> str:
+async def get_company_profile(ctx: Context, symbol: str) -> str:
     """Get company profile: name, price, market cap, beta, avg volume, last dividend,
     52-week range, sector, industry, exchange, and CEO.
 
     symbol: ticker symbol (e.g. 'AAPL').
     Requires [fmp] section in ~/.tradingrc.
     """
-    return _fmp(ctx).get(fmp.PROFILE, fmp.SymbolRequest(symbol)).to_output()
+    return (await _fmp(ctx).get(fmp.PROFILE, fmp.SymbolRequest(symbol))).to_output()
 
 
 @mcp.tool()
-def get_income_statement(ctx: Context, symbol: str, period: str = "annual", limit: int = 4) -> str:
+async def get_income_statement(
+    ctx: Context, symbol: str, period: str = "annual", limit: int = 4
+) -> str:
     """Get income statement from SEC filings: revenue, cost of revenue, gross profit,
     operating income, net income, EPS.
 
@@ -1591,12 +1619,16 @@ def get_income_statement(ctx: Context, symbol: str, period: str = "annual", limi
     Requires [finnhub] section in ~/.tradingrc.
     """
     freq = "quarterly" if period in ("quarter", "quarterly") else "annual"
-    result = _finnhub(ctx).get(fh.FINANCIALS_REPORTED, fh.FinancialsReportedRequest(symbol, freq))
+    result = await _finnhub(ctx).get(
+        fh.FINANCIALS_REPORTED, fh.FinancialsReportedRequest(symbol, freq)
+    )
     return result.income_markdown(limit)
 
 
 @mcp.tool()
-def get_balance_sheet(ctx: Context, symbol: str, period: str = "annual", limit: int = 4) -> str:
+async def get_balance_sheet(
+    ctx: Context, symbol: str, period: str = "annual", limit: int = 4
+) -> str:
     """Get balance sheet from SEC filings: cash, current assets, total assets,
     current liabilities, long-term debt, total liabilities, total equity.
 
@@ -1606,12 +1638,14 @@ def get_balance_sheet(ctx: Context, symbol: str, period: str = "annual", limit: 
     Requires [finnhub] section in ~/.tradingrc.
     """
     freq = "quarterly" if period in ("quarter", "quarterly") else "annual"
-    result = _finnhub(ctx).get(fh.FINANCIALS_REPORTED, fh.FinancialsReportedRequest(symbol, freq))
+    result = await _finnhub(ctx).get(
+        fh.FINANCIALS_REPORTED, fh.FinancialsReportedRequest(symbol, freq)
+    )
     return result.balance_sheet_markdown(limit)
 
 
 @mcp.tool()
-def get_cash_flow(ctx: Context, symbol: str, period: str = "annual", limit: int = 4) -> str:
+async def get_cash_flow(ctx: Context, symbol: str, period: str = "annual", limit: int = 4) -> str:
     """Get cash flow statement from SEC filings: operating cash flow, capex,
     investing/financing cash flows, dividends, buybacks.
 
@@ -1621,12 +1655,14 @@ def get_cash_flow(ctx: Context, symbol: str, period: str = "annual", limit: int 
     Requires [finnhub] section in ~/.tradingrc.
     """
     freq = "quarterly" if period in ("quarter", "quarterly") else "annual"
-    result = _finnhub(ctx).get(fh.FINANCIALS_REPORTED, fh.FinancialsReportedRequest(symbol, freq))
+    result = await _finnhub(ctx).get(
+        fh.FINANCIALS_REPORTED, fh.FinancialsReportedRequest(symbol, freq)
+    )
     return result.cash_flow_markdown(limit)
 
 
 @mcp.tool()
-def get_key_metrics(ctx: Context, symbol: str, period: str = "annual", limit: int = 4) -> str:
+async def get_key_metrics(ctx: Context, symbol: str, period: str = "annual", limit: int = 4) -> str:
     """Get key financial metrics: EV/EBITDA, ROE, ROA, current ratio, debt/equity, FCF yield.
 
     symbol: ticker symbol (e.g. 'AAPL').
@@ -1634,11 +1670,12 @@ def get_key_metrics(ctx: Context, symbol: str, period: str = "annual", limit: in
     limit: number of periods to return (default 4).
     Requires [fmp] section in ~/.tradingrc.
     """
-    return _fmp(ctx).get(fmp.KEY_METRICS, fmp.FinancialRequest(symbol, period, limit)).to_output()
+    resp = await _fmp(ctx).get(fmp.KEY_METRICS, fmp.FinancialRequest(symbol, period, limit))
+    return resp.to_output()
 
 
 @mcp.tool()
-def get_dividend_history(ctx: Context, symbol: str) -> str:
+async def get_dividend_history(ctx: Context, symbol: str) -> str:
     """Get dividend payment history: ex-date, pay date, record date, amount.
 
     symbol: ticker symbol (e.g. 'AAPL').
@@ -1647,30 +1684,32 @@ def get_dividend_history(ctx: Context, symbol: str) -> str:
     fmp_client = ctx.request_context.lifespan_context.get("fmp")
     if fmp_client:
         try:
-            return fmp_client.get(fmp.DIVIDEND_HISTORY, fmp.SymbolRequest(symbol)).to_output()
+            resp = await fmp_client.get(fmp.DIVIDEND_HISTORY, fmp.SymbolRequest(symbol))
+            return resp.to_output()
         except ValueError:
             pass  # FMP paywall — fall through to TastyTrade
     tt_client = ctx.request_context.lifespan_context.get("tastytrade")
     if tt_client:
-        return tt_client.get(tt.DIVIDEND_HISTORY, tt.DividendHistoryRequest(symbol)).to_output()
+        resp = await tt_client.get(tt.DIVIDEND_HISTORY, tt.DividendHistoryRequest(symbol))
+        return resp.to_output()
     raise RuntimeError(
         "No dividend data source available. Add [fmp] or [tastytrade] to ~/.tradingrc"
     )
 
 
 @mcp.tool()
-def get_fmp_earnings_calendar(ctx: Context, symbol: str, limit: int = 5) -> str:
+async def get_fmp_earnings_calendar(ctx: Context, symbol: str, limit: int = 5) -> str:
     """Get earnings history: date, EPS estimate/actual, revenue estimate/actual.
 
     symbol: ticker symbol (e.g. 'AAPL').
     limit: number of recent earnings to return (default 5).
     Requires [fmp] section in ~/.tradingrc.
     """
-    return _fmp(ctx).get(fmp.EARNINGS, fmp.EarningsRequest(symbol, limit)).to_output()
+    return (await _fmp(ctx).get(fmp.EARNINGS, fmp.EarningsRequest(symbol, limit))).to_output()
 
 
 @mcp.tool()
-def get_sector_performance(ctx: Context, date: str, exchange: str = "NYSE") -> str:
+async def get_sector_performance(ctx: Context, date: str, exchange: str = "NYSE") -> str:
     """Get sector performance for a specific date: average percentage change for each
     of 11 sectors (Technology, Healthcare, Financial Services, etc.), sorted best to worst.
 
@@ -1683,10 +1722,8 @@ def get_sector_performance(ctx: Context, date: str, exchange: str = "NYSE") -> s
     Requires [fmp] section in ~/.tradingrc.
     """
     return (
-        _fmp(ctx)
-        .get(fmp.SECTOR_PERFORMANCE, fmp.SectorPerformanceRequest(date, exchange))
-        .to_output()
-    )
+        await _fmp(ctx).get(fmp.SECTOR_PERFORMANCE, fmp.SectorPerformanceRequest(date, exchange))
+    ).to_output()
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1695,7 +1732,7 @@ def get_sector_performance(ctx: Context, date: str, exchange: str = "NYSE") -> s
 
 
 @mcp.tool()
-def get_economic_data(
+async def get_economic_data(
     ctx: Context, series_id: str, limit: int = 12, sort_order: str = "desc"
 ) -> str:
     """Get historical values for a FRED economic data series.
@@ -1709,31 +1746,31 @@ def get_economic_data(
     Requires [fred] section in ~/.tradingrc.
     """
     req = fred.GetObservationsRequest(series_id, limit, sort_order)
-    return _fred(ctx).get(fred.OBSERVATIONS, req).to_output()
+    return (await _fred(ctx).get(fred.OBSERVATIONS, req)).to_output()
 
 
 @mcp.tool()
-def get_fred_series_info(ctx: Context, series_id: str) -> str:
+async def get_fred_series_info(ctx: Context, series_id: str) -> str:
     """Get metadata for a FRED series: title, frequency, units, seasonal adjustment.
 
     series_id: FRED series ID (e.g. 'CPIAUCSL', 'GDP', 'VIXCLS').
     Requires [fred] section in ~/.tradingrc.
     """
-    return _fred(ctx).get(fred.SERIES_INFO, fred.SeriesIdRequest(series_id)).to_output()
+    return (await _fred(ctx).get(fred.SERIES_INFO, fred.SeriesIdRequest(series_id))).to_output()
 
 
 @mcp.tool()
-def get_upcoming_economic_releases(ctx: Context, limit: int = 20) -> str:
+async def get_upcoming_economic_releases(ctx: Context, limit: int = 20) -> str:
     """Get upcoming FRED data release dates: when CPI, GDP, jobs report will be published.
 
     limit: number of upcoming releases to return (default 20).
     Requires [fred] section in ~/.tradingrc.
     """
-    return _fred(ctx).get(fred.RELEASES, fred.GetReleasesRequest(limit)).to_output()
+    return (await _fred(ctx).get(fred.RELEASES, fred.GetReleasesRequest(limit))).to_output()
 
 
 @mcp.tool()
-def search_fred_series(ctx: Context, query: str, limit: int = 10) -> str:
+async def search_fred_series(ctx: Context, query: str, limit: int = 10) -> str:
     """Search for FRED economic data series by keyword.
 
     query: search terms (e.g. 'inflation', 'housing starts', 'consumer credit').
@@ -1742,7 +1779,7 @@ def search_fred_series(ctx: Context, query: str, limit: int = 10) -> str:
     Use the returned series_id with get_economic_data to fetch actual values.
     Requires [fred] section in ~/.tradingrc.
     """
-    return _fred(ctx).get(fred.SEARCH, fred.SearchRequest(query, limit)).to_output()
+    return (await _fred(ctx).get(fred.SEARCH, fred.SearchRequest(query, limit))).to_output()
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1774,21 +1811,12 @@ async def get_market_regime(ctx: Context) -> str:
     tt_client = ctx.request_context.lifespan_context.get("tastytrade")
 
     # Fetch all required data concurrently
-    tasks: list = [
-        asyncio.to_thread(
-            fred_client.get, fred.OBSERVATIONS, fred.GetObservationsRequest("VIXCLS", 1)
-        ),
-        asyncio.to_thread(
-            fred_client.get, fred.OBSERVATIONS, fred.GetObservationsRequest("VXVCLS", 1)
-        ),
-        asyncio.to_thread(
-            fred_client.get, fred.OBSERVATIONS, fred.GetObservationsRequest("T10Y2Y", 1)
-        ),
-        asyncio.to_thread(
-            fred_client.get, fred.OBSERVATIONS, fred.GetObservationsRequest("FEDFUNDS", 2)
-        ),
-        asyncio.to_thread(
-            tradier.get,
+    tasks = [
+        fred_client.get(fred.OBSERVATIONS, fred.GetObservationsRequest("VIXCLS", 1)),
+        fred_client.get(fred.OBSERVATIONS, fred.GetObservationsRequest("VXVCLS", 1)),
+        fred_client.get(fred.OBSERVATIONS, fred.GetObservationsRequest("T10Y2Y", 1)),
+        fred_client.get(fred.OBSERVATIONS, fred.GetObservationsRequest("FEDFUNDS", 2)),
+        tradier.get(
             t.HISTORY,
             t.GetHistoryRequest("SPY", "daily", start=_year_ago(date.today()).isoformat()),
         ),
@@ -1797,16 +1825,13 @@ async def get_market_regime(ctx: Context) -> str:
     # Optional providers
     if fmp_client:
         tasks.append(
-            asyncio.to_thread(
-                fmp_client.get,
+            fmp_client.get(
                 fmp.SECTOR_PERFORMANCE,
                 fmp.SectorPerformanceRequest(date.today().isoformat()),
             )
         )
     if tt_client:
-        tasks.append(
-            asyncio.to_thread(tt_client.get, tt.MARKET_METRICS, tt.MarketMetricsRequest("SPY"))
-        )
+        tasks.append(tt_client.get(tt.MARKET_METRICS, tt.MarketMetricsRequest("SPY")))
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -1879,13 +1904,195 @@ async def get_market_regime(ctx: Context) -> str:
     return f"## Market Regime\n\n{kv_table(data)}"
 
 
+@mcp.tool()
+async def get_conviction_metrics(ctx: Context, symbol: str) -> str:
+    """Compute position sizing metrics from the decision framework: PEG ratio,
+    drawdown %, operating margin trend, and recommended position size.
+
+    Pulls P/E + ROE from Finnhub basic financials, quarterly revenue and operating
+    income from SEC filings, and current price / 52W high from Tradier quotes.
+    Returns all computed values in one call — replaces manual math across
+    get_basic_financials + get_income_statement + get_quote.
+
+    symbol: ticker symbol (e.g. 'ADBE').
+
+    Requires [finnhub] and [tradier] sections in ~/.tradingrc.
+    """
+    from trading_clients.table_helpers import kv_table
+
+    finnhub = _finnhub(ctx)
+    tradier = _tradier(ctx)
+
+    async def _finnhub_data():
+        basics = await finnhub.get(fh.BASIC_FINANCIALS, fh.BasicFinancialsRequest(symbol))
+        fin = await finnhub.get(
+            fh.FINANCIALS_REPORTED, fh.FinancialsReportedRequest(symbol, "quarterly")
+        )
+        return basics, fin
+
+    results = await asyncio.gather(
+        _finnhub_data(),
+        tradier.get(t.QUOTES, t.GetQuotesRequest(symbol)),
+        return_exceptions=True,
+    )
+
+    if isinstance(results[0], BaseException):
+        basics, fin = None, None
+    else:
+        basics, fin = results[0]
+    quote_resp = results[1] if not isinstance(results[1], BaseException) else None
+
+    metric = basics.data.get("metric", {}) if basics else {}
+    pe = metric.get("peNormalizedAnnual")
+    roe = metric.get("roeTTM")
+    de = metric.get("totalDebt/totalEquityAnnual")
+
+    q = quote_resp.quotes[0] if quote_resp and quote_resp.quotes else {}
+    price = q.get("last")
+    high_52w = q.get("week_52_high")
+
+    quarters = fin.income_numeric(8) if fin else []
+
+    # ── Drawdown ──
+    drawdown_pct = None
+    if price and high_52w and high_52w > 0:
+        drawdown_pct = (price - high_52w) / high_52w * 100
+
+    # ── Revenue growth (YoY) ──
+    # Match most recent quarter to same quarter ~1 year ago by period date
+    rev_growth = None
+    current_q = None
+    prior_q = None
+    if len(quarters) >= 2:
+        current_q = quarters[0]
+        current_rev = current_q.get("Revenue")
+        current_period = current_q.get("period", "")
+        # Find the same quarter from prior year (period ~12 months earlier)
+        if current_rev and current_period:
+            try:
+                from datetime import date as dt_date
+
+                cp = dt_date.fromisoformat(current_period)
+                for q_row in quarters[1:]:
+                    qp = q_row.get("period", "")
+                    if not qp:
+                        continue
+                    pp = dt_date.fromisoformat(qp)
+                    months_diff = (cp.year - pp.year) * 12 + (cp.month - pp.month)
+                    if 10 <= months_diff <= 14:
+                        prior_rev = q_row.get("Revenue")
+                        if prior_rev and prior_rev > 0:
+                            prior_q = q_row
+                            rev_growth = (current_rev - prior_rev) / prior_rev * 100
+                        break
+            except ValueError:
+                pass
+
+    # ── Operating margin trend ──
+    margins: list[tuple[str, float]] = []
+    for q_row in quarters[:4]:
+        rev = q_row.get("Revenue")
+        op_inc = q_row.get("Operating Income")
+        period = q_row.get("period", "")
+        if rev and op_inc and rev > 0:
+            margins.append((period, op_inc / rev * 100))
+
+    margin_trend = None
+    if len(margins) >= 2:
+        # Compare most recent to previous quarter
+        if margins[0][1] > margins[1][1] + 0.5:
+            margin_trend = "Expanding"
+        elif margins[0][1] < margins[1][1] - 0.5:
+            margin_trend = "Compressing"
+        else:
+            margin_trend = "Stable"
+
+    # ── PEG ──
+    peg = None
+    peg_valid = True
+    peg_note = ""
+    if pe is not None and rev_growth is not None:
+        if rev_growth <= 0:
+            peg_valid = False
+            peg_note = "Negative/zero growth — PEG not meaningful, use raw P/E"
+        elif margin_trend == "Compressing":
+            peg_valid = False
+            peg_note = "Margins compressing — PEG unreliable, use raw P/E"
+        else:
+            peg = pe / rev_growth
+
+    # ── Position size recommendation ──
+    if peg is not None and peg_valid:
+        if peg < 1.5:
+            size = "Full (2 contracts / 200 shares) — PEG < 1.5"
+        elif peg <= 3.0:
+            size = "Standard (1 contract / 100 shares) — PEG 1.5-3.0"
+        else:
+            size = "Reduced (1 contract / 50 shares) — PEG > 3.0"
+        if pe and pe > 80:
+            size += " | P/E >80 hard cap: never full-size"
+    elif pe is not None:
+        if pe < 15:
+            size = "Full (2 contracts / 200 shares) — P/E < 15"
+        elif pe <= 25:
+            size = "Standard (1 contract / 100 shares) — P/E 15-25"
+        else:
+            size = "Reduced (1 contract / 50 shares) — P/E > 25"
+    else:
+        size = "Unable to determine — missing P/E data"
+
+    # ── Build output ──
+    data: dict[str, str] = {"Symbol": symbol}
+
+    if price:
+        data["Price"] = f"${price:,.2f}"
+    if high_52w:
+        data["52W High"] = f"${high_52w:,.2f}"
+    if drawdown_pct is not None:
+        data["Drawdown"] = f"{drawdown_pct:+.1f}%"
+
+    if pe is not None:
+        data["P/E (TTM)"] = f"{pe:.1f}"
+    if roe is not None:
+        data["ROE (TTM)"] = f"{roe:.1f}%"
+    if de is not None:
+        data["Debt/Equity"] = f"{de:.2f}"
+
+    if current_q and prior_q:
+        cr = current_q.get("Revenue")
+        pr = prior_q.get("Revenue")
+        data["Revenue (Current Q)"] = (
+            f"${cr / 1e9:.2f}B" if cr and cr >= 1e9 else (f"${cr / 1e6:.0f}M" if cr else "N/A")
+        )
+        data["Revenue (Prior YoY Q)"] = (
+            f"${pr / 1e9:.2f}B" if pr and pr >= 1e9 else (f"${pr / 1e6:.0f}M" if pr else "N/A")
+        )
+    if rev_growth is not None:
+        data["Revenue Growth (YoY)"] = f"{rev_growth:.1f}%"
+
+    if margins:
+        margin_strs = [f"{p[:7]} {m:.1f}%" for p, m in margins]
+        data["Operating Margin"] = " → ".join(margin_strs)
+    if margin_trend:
+        data["Margin Trend"] = margin_trend
+
+    if peg is not None and peg_valid:
+        data["PEG"] = f"{peg:.2f}"
+    elif peg_note:
+        data["PEG"] = peg_note
+
+    data["Position Size"] = size
+
+    return kv_table(data)
+
+
 # ═══════════════════════════════════════════════════════════════
 # ALPHA VANTAGE — News Sentiment, Market Movers
 # ═══════════════════════════════════════════════════════════════
 
 
 @mcp.tool()
-def get_news_sentiment(
+async def get_news_sentiment(
     ctx: Context,
     tickers: str | None = None,
     topics: str | None = None,
@@ -1902,21 +2109,21 @@ def get_news_sentiment(
     Requires [alphavantage] section in ~/.tradingrc.
     """
     return (
-        _alphavantage(ctx)
-        .get(av.SENTIMENT, av.SentimentRequest(tickers, topics, limit=limit))
-        .to_output()
-    )
+        await _alphavantage(ctx).get(
+            av.SENTIMENT, av.SentimentRequest(tickers, topics, limit=limit)
+        )
+    ).to_output()
 
 
 @mcp.tool()
-def get_top_movers(ctx: Context) -> str:
+async def get_top_movers(ctx: Context) -> str:
     """Get today's top market movers: top 20 gainers, top 20 losers, and most actively
     traded stocks.
 
     Rate limit: 25 requests/day. Use sparingly.
     Requires [alphavantage] section in ~/.tradingrc.
     """
-    return _alphavantage(ctx).get(av.MOVERS, av.MoversRequest()).to_output()
+    return (await _alphavantage(ctx).get(av.MOVERS, av.MoversRequest())).to_output()
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1925,7 +2132,7 @@ def get_top_movers(ctx: Context) -> str:
 
 
 @mcp.tool()
-def get_iv_metrics(ctx: Context, symbols: str) -> str:
+async def get_iv_metrics(ctx: Context, symbols: str) -> str:
     """Get implied volatility metrics: IV rank, IV percentile, IV index, 30-day IV,
     5-day IV change, next earnings date, and liquidity rating.
 
@@ -1937,11 +2144,12 @@ def get_iv_metrics(ctx: Context, symbols: str) -> str:
 
     Requires [tastytrade] section in ~/.tradingrc.
     """
-    return _tastytrade(ctx).get(tt.MARKET_METRICS, tt.MarketMetricsRequest(symbols)).to_output()
+    resp = await _tastytrade(ctx).get(tt.MARKET_METRICS, tt.MarketMetricsRequest(symbols))
+    return resp.to_output()
 
 
 @mcp.tool()
-def get_public_watchlists(ctx: Context) -> str:
+async def get_public_watchlists(ctx: Context) -> str:
     """List all TastyTrade curated watchlists with symbol counts.
 
     Includes sector lists, high IV rank names, liquid options, dividend aristocrats,
@@ -1950,11 +2158,11 @@ def get_public_watchlists(ctx: Context) -> str:
 
     Requires [tastytrade] section in ~/.tradingrc.
     """
-    return _tastytrade(ctx).get(tt.PUBLIC_WATCHLISTS, tt.EmptyRequest()).to_output()
+    return (await _tastytrade(ctx).get(tt.PUBLIC_WATCHLISTS, tt.EmptyRequest())).to_output()
 
 
 @mcp.tool()
-def get_public_watchlist(ctx: Context, name: str) -> str:
+async def get_public_watchlist(ctx: Context, name: str) -> str:
     """Get all symbols in a TastyTrade curated watchlist.
 
     name: watchlist name (e.g. 'tasty IVR', 'High Options Volume',
@@ -1963,11 +2171,11 @@ def get_public_watchlist(ctx: Context, name: str) -> str:
 
     Requires [tastytrade] section in ~/.tradingrc.
     """
-    return _tastytrade(ctx).get(tt.PUBLIC_WATCHLIST, tt.WatchlistRequest(name)).to_output()
+    return (await _tastytrade(ctx).get(tt.PUBLIC_WATCHLIST, tt.WatchlistRequest(name))).to_output()
 
 
 @mcp.tool()
-def backtest_strategy(
+async def backtest_strategy(
     ctx: Context,
     symbol: str,
     start_date: str,
@@ -2019,12 +2227,10 @@ def backtest_strategy(
     Note: backtests run asynchronously and may take 1-3 minutes.
     Requires [tastytrade] section in ~/.tradingrc.
     """
-    import time
-
     client = _tastytrade(ctx)
 
     # Create the backtest
-    result = client.post(
+    result = await client.post(
         tt.BACKTEST_CREATE,
         tt.BacktestRequest(
             symbol=symbol,
@@ -2041,10 +2247,10 @@ def backtest_strategy(
 
     # Poll until complete (up to 5 minutes)
     for _ in range(100):
-        result = client.get(tt.BACKTEST_GET, tt.BacktestIdRequest(bt_id))
+        result = await client.get(tt.BACKTEST_GET, tt.BacktestIdRequest(bt_id))
         if result.data.get("status") == "completed":
             return result.to_output()
-        time.sleep(3)
+        await asyncio.sleep(3)
 
     return f"Backtest {bt_id} still running. Check back later."
 
