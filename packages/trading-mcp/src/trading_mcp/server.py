@@ -653,6 +653,98 @@ async def get_csp_utilization(
 
 
 @mcp.tool()
+async def get_cc_coverage(
+    ctx: Context,
+    account_id: str,
+) -> str:
+    """Calculate covered call coverage ratio per underlying in a Webull account.
+
+    For each stock position with short calls, shows total shares, covered shares,
+    uncovered shares, and coverage %. Use before writing new CCs to decide how
+    many contracts to sell.
+
+    Coverage guidance from the decision framework:
+    - 0-25%: High conviction hold (minimal income, max upside)
+    - 50-75%: Growth with income (balanced)
+    - 75-100%: Exit/neutral (max income, capped upside)
+
+    account_id: Webull account ID.
+    """
+    from trading_clients.table_helpers import fmt_number, list_table
+
+    client = _webull(ctx)
+    aid = client.ensure_account_id(account_id)
+
+    pos_resp = await _webull_get_with_retry(client, POSITIONS, AccountRequest(aid))
+    positions = pos_resp.to_normalized()
+
+    # Collect shares and short calls per underlying
+    shares_by_sym: dict[str, float] = {}
+    calls_by_sym: dict[str, list[dict]] = {}
+
+    for p in positions:
+        if p.get("is_cash"):
+            continue
+        if p.get("is_option"):
+            # Short calls: negative quantity, option_type == "call"
+            if p.get("option_type") == "call" and p.get("quantity", 0) < 0:
+                sym = p.get("underlying", "")
+                calls_by_sym.setdefault(sym, []).append(p)
+        else:
+            sym = p.get("symbol", "")
+            qty = p.get("quantity", 0)
+            if qty > 0:
+                shares_by_sym[sym] = shares_by_sym.get(sym, 0) + qty
+
+    # Build coverage table for symbols that have either shares or short calls
+    all_syms = sorted(set(shares_by_sym) | set(calls_by_sym))
+    if not all_syms:
+        return "(no stock or short call positions found)"
+
+    rows: list[dict[str, str]] = []
+    for sym in all_syms:
+        total_shares = shares_by_sym.get(sym, 0)
+        calls = calls_by_sym.get(sym, [])
+        covered_contracts = sum(abs(c.get("quantity", 0)) for c in calls)
+        covered_shares = covered_contracts * 100
+        uncovered = max(0, total_shares - covered_shares)
+        coverage_pct = (covered_shares / total_shares * 100) if total_shares > 0 else 0
+
+        # Determine coverage label
+        if coverage_pct == 0:
+            label = "None"
+        elif coverage_pct <= 25:
+            label = "High conviction"
+        elif coverage_pct <= 50:
+            label = "Moderate"
+        elif coverage_pct <= 75:
+            label = "Growth + income"
+        else:
+            label = "Exit/neutral"
+
+        row: dict[str, str] = {
+            "Symbol": sym,
+            "Shares": fmt_number(total_shares, 0),
+            "Covered": fmt_number(covered_shares, 0),
+            "Uncovered": fmt_number(uncovered, 0),
+            "Coverage": f"{coverage_pct:.0f}%",
+            "Label": label,
+        }
+
+        # Show call details inline if any
+        if calls:
+            call_details = ", ".join(
+                f"${fmt_number(c.get('strike'))} {c.get('expiration', '')}"
+                for c in calls
+            )
+            row["Calls"] = call_details
+
+        rows.append(row)
+
+    return f"## CC Coverage Ratio\n\n{list_table(rows)}"
+
+
+@mcp.tool()
 async def get_cc_chain_pnl(
     ctx: Context,
     account_id: str,
