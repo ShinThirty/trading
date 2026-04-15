@@ -475,6 +475,11 @@ def get_portfolio_summary(
             positions = []
             errors[f"{label} (positions)"] = str(e)
 
+        # Reclassify cash equivalents (SGOV, etc.) from market_value to cash
+        cash_equiv_value = sum(p["value"] for p in positions if p.get("is_cash"))
+        cash += cash_equiv_value
+        mv -= cash_equiv_value
+
         summaries.append(
             AccountSummary(
                 account_id=aid,

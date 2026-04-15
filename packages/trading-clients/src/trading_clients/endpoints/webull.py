@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from trading_clients.endpoint import BodyRequest, Endpoint, ParamsRequest
+from trading_clients.portfolio import CASH_EQUIVALENTS
 from trading_clients.table_helpers import fmt_number, kv_table, list_table
 
 
@@ -265,6 +266,7 @@ class PositionsResponse:
                     (lg for lg in legs if lg.get("instrument_type") == "OPTION"),
                     None,
                 )
+                is_cash_equiv = symbol in CASH_EQUIVALENTS
                 pos: dict[str, Any] = {
                     "symbol": symbol,
                     "quantity": sf(p.get("quantity")),
@@ -274,7 +276,7 @@ class PositionsResponse:
                     "pnl": sf(p.get("unrealized_profit_loss")),
                     "pnl_pct": pnl_pct,
                     "is_option": option_leg is not None,
-                    "is_cash": False,
+                    "is_cash": is_cash_equiv,
                 }
                 if option_leg:
                     pos["underlying"] = symbol

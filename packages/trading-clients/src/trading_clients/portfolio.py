@@ -12,6 +12,8 @@ from typing import Any
 
 from trading_clients.table_helpers import fmt_number, list_table
 
+CASH_EQUIVALENTS = {"FDRXX", "SGOV"}
+
 
 def _safe_float(val: Any) -> float:
     """Parse a value to float, stripping commas, dollar signs, and percent signs."""
@@ -132,19 +134,19 @@ def parse_fidelity_csv(path: str) -> AccountSummary:
             label = (row.get("Account Name") or Path(path).stem).strip()
             account_id = (row.get("Account Number") or Path(path).stem).strip()
 
-        # Handle cash / money market
-        if "FDRXX" in symbol:
+        # Handle cash / money market / cash equivalents
+        if symbol in CASH_EQUIVALENTS:
             value = _safe_float(row.get("Current Value"))
-            cash = value
+            cash += value
             positions.append(
                 {
-                    "symbol": "FDRXX",
-                    "quantity": 0,
-                    "last": 0.0,
-                    "cost": 0.0,
+                    "symbol": symbol,
+                    "quantity": _safe_float(row.get("Quantity")),
+                    "last": _safe_float(row.get("Last Price")),
+                    "cost": _safe_float(row.get("Average Cost Basis")),
                     "value": value,
-                    "pnl": 0.0,
-                    "pnl_pct": 0.0,
+                    "pnl": _safe_float(row.get("Total Gain/Loss Dollar")),
+                    "pnl_pct": _safe_float(row.get("Total Gain/Loss Percent")),
                     "is_option": False,
                     "is_cash": True,
                 }
