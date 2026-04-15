@@ -540,6 +540,118 @@ async def get_portfolio_summary(
     return compact_portfolio_summary(portfolio, f.name)
 
 
+@mcp.tool()
+async def get_csp_utilization(
+    ctx: Context,
+    fidelity_folder: str | None = None,
+) -> str:
+    """Calculate CSP collateral utilization across all accounts.
+
+    Shows total cash-secured put collateral vs available cash (including SGOV),
+    utilization %, remaining capacity, and per-position detail. Use before
+    writing new CSPs to check the 60% cash utilization limit.
+
+    fidelity_folder: path to folder containing Fidelity Positions_*.csv files
+      (e.g. '~/Downloads/fidelity'). Omit to show Webull only.
+    """
+    from trading_clients.portfolio import AccountSummary, parse_fidelity_folder
+    from trading_clients.table_helpers import fmt_number, kv_table, list_table
+
+    client = _webull(ctx)
+    summaries: list[AccountSummary] = []
+
+    # 1. Fetch Webull accounts, balances, and positions
+    account_list = await client.get(ACCOUNT_LIST, EmptyRequest())
+    for acct in account_list.accounts:
+        aid = acct.get("account_id", "")
+        label = acct.get("account_label", acct.get("account_type", aid))
+        atype = acct.get("account_type", "")
+
+        try:
+            bal = await _webull_get_with_retry(client, BALANCE, AccountRequest(aid))
+        except Exception:
+            continue
+
+        sf = _safe_float
+        cash = sf(bal.cash_balance)
+
+        try:
+            pos_resp = await _webull_get_with_retry(client, POSITIONS, AccountRequest(aid))
+            positions = pos_resp.to_normalized()
+        except Exception:
+            positions = []
+
+        cash_equiv_value = sum(p["value"] for p in positions if p.get("is_cash"))
+        cash += cash_equiv_value
+
+        summaries.append(
+            AccountSummary(
+                account_id=aid,
+                label=label,
+                broker="Webull",
+                account_type=atype,
+                cash=cash,
+                positions=positions,
+            )
+        )
+
+    # 2. Parse Fidelity CSVs if provided
+    if fidelity_folder:
+        try:
+            summaries.extend(parse_fidelity_folder(fidelity_folder))
+        except Exception:
+            pass
+
+    # 3. Find all short puts and compute collateral
+    csp_rows: list[dict[str, str]] = []
+    total_collateral = 0.0
+    total_cash = 0.0
+
+    for acct in summaries:
+        total_cash += acct.cash
+        for p in acct.positions:
+            if not p.get("is_option"):
+                continue
+            if p.get("option_type") != "put":
+                continue
+            qty = p.get("quantity", 0)
+            if qty >= 0:
+                continue
+            strike = p.get("strike", 0)
+            contracts = abs(qty)
+            collateral = strike * 100 * contracts
+            total_collateral += collateral
+            csp_rows.append({
+                "Account": acct.label,
+                "Underlying": p.get("underlying", p.get("symbol", "")),
+                "Strike": fmt_number(strike),
+                "Exp": p.get("expiration", ""),
+                "Qty": fmt_number(contracts, 0),
+                "Collateral": fmt_number(collateral),
+            })
+
+    # 4. Build output
+    utilization = (total_collateral / total_cash * 100) if total_cash > 0 else 0
+    remaining = total_cash - total_collateral
+    status = "OVER LIMIT" if utilization > 60 else "OK"
+
+    summary = kv_table({
+        "Total Cash (incl. SGOV)": f"${fmt_number(total_cash)}",
+        "Total CSP Collateral": f"${fmt_number(total_collateral)}",
+        "Utilization": f"{utilization:.1f}% ({status} — limit 60%)",
+        "Remaining Capacity": f"${fmt_number(remaining)}",
+    })
+
+    sections = [f"## CSP Collateral Utilization\n\n{summary}"]
+    if csp_rows:
+        sections.append(f"\n### Open CSPs ({len(csp_rows)} positions)\n")
+        sections.append(list_table(csp_rows))
+    else:
+        sections.append("\nNo open CSP positions found.")
+
+    return "\n".join(sections)
+
+
 async def _webull_get_with_retry(client: Any, endpoint: Any, request: Any, retries: int = 2) -> Any:
     """Call client.get with retry on 429 rate limit errors."""
     for attempt in range(retries + 1):
