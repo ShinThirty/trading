@@ -2110,8 +2110,10 @@ async def get_income_statement(
     if output != "(no data)":
         return output
 
-    # Fallback to Yahoo Finance
-    data = yfc.income_statement(symbol, freq, limit)
+    # Fallback to Yahoo Finance (blocking I/O — run in thread)
+    import asyncio
+
+    data = await asyncio.to_thread(yfc.income_statement, symbol, freq, limit)
     if not data:
         return f"(no income statement data for {symbol})"
 
