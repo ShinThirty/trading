@@ -134,6 +134,14 @@ def parse_fidelity_csv(path: str) -> AccountSummary:
             label = (row.get("Account Name") or Path(path).stem).strip()
             account_id = (row.get("Account Number") or Path(path).stem).strip()
 
+        # Normalize: strip trailing asterisks (e.g. FDRXX** → FDRXX)
+        symbol = symbol.rstrip("*")
+
+        # Handle pending activity as cash adjustment (unsettled transactions)
+        if symbol.lower() == "pending activity":
+            cash += _safe_float(row.get("Current Value"))
+            continue
+
         # Handle cash / money market / cash equivalents
         if symbol in CASH_EQUIVALENTS:
             value = _safe_float(row.get("Current Value"))
@@ -208,7 +216,7 @@ def parse_fidelity_folder(folder: str) -> list[AccountSummary]:
     folder_path = Path(folder).expanduser()
     if not folder_path.is_dir():
         return []
-    csvs = sorted(folder_path.glob("Positions_*.csv"))
+    csvs = sorted(folder_path.glob("*Positions*.csv"))
     return [parse_fidelity_csv(str(p)) for p in csvs]
 
 

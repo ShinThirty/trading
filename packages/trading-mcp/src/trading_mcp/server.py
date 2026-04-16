@@ -653,6 +653,156 @@ async def get_csp_utilization(
 
 
 @mcp.tool()
+async def get_free_capital(
+    ctx: Context,
+    fidelity_folder: str | None = None,
+) -> str:
+    """Calculate free (deployable) capital across all brokerage accounts.
+
+    For each account shows total cash/money market, CSP collateral tied up,
+    liquid holdings (SGOV), and resulting free capital.
+
+    Free Capital = Cash/MM + Liquid Holdings - CSP Collateral
+
+    Rules:
+    - Short puts tie up collateral = strike x 100 per contract
+    - Covered calls do NOT tie up additional collateral
+    - Long options don't tie up collateral
+    - SGOV (0-3 month treasury) is treated as liquid/deployable
+
+    fidelity_folder: path to folder containing Fidelity Portfolio_Positions_*.csv
+      files (e.g. '~/Downloads/fidelity'). Omit to show Webull only.
+    """
+    from trading_clients.portfolio import AccountSummary, parse_fidelity_folder
+    from trading_clients.table_helpers import fmt_number, kv_table, list_table
+
+    client = _webull(ctx)
+    summaries: list[AccountSummary] = []
+    errors: dict[str, str] = {}
+
+    # 1. Fetch Webull accounts, balances, and positions
+    account_list = await client.get(ACCOUNT_LIST, EmptyRequest())
+    for acct in account_list.accounts:
+        aid = acct.get("account_id", "")
+        label = acct.get("account_label", acct.get("account_type", aid))
+        atype = acct.get("account_type", "")
+
+        try:
+            bal = await _webull_get_with_retry(client, BALANCE, AccountRequest(aid))
+        except Exception as e:
+            errors[label] = str(e)
+            continue
+
+        sf = _safe_float
+        cash = sf(bal.cash_balance)
+
+        try:
+            pos_resp = await _webull_get_with_retry(client, POSITIONS, AccountRequest(aid))
+            positions = pos_resp.to_normalized()
+        except Exception as e:
+            positions = []
+            errors[f"{label} (positions)"] = str(e)
+
+        cash_equiv_value = sum(p["value"] for p in positions if p.get("is_cash"))
+        cash += cash_equiv_value
+
+        summaries.append(
+            AccountSummary(
+                account_id=aid,
+                label=label,
+                broker="Webull",
+                account_type=atype,
+                cash=cash,
+                positions=positions,
+            )
+        )
+
+    # 2. Parse Fidelity CSVs if provided
+    if fidelity_folder:
+        try:
+            summaries.extend(parse_fidelity_folder(fidelity_folder))
+        except Exception as e:
+            errors["Fidelity"] = str(e)
+
+    # 3. Compute per-account free capital
+    rows: list[dict[str, str]] = []
+    grand_cash = 0.0
+    grand_collateral = 0.0
+    grand_liquid = 0.0
+    grand_free = 0.0
+
+    for acct in summaries:
+        # Separate SGOV (liquid holdings) from cash total
+        # acct.cash already includes SGOV from CASH_EQUIVALENTS reclassification
+        acct_liquid = sum(
+            p.get("value", 0.0)
+            for p in acct.positions
+            if p.get("is_cash") and p.get("symbol", "").upper() == "SGOV"
+        )
+        acct_cash_mm = acct.cash - acct_liquid
+
+        # CSP collateral: short puts only
+        acct_collateral = 0.0
+        for p in acct.positions:
+            if not p.get("is_option"):
+                continue
+            if p.get("option_type") != "put":
+                continue
+            qty = p.get("quantity", 0)
+            if qty >= 0:
+                continue
+            strike = p.get("strike", 0)
+            acct_collateral += strike * 100 * abs(qty)
+
+        acct_free = acct.cash - acct_collateral
+
+        rows.append({
+            "Account": acct.label,
+            "Broker": acct.broker,
+            "Cash/MM": f"${fmt_number(acct_cash_mm)}",
+            "SGOV": f"${fmt_number(acct_liquid)}",
+            "CSP Collateral": f"${fmt_number(acct_collateral)}",
+            "Free Capital": f"${fmt_number(acct_free)}",
+        })
+
+        grand_cash += acct_cash_mm
+        grand_collateral += acct_collateral
+        grand_liquid += acct_liquid
+        grand_free += acct_free
+
+    # Total row
+    rows.append({
+        "Account": "**Total**",
+        "Broker": "",
+        "Cash/MM": f"**${fmt_number(grand_cash)}**",
+        "SGOV": f"**${fmt_number(grand_liquid)}**",
+        "CSP Collateral": f"**${fmt_number(grand_collateral)}**",
+        "Free Capital": f"**${fmt_number(grand_free)}**",
+    })
+
+    # 4. Build output
+    total_available = grand_cash + grand_liquid
+    utilization = (grand_collateral / total_available * 100) if total_available > 0 else 0
+
+    summary = kv_table({
+        "Total Available (Cash + SGOV)": f"${fmt_number(total_available)}",
+        "Total CSP Collateral": f"${fmt_number(grand_collateral)}",
+        "Total Free Capital": f"${fmt_number(grand_free)}",
+        "Collateral Utilization": f"{utilization:.1f}%",
+    })
+
+    sections = [f"## Free Capital\n\n{summary}"]
+    sections.append(f"\n### Per Account\n\n{list_table(rows)}")
+
+    if errors:
+        sections.append("\n### Errors")
+        for label, err in errors.items():
+            sections.append(f"- {label}: {err}")
+
+    return "\n".join(sections)
+
+
+@mcp.tool()
 async def get_cc_coverage(
     ctx: Context,
     account_id: str,
