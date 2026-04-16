@@ -52,15 +52,17 @@ How many shares to cover determines how much upside you retain. This is the most
 
 ## CC Step 4: Strike Selection
 
-| CC Intent | Strike Target | Rationale |
-|-----------|--------------|-----------|
-| **Thesis exit** | **Your exit price** | The strike IS the exit — pick where you'd sell outright |
-| **Income generation** | **10-15% OTM** | High probability of expiring worthless, small steady premium |
-| **Growth with income** | **8-12% OTM** | Enough room for modest appreciation, decent premium |
-| **Orderly liquidation** | **ATM to 5% OTM** | You want assignment — maximize premium on the way out |
+| CC Intent | Delta Target | Approx. % OTM | Rationale |
+|-----------|-------------|---------------|-----------|
+| **Thesis exit** | **N/A — your exit price** | Varies | The strike IS the exit — pick where you'd sell outright |
+| **Income generation** | **15-20 delta** | ~10-15% OTM | ~80-85% chance of keeping shares, small steady premium |
+| **Growth with income** | **25-30 delta** | ~8-12% OTM | Enough room for modest appreciation, decent premium |
+| **Orderly liquidation** | **40-50 delta** | ATM to 5% OTM | You want assignment — maximize premium on the way out |
+
+**Why delta, not % OTM:** A 10% OTM call on AAPL (25% IV) has roughly a 5-10% chance of being hit. The same 10% OTM on ALAB (60% IV) has a 30-40% chance. Delta normalizes for volatility — a 20-delta call is a 20% probability of assignment whether the stock's IV is 20% or 80%. Always check delta from the chain, not just distance from spot.
 
 **Modifiers:**
-- **Underwater position (cost > current price):** Never sell calls below your cost basis unless you're intentionally liquidating at a loss. A CC that locks in a guaranteed loss is worse than no CC.
+- **Underwater position (cost > current price):** Default: don't sell calls below your cost basis — a CC that locks in a guaranteed loss is worse than no CC. **Exception:** If the stock is >30% underwater but the thesis is intact, sell CCs below cost basis on **25% of shares only**. This gives you premium to lower cost basis, and if the 25% gets called away at a loss, you harvest a tax loss to offset winners while keeping 75% uncovered for recovery. Wash sale caution: don't buy more shares or sell CSPs on the same name within 30 days of the loss, or the deduction is disallowed.
 - **Post-earnings:** Strike can be tighter (closer to ATM) — event risk is gone, fundamentals are known, less chance of a gap.
 - **Pre-earnings:** Sell THROUGH earnings to capture elevated IV — crush works in the CC seller's favor. Or wait until after. Never sell a pre-earnings expiry with a tight strike — gap risk.
 - **Technical resistance:** If the stock has a clear ceiling (e.g., prior high, round number), use it as a natural strike.
@@ -92,7 +94,10 @@ How many shares to cover determines how much upside you retain. This is the most
 | Stock **approaching strike** (thesis exit) | **Let it happen.** The strike was your target. Don't roll. |
 | Stock **drops significantly** after writing | CC is winning. Buy back at 80%+ profit, reassess thesis before writing another at lower strike. |
 | **Earnings approaching** with short-term CC | Buy back if <50% profit realized — gap risk isn't worth remaining premium |
+| **Ex-dividend approaching** with ITM CC | Buy back or roll if the call's extrinsic value < dividend amount — early assignment is likely (see below) |
 | **Thesis changes** fundamentally | Roll strike/expiry to match new thesis, or buy back entirely to remove the cap |
+
+**Ex-dividend early assignment:** If your short call is ITM heading into an ex-dividend date, institutional market makers will exercise early to capture the dividend when the call's remaining extrinsic (time) value is less than the dividend amount. At that point, exercising and collecting the dividend is more profitable than holding the option. Check `get_dividend_history` for upcoming ex-dates on dividend-paying names (AVGO, QCOM, etc.) and buy back or roll ITM calls before ex-date if extrinsic < dividend.
 
 **The cardinal sin: thesis drift disguised as conviction.**
 
