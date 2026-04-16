@@ -54,6 +54,8 @@ should not need to ask for this — surface it automatically.
 | **Wheel** (CSP -> CC -> repeat) | CSP -> assigned -> covered call -> called away -> CSP again | Ongoing income + entry/exit cycle on a name you'll keep trading | Full strike notional |
 | **Put ratio spread** (sell 2 puts, buy 1 lower put) | Extra premium, partially defined risk | Aggressive discount, willing to own 200 shares | ~1.5x collateral |
 
+**Wheel caveat:** The mechanical Wheel (CSP → CC → called away → repeat) caps your upside by design — the CC leg removes shares right before big moves. If your intent is truly *Enter at Discount* on a name you expect to appreciate significantly, prefer CSP → hold with selective CC overlay (see [covered-call-overlay.md](covered-call-overlay.md)) rather than mechanical wheeling. The Wheel works best for range-bound names where you're comfortable repeatedly entering and exiting around a price band.
+
 **CSP strike selection by drawdown:**
 
 | Drawdown | Strike target | Rationale |
@@ -149,6 +151,8 @@ The key difference from Accumulate/Enter at Discount: you have **timing convicti
 
 **When to prefer bull call spread over BPS:** When you want defined cost upfront rather than assignment risk. Better for names you'd rather not own 100 shares of but want upside exposure.
 
+**Credit-to-width ratio (all credit spreads):** Collect at least **30% of the strike width** in net credit, or reject the trade. On a $10-wide BPS, the minimum acceptable credit is $3.00 — anything less means poor risk-to-reward (risking $7 to make $3). If the ratio is below 30%, either widen the spread, move closer to ATM, or wait for higher IV.
+
 **Key decision factors:**
 - IV-HV > 10%: Favor credit strategies (BPS) — sell overpriced premium
 - IV-HV < 5%: Favor debit strategies (bull call spread) — buy fairly priced options
@@ -214,6 +218,8 @@ The key difference from Accumulate/Enter at Discount: you have **timing convicti
 | **Long put** | Buy OTM put | Simple directional, unlimited profit | Premium paid |
 | **Put backspread** (sell 1 put, buy 2 lower puts) | Crash bet, small credit or small debit | Tail risk / blowup thesis | Net credit or small debit |
 
+**Put backspread management:** This structure has a "Valley of Death" — if the stock drifts slowly into the long put strikes (instead of crashing through them), the short put is at max loss while the long puts have little intrinsic value. The backspread requires a *violent* move, not a slow bleed. Close early if the underlying is grinding toward the long strikes without momentum. The worst outcome is a slow decline that pins between your short and long strikes at expiry.
+
 **When to use:**
 - Thesis is explicitly bearish (CRWV pattern)
 - Hedging portfolio beta (index puts on SPY/QQQ)
@@ -223,6 +229,7 @@ The key difference from Accumulate/Enter at Discount: you have **timing convicti
 - IV-HV < 5%: Favor debit strategies (bear put spread, long put) — buy fairly priced
 - Post-earnings gap-down play: Buy puts AFTER the gap to avoid IV crush (L2 strategy)
 - Crash conviction: Put backspread — pay little or nothing, profit big on blowup
+- **Credit-to-width ratio applies** to bear call spreads — same 30% minimum as BPS (see Defined-Risk section)
 
 ---
 

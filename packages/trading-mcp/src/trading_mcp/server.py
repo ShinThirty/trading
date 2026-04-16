@@ -1309,6 +1309,27 @@ async def analyze_option_strategy(
     data["Max Profit"] = f"${fmt_number(result['max_profit'])}"
     data["Max Loss"] = f"${fmt_number(result['max_loss'])}"
 
+    # Credit-to-width ratio for credit spreads
+    _CREDIT_SPREAD_TYPES = {
+        "Bull Put Spread",
+        "Bear Call Spread",
+        "Iron Condor",
+        "Iron Butterfly",
+    }
+    strategy_type = result.get("strategy_type", "")
+    if strategy_type in _CREDIT_SPREAD_TYPES and net > 0:
+        strikes = sorted({el["strike"] for el in enriched_legs})
+        if len(strikes) >= 2:
+            if strategy_type in ("Iron Condor", "Iron Butterfly"):
+                # Use the wider side (put spread or call spread width)
+                width = (strikes[-1] - strikes[-2] + strikes[1] - strikes[0]) / 2
+            else:
+                width = strikes[-1] - strikes[0]
+            if width > 0:
+                ratio = per_share / width * 100
+                warning = " \u26a0 Below 30% minimum" if ratio < 30 else ""
+                data["Credit/Width"] = f"{ratio:.0f}%{warning}"
+
     if result["breakevens"]:
         data["Breakeven"] = ", ".join(f"${fmt_number(b)}" for b in result["breakevens"])
 
