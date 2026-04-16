@@ -69,6 +69,34 @@ def earnings_estimate(symbol: str) -> list[dict]:
     return rows
 
 
+def income_statement(symbol: str, period: str = "quarterly", limit: int = 4) -> list[dict]:
+    """Get income statement data. Returns list of quarterly/annual row dicts.
+
+    Each dict has: period, revenue, cost_of_revenue, gross_profit,
+    operating_income, net_income, eps (basic).
+    """
+    t = yf.Ticker(symbol)
+    df = t.quarterly_income_stmt if period == "quarterly" else t.income_stmt
+    if df is None or df.empty:
+        return []
+
+    def _get(label: str) -> float | None:
+        return float(df.loc[label, col]) if label in df.index else None
+
+    rows = []
+    for col in df.columns[:limit]:
+        rows.append({
+            "period": col.strftime("%Y-%m-%d"),
+            "revenue": _get("Total Revenue"),
+            "cost_of_revenue": _get("Cost Of Revenue"),
+            "gross_profit": _get("Gross Profit"),
+            "operating_income": _get("Operating Income"),
+            "net_income": _get("Net Income"),
+            "eps": _get("Basic EPS"),
+        })
+    return rows
+
+
 def analyst_price_targets(symbol: str) -> dict:
     """Get analyst consensus price targets: current, low, mean, median, high."""
     return yf.Ticker(symbol).get_analyst_price_targets() or {}

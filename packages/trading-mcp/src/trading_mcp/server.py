@@ -2097,13 +2097,45 @@ async def get_income_statement(
     symbol: ticker symbol (e.g. 'AAPL').
     period: 'annual' or 'quarterly'.
     limit: number of periods to return (default 4).
-    Requires [finnhub] section in ~/.tradingrc.
+    Requires [finnhub] section in ~/.tradingrc. Falls back to Yahoo Finance
+    if Finnhub has no data for the symbol.
     """
+    from trading_clients.table_helpers import fmt_number, list_table
+
     freq = "quarterly" if period in ("quarter", "quarterly") else "annual"
     result = await _finnhub(ctx).get(
         fh.FINANCIALS_REPORTED, fh.FinancialsReportedRequest(symbol, freq)
     )
-    return result.income_markdown(limit)
+    output = result.income_markdown(limit)
+    if output != "(no data)":
+        return output
+
+    # Fallback to Yahoo Finance
+    data = yfc.income_statement(symbol, freq, limit)
+    if not data:
+        return f"(no income statement data for {symbol})"
+
+    def _fmt(v: float | None) -> str:
+        if v is None:
+            return ""
+        if abs(v) >= 1e9:
+            return f"{v / 1e9:.2f}B"
+        if abs(v) >= 1e6:
+            return f"{v / 1e6:.1f}M"
+        return fmt_number(v)
+
+    rows = [
+        {
+            "Period": d["period"],
+            "Revenue": _fmt(d["revenue"]),
+            "Gross Profit": _fmt(d["gross_profit"]),
+            "Operating Income": _fmt(d["operating_income"]),
+            "Net Income": _fmt(d["net_income"]),
+            "EPS": fmt_number(d["eps"]),
+        }
+        for d in data
+    ]
+    return f"(via Yahoo Finance)\n{list_table(rows)}"
 
 
 @mcp.tool()
