@@ -2124,11 +2124,15 @@ async def get_market_regime(ctx: Context) -> str:
     tasks = [
         fred_client.get(fred.OBSERVATIONS, fred.GetObservationsRequest("VIXCLS", 1)),
         fred_client.get(fred.OBSERVATIONS, fred.GetObservationsRequest("VXVCLS", 1)),
-        fred_client.get(fred.OBSERVATIONS, fred.GetObservationsRequest("T10Y2Y", 1)),
+        fred_client.get(fred.OBSERVATIONS, fred.GetObservationsRequest("T10Y2Y", 130)),
         fred_client.get(fred.OBSERVATIONS, fred.GetObservationsRequest("FEDFUNDS", 2)),
         tradier.get(
             t.HISTORY,
             t.GetHistoryRequest("SPY", "daily", start=_year_ago(date.today()).isoformat()),
+        ),
+        tradier.get(
+            t.HISTORY,
+            t.GetHistoryRequest("SMH", "daily", start=_year_ago(date.today()).isoformat()),
         ),
     ]
 
@@ -2151,9 +2155,10 @@ async def get_market_regime(ctx: Context) -> str:
     spread_resp = results[2] if not isinstance(results[2], BaseException) else None
     ff_resp = results[3] if not isinstance(results[3], BaseException) else None
     spy_resp = results[4] if not isinstance(results[4], BaseException) else None
+    smh_resp = results[5] if not isinstance(results[5], BaseException) else None
 
     # Unpack optional results
-    idx = 5
+    idx = 6
     sector_resp = None
     if fmp_client:
         sector_resp = results[idx] if not isinstance(results[idx], BaseException) else None
@@ -2183,7 +2188,8 @@ async def get_market_regime(ctx: Context) -> str:
         data["Trend"] = f"{label} ({detail})"
 
     # Macro regime
-    spread_val, _ = regime.parse_fred_value(spread_resp.observations if spread_resp else [])
+    spread_observations = spread_resp.observations if spread_resp else []
+    spread_val, _ = regime.parse_fred_value(spread_observations)
     ff_observations = ff_resp.observations if ff_resp else []
     ff_val, _ = regime.parse_fred_value(ff_observations)
     prev_ff_obs = ff_observations[1:] if len(ff_observations) > 1 else []
@@ -2191,10 +2197,31 @@ async def get_market_regime(ctx: Context) -> str:
     label, detail = regime.classify_macro(spread_val, ff_val, prev_ff_val)
     data["Macro"] = f"{label} ({detail})"
 
+    # Un-inversion trap detection (needs ~6 months of T10Y2Y history)
+    spread_history = []
+    for obs in spread_observations:
+        v = obs.get("value", ".")
+        if v != ".":
+            try:
+                spread_history.append(float(v))
+            except (ValueError, TypeError):
+                pass
+    trap_warning = regime.detect_uninversion_trap(spread_history, spread_val, ff_val, prev_ff_val)
+    if trap_warning:
+        data["\u26a0 Macro"] = trap_warning
+
     # Sector regime (optional)
     if sector_resp and sector_resp.sectors:
         label, detail = regime.classify_sectors(sector_resp.sectors)
         data["Sectors"] = f"{label} ({detail})"
+
+    # Semi divergence detection (SMH vs SPY relative performance)
+    if smh_resp and smh_resp.days and spy_resp and spy_resp.days:
+        smh_closes = [float(b["close"]) for b in smh_resp.days]
+        spy_closes_all = [float(b["close"]) for b in spy_resp.days]
+        semi_warning = regime.detect_semi_divergence(smh_closes, spy_closes_all)
+        if semi_warning:
+            data["\u26a0 Sectors"] = semi_warning
 
     # IV enrichment (optional)
     if tt_resp and tt_resp.items:

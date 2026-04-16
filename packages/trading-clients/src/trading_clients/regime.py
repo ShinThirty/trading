@@ -106,6 +106,17 @@ def classify_trend(
     return "Sideways", detail
 
 
+def _fed_direction(fed_funds: float | None, prev_fed_funds: float | None) -> str:
+    """Determine Fed funds direction from two consecutive observations."""
+    if fed_funds is None or prev_fed_funds is None:
+        return "unknown"
+    if fed_funds > prev_fed_funds:
+        return "rising"
+    if fed_funds < prev_fed_funds:
+        return "falling"
+    return "stable"
+
+
 def classify_macro(
     yield_spread: float | None,
     fed_funds: float | None,
@@ -133,18 +144,69 @@ def classify_macro(
 
     # Fed funds direction
     if fed_funds is not None:
-        if prev_fed_funds is not None:
-            if fed_funds > prev_fed_funds:
-                direction = "rising"
-            elif fed_funds < prev_fed_funds:
-                direction = "falling"
-            else:
-                direction = "stable"
+        direction = _fed_direction(fed_funds, prev_fed_funds)
+        if direction != "unknown":
             detail += f", Fed funds {fed_funds:.2f}% {direction}"
         else:
             detail += f", Fed funds {fed_funds:.2f}%"
 
     return label, detail
+
+
+def detect_uninversion_trap(
+    spread_history: list[float],
+    current_spread: float | None,
+    fed_funds: float | None,
+    prev_fed_funds: float | None,
+) -> str | None:
+    """Detect the yield curve un-inversion trap.
+
+    The recession signal is the inversion. The recession itself typically
+    arrives when the curve un-inverts — the Fed cuts the short end,
+    steepening the curve rapidly. If the curve was recently inverted and
+    is now steepening while the Fed is cutting, this is maximum danger.
+
+    spread_history: recent T10Y2Y daily values (newest first), ~6 months.
+    current_spread: latest T10Y2Y value.
+    fed_funds / prev_fed_funds: for direction detection.
+
+    Returns a warning string, or None if the trap is not active.
+    """
+    if current_spread is None or not spread_history:
+        return None
+
+    # Was the curve inverted at any point in the history?
+    inverted_values = [v for v in spread_history if v <= 0.0]
+    if not inverted_values:
+        return None
+
+    # How long ago? Find the most recent inverted observation index
+    # (history is newest-first, so index = how many observations ago)
+    months_ago = None
+    for i, v in enumerate(spread_history):
+        if v <= 0.0:
+            # ~21 trading days per month
+            months_ago = round(i / 21)
+            break
+
+    direction = _fed_direction(fed_funds, prev_fed_funds)
+
+    if current_spread > 1.0 and direction == "falling":
+        ago = f"{months_ago}mo ago" if months_ago else "recently"
+        return (
+            f"UN-INVERSION TRAP: curve was inverted {ago}, "
+            f"now Steep ({current_spread:+.2f}%) with falling rates — maximum danger"
+        )
+
+    if current_spread > 0.0 and direction == "falling":
+        ago = f"{months_ago}mo ago" if months_ago else "recently"
+        return (
+            f"Un-inversion watch: curve was inverted {ago}, "
+            f"now {current_spread:+.2f}% with falling rates — "
+            f"monitor for acceleration toward Steep (>1.0%)"
+        )
+
+    return None
 
 
 def classify_sectors(sectors: list[dict]) -> tuple[str, str]:
@@ -198,6 +260,39 @@ def classify_sectors(sectors: list[dict]) -> tuple[str, str]:
     if risk_off_avg > risk_on_avg and risk_off_avg > 0:
         return "Risk-Off", detail
     return "Rotation", detail
+
+
+def detect_semi_divergence(
+    smh_closes: list[float],
+    spy_closes: list[float],
+    lookback: int = 20,
+) -> str | None:
+    """Detect semiconductor divergence from broad market.
+
+    Big Tech (AAPL, MSFT) can mask semi weakness, producing a false
+    Risk-On signal while semis are rolling over. Compare SMH vs SPY
+    relative performance over the lookback period.
+
+    smh_closes / spy_closes: daily closes (oldest first), at least
+    lookback+1 bars.
+
+    Returns a warning string, or None if no divergence.
+    """
+    if len(smh_closes) < lookback + 1 or len(spy_closes) < lookback + 1:
+        return None
+
+    smh_return = (smh_closes[-1] - smh_closes[-1 - lookback]) / smh_closes[-1 - lookback] * 100
+    spy_return = (spy_closes[-1] - spy_closes[-1 - lookback]) / spy_closes[-1 - lookback] * 100
+    divergence = smh_return - spy_return
+
+    # Flag if SMH underperforms SPY by more than 3% over the lookback period
+    if divergence < -3.0:
+        return (
+            f"Semi divergence: SMH {smh_return:+.1f}% vs SPY {spy_return:+.1f}% "
+            f"({lookback}d) — cycle may be turning despite Risk-On sector label"
+        )
+
+    return None
 
 
 def _short_sector(name: str) -> str:

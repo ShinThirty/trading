@@ -12,7 +12,7 @@ Based on VIX level with a term structure override.
 |-------|-----------|---------------|----------------------|
 | **Low** | <15 | Complacency, cheap options | Buy vol (straddles/strangles). Options are cheap. |
 | **Normal** | 15-25 | Typical trading environment | Default framework applies as-is |
-| **Elevated** | 25-35 | Fear rising, rich premiums | Sell premium (CSPs, iron condors). Options are expensive. |
+| **Elevated** | 25-35 | Fear rising, rich premiums | Sell premium but reduce size by 50% and widen strikes. Vega expansion risk — if VIX spikes from 30→45, short options get crushed even without price movement. |
 | **Crisis** | >=35 or backwardation | Active panic | Widen strikes, reduce size, favor defined-risk. Cash is a position. |
 
 **Backwardation override:** If the 30-day VIX exceeds the 3-month VIX (VXVCLS), the term structure is inverted — the market is pricing more risk in the near term than further out. This signals active panic and overrides to Crisis regardless of the absolute VIX level. A VIX of 22 in backwardation is more dangerous than a VIX of 28 in normal contango.
@@ -39,6 +39,8 @@ Based on the 10-year minus 2-year Treasury yield spread, with Fed funds rate dir
 
 Fed funds direction (rising / stable / falling) adds context: a falling rate in an inverted curve suggests the Fed is responding to recession risk.
 
+**Un-inversion trap:** The recession signal is the inversion. The recession *itself* typically arrives when the curve un-inverts — the Fed panic-cuts the short end, steepening the curve rapidly. If the spread moves from Inverted to Steep (>1.0%) while Fed funds are falling, this is maximum danger — it looks like "normal expansion" but the rate cuts are confirming the recession has arrived. Override to defensive posture (hedges, cash, smaller sizes). Do not treat rapid un-inversion as a green light.
+
 ### Sectors: Risk-On / Rotation / Risk-Off
 
 Compares average daily performance of high-beta sectors (Tech, Consumer Cyclical, Comm Services) vs defensive sectors (Utilities, Consumer Defensive, Real Estate).
@@ -48,6 +50,8 @@ Compares average daily performance of high-beta sectors (Tech, Consumer Cyclical
 | **Risk-On** | High-beta outperforming, positive | Growth and tech names favored, momentum strategies |
 | **Rotation** | Mixed or all negative | Be selective, don't chase sector momentum |
 | **Risk-Off** | Defensives outperforming, positive | Reduce tech exposure, favor hedges and income strategies |
+
+**Semi divergence check:** The high-beta sector basket includes broad Tech (AAPL, MSFT) which often acts as a safe haven in late-cycle environments due to massive cash piles. This can produce a false Risk-On signal while semiconductors are already rolling over. If your portfolio is semi-concentrated, cross-check SMH vs SPY relative strength. If semis are underperforming broad Tech, the cycle may be turning even if the sector label reads Risk-On.
 
 ## Regime Combinations
 
