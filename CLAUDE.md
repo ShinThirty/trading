@@ -210,6 +210,7 @@ All Webull endpoints use the v2 API (`x-version: v2` header). Stock and option o
 - Client helper functions in server.py (`_webull()`, `_tradier()`, etc.) extract the client from lifespan context and raise a clear error if the provider isn't configured
 - MCP server calls `.to_output()` on response models; option-monitor accesses typed fields directly
 - Ruff rules: E, F, I (isort), UP (pyupgrade). Line length: 100.
+- **Never do manual math.** Always delegate calculations (P&L, PEG, returns, Greeks, position sizing, etc.) to MCP tools. If no suitable MCP tool exists, flag it to the user instead of computing by hand — manual math is error-prone and unverifiable.
 
 ### Output Format Convention
 
