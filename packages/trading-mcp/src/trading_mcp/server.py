@@ -2446,7 +2446,7 @@ async def get_market_regime(ctx: Context) -> str:
 @mcp.tool()
 async def get_conviction_metrics(ctx: Context, symbol: str) -> str:
     """Compute position sizing metrics from the decision framework: PEG ratio,
-    drawdown %, operating margin trend, and recommended position size.
+    drawdown %, operating margin trend, and recommended position size tier.
 
     Pulls P/E + ROE from Finnhub basic financials, quarterly revenue and operating
     income from SEC filings, and current price / 52W high from Tradier quotes.
@@ -2462,24 +2462,18 @@ async def get_conviction_metrics(ctx: Context, symbol: str) -> str:
     finnhub = _finnhub(ctx)
     tradier = _tradier(ctx)
 
-    async def _finnhub_data():
-        basics = await finnhub.get(fh.BASIC_FINANCIALS, fh.BasicFinancialsRequest(symbol))
-        fin = await finnhub.get(
+    basics_r, fin_r, quote_r = await asyncio.gather(
+        finnhub.get(fh.BASIC_FINANCIALS, fh.BasicFinancialsRequest(symbol)),
+        finnhub.get(
             fh.FINANCIALS_REPORTED, fh.FinancialsReportedRequest(symbol, "quarterly")
-        )
-        return basics, fin
-
-    results = await asyncio.gather(
-        _finnhub_data(),
+        ),
         tradier.get(t.QUOTES, t.GetQuotesRequest(symbol)),
         return_exceptions=True,
     )
 
-    if isinstance(results[0], BaseException):
-        basics, fin = None, None
-    else:
-        basics, fin = results[0]
-    quote_resp = results[1] if not isinstance(results[1], BaseException) else None
+    basics = None if isinstance(basics_r, BaseException) else basics_r
+    fin = None if isinstance(fin_r, BaseException) else fin_r
+    quote_resp = None if isinstance(quote_r, BaseException) else quote_r
 
     metric = basics.data.get("metric", {}) if basics else {}
     pe = metric.get("peNormalizedAnnual")
@@ -2551,7 +2545,10 @@ async def get_conviction_metrics(ctx: Context, symbol: str) -> str:
     peg_valid = True
     peg_note = ""
     if pe is not None and rev_growth is not None:
-        if rev_growth <= 0:
+        if pe < 0:
+            peg_valid = False
+            peg_note = "Negative P/E (unprofitable) — PEG not meaningful, use raw P/E"
+        elif rev_growth <= 0:
             peg_valid = False
             peg_note = "Negative/zero growth — PEG not meaningful, use raw P/E"
         elif margin_trend == "Compressing":
@@ -2563,20 +2560,22 @@ async def get_conviction_metrics(ctx: Context, symbol: str) -> str:
     # ── Position size recommendation ──
     if peg is not None and peg_valid:
         if peg < 1.5:
-            size = "Full (2 contracts / 200 shares) — PEG < 1.5"
+            size = "Full — PEG < 1.5"
         elif peg <= 3.0:
-            size = "Standard (1 contract / 100 shares) — PEG 1.5-3.0"
+            size = "Standard — PEG 1.5-3.0"
         else:
-            size = "Reduced (1 contract / 50 shares) — PEG > 3.0"
+            size = "Reduced — PEG > 3.0"
         if pe and pe > 80:
-            size += " | P/E >80 hard cap: never full-size"
-    elif pe is not None:
+            size = "Reduced — PEG > 3.0 | P/E >80 hard cap: never full-size"
+    elif pe is not None and pe > 0:
         if pe < 15:
-            size = "Full (2 contracts / 200 shares) — P/E < 15"
+            size = "Full — P/E < 15"
         elif pe <= 25:
-            size = "Standard (1 contract / 100 shares) — P/E 15-25"
+            size = "Standard — P/E 15-25"
         else:
-            size = "Reduced (1 contract / 50 shares) — P/E > 25"
+            size = "Reduced — P/E > 25"
+    elif pe is not None and pe < 0:
+        size = "Reduced — negative P/E (unprofitable)"
     else:
         size = "Unable to determine — missing P/E data"
 
@@ -2623,6 +2622,49 @@ async def get_conviction_metrics(ctx: Context, symbol: str) -> str:
     data["Position Size"] = size
 
     return kv_table(data)
+
+
+@mcp.tool()
+async def calculate_position_size(
+    ctx: Context, symbol: str, total_assets: float, tier: str = "full"
+) -> str:
+    """Calculate share count for a position based on sizing tier and total portfolio
+    assets. Uses the 10% / 5% / 2% concentration limit from the decision framework.
+
+    Call this after get_conviction_metrics has determined the sizing tier and you are
+    ready to deploy capital.
+
+    The output share count is NOT rounded to 100-share lots. If CSP is the recommended
+    strategy, tell the user to round up to the nearest 100 shares since each CSP
+    contract covers 100 shares.
+
+    symbol: ticker symbol (e.g. 'ADBE').
+    total_assets: total portfolio value in the target account (e.g. 500000).
+    tier: sizing tier from get_conviction_metrics — 'full', 'standard', or 'reduced'.
+    """
+    from trading_clients.table_helpers import kv_table
+
+    fracs = {"full": 0.10, "standard": 0.05, "reduced": 0.02}
+    frac = fracs.get(tier.lower())
+    if frac is None:
+        return f"Invalid tier '{tier}' — use full, standard, or reduced"
+
+    quote_resp = await _tradier(ctx).get(t.QUOTES, t.GetQuotesRequest(symbol, greeks=False))
+    price = quote_resp.quotes[0].get("last", 0) if quote_resp.quotes else 0
+    if not price or price <= 0:
+        return f"Could not get price for {symbol}"
+
+    dollars = total_assets * frac
+    shares = int(dollars / price)
+
+    return kv_table({
+        "Symbol": symbol,
+        "Price": f"${price:,.2f}",
+        "Total Assets": f"${total_assets:,.0f}",
+        "Tier": f"{tier.capitalize()} ({frac:.0%})",
+        "Allocation": f"${dollars:,.0f}",
+        "Shares": str(shares),
+    })
 
 
 # ═══════════════════════════════════════════════════════════════
