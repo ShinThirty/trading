@@ -26,6 +26,8 @@ After screening confirms (or rejects) a thesis, run through these steps in order
 
 Conviction drives intent. Intent drives strategy. Decide intent FIRST — everything else follows.
 
+**Quick start:** Run `get_conviction_metrics` for ROE, D/E, revenue growth, and margin trend. Moat and AI ROI require qualitative judgment — use `get_company_news` and `get_income_statement` for supporting evidence.
+
 **Conviction inputs — what raises or lowers conviction:**
 
 | Factor | High conviction | Low conviction |
