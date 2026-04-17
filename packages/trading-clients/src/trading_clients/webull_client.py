@@ -15,7 +15,7 @@ import httpx
 
 from trading_clients.cache import TTLCache
 from trading_clients.config import WebullConfig, save_webull_token
-from trading_clients.endpoint import _DEFAULT_CONCURRENCY, BaseClient, Endpoint
+from trading_clients.endpoint import ApiError, BaseClient, Endpoint
 from trading_clients.rate_limit import RateLimiter
 
 API_HOST = "api.webull.com"
@@ -29,6 +29,8 @@ RATE_LIMITS: dict[str, tuple[int, float]] = {
     "order_write": (5, 10.0),  # 600 req/60s
     "instruments": (1, 1.0),  # 60 req/60s
 }
+
+CONCURRENCY = 1
 
 
 def _iso8601_now() -> str:
@@ -101,7 +103,7 @@ class WebullClient(BaseClient):
         self._config = config
         self._token: str | None = config.token
         self._http = httpx.AsyncClient(timeout=15, http2=True)
-        self._semaphore = asyncio.Semaphore(_DEFAULT_CONCURRENCY)
+        self._semaphore = asyncio.Semaphore(CONCURRENCY)
         self._cache = TTLCache()
         self._limiter = RateLimiter(RATE_LIMITS)
 
@@ -157,7 +159,7 @@ class WebullClient(BaseClient):
             detail = f"{err.get('error_code', '')} — {err.get('message', resp.text)}"
         except Exception:
             detail = resp.text
-        raise RuntimeError(f"Webull API {resp.status_code}: {detail}")
+        raise ApiError(resp.status_code, f"Webull API {resp.status_code}: {detail}")
 
     async def _request(
         self,

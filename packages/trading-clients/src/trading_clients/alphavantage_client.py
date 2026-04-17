@@ -7,7 +7,7 @@ import httpx
 
 from trading_clients.cache import TTLCache
 from trading_clients.config import AlphaVantageConfig
-from trading_clients.endpoint import _DEFAULT_CONCURRENCY, BaseClient, Endpoint
+from trading_clients.endpoint import BaseClient, Endpoint
 from trading_clients.rate_limit import RateLimiter
 
 BASE_URL = "https://www.alphavantage.co/query"
@@ -16,12 +16,14 @@ RATE_LIMITS: dict[str, tuple[int, float]] = {
     "default": (5, 1.0),  # burst up to 5, then 1 req/s
 }
 
+CONCURRENCY = 1
+
 
 class AlphaVantageClient(BaseClient):
     def __init__(self, config: AlphaVantageConfig) -> None:
         self._api_key = config.api_key
         self._http = httpx.AsyncClient(timeout=15)
-        self._semaphore = asyncio.Semaphore(_DEFAULT_CONCURRENCY)
+        self._semaphore = asyncio.Semaphore(CONCURRENCY)
         self._cache = TTLCache()
         self._limiter = RateLimiter(RATE_LIMITS)
 

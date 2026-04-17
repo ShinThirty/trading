@@ -17,7 +17,7 @@ RATE_LIMITS: dict[str, tuple[int, float]] = {
     "default": (5, 2.0),  # 120 req/min — conservative burst
 }
 
-MAX_CONCURRENT = 5
+CONCURRENCY = 5
 
 
 class TradierClient(BaseClient):
@@ -25,7 +25,7 @@ class TradierClient(BaseClient):
         self._base = SANDBOX_HOST if config.sandbox else PRODUCTION_HOST
         self._account_id = config.account_id
         self._http = httpx.AsyncClient(timeout=15)
-        self._semaphore = asyncio.Semaphore(MAX_CONCURRENT)
+        self._semaphore = asyncio.Semaphore(CONCURRENCY)
         self._headers = {
             "Authorization": f"Bearer {config.api_token}",
             "Accept": "application/json",

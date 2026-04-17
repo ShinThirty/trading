@@ -16,8 +16,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-_DEFAULT_CONCURRENCY = 1
-
 # ── Request mixins ──────────────────────────────────────────
 
 
@@ -54,6 +52,17 @@ class ResponseModel(Protocol):
     def to_output(self) -> str: ...
 
 
+# ── Errors ──────────────────────────────────────────────────
+
+
+class ApiError(RuntimeError):
+    """HTTP error with a preserved integer status code."""
+
+    def __init__(self, status_code: int, message: str) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
 # ── Endpoint ────────────────────────────────────────────────
 
 
@@ -84,9 +93,10 @@ class BaseClient(ABC):
     """Base class for async API clients. Subclasses implement _request() with
     provider-specific auth, HTTP transport, caching, and rate limiting.
 
-    Each client holds an asyncio.Semaphore that serializes concurrent calls.
-    The semaphore is acquired in get/post/put/delete (not _request), so internal
-    HTTP calls (e.g. token refresh) don't double-acquire.
+    Each client holds an asyncio.Semaphore that caps in-flight requests.
+    Concurrency varies per provider (e.g. Webull=1, Tradier=5). The semaphore
+    is acquired in get/post/put/delete (not _request), so internal HTTP calls
+    (e.g. token refresh) don't double-acquire.
     """
 
     _http: Any  # httpx.AsyncClient

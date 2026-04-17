@@ -1,7 +1,8 @@
 import asyncio
+import tempfile
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
@@ -10,6 +11,7 @@ from trading_clients import options as opts
 from trading_clients import regime
 from trading_clients.alphavantage_client import AlphaVantageClient
 from trading_clients.config import load_config
+from trading_clients.endpoint import ApiError
 from trading_clients.endpoints import alphavantage as av
 from trading_clients.endpoints import finnhub as fh
 from trading_clients.endpoints import fmp, fred
@@ -459,8 +461,6 @@ async def get_portfolio_summary(
 
     Note: fetches Webull data sequentially to respect rate limits (~1 req/second).
     """
-    import tempfile
-
     from trading_clients.portfolio import (
         AccountSummary,
         PortfolioSummary,
@@ -490,10 +490,9 @@ async def get_portfolio_summary(
             errors[label] = str(e)
             continue
 
-        sf = _safe_float
-        nlv = sf(bal.net_liquidation)
-        cash = sf(bal.cash_balance)
-        mv = sf(bal.market_value)
+        nlv = _safe_float(bal.net_liquidation)
+        cash = _safe_float(bal.cash_balance)
+        mv = _safe_float(bal.market_value)
 
         try:
             pos_resp = await _webull_get_with_retry(client, POSITIONS, AccountRequest(aid))
@@ -516,8 +515,8 @@ async def get_portfolio_summary(
                 nlv=nlv,
                 cash=cash,
                 market_value=mv,
-                day_pnl=sf(bal.day_pnl),
-                unrealized_pnl=sf(bal.unrealized_pnl),
+                day_pnl=_safe_float(bal.day_pnl),
+                unrealized_pnl=_safe_float(bal.unrealized_pnl),
                 positions=positions,
             )
         )
@@ -572,8 +571,7 @@ async def get_csp_utilization(
         except Exception:
             continue
 
-        sf = _safe_float
-        cash = sf(bal.cash_balance)
+        cash = _safe_float(bal.cash_balance)
 
         try:
             pos_resp = await _webull_get_with_retry(client, POSITIONS, AccountRequest(aid))
@@ -693,8 +691,7 @@ async def get_free_capital(
             errors[label] = str(e)
             continue
 
-        sf = _safe_float
-        cash = sf(bal.cash_balance)
+        cash = _safe_float(bal.cash_balance)
 
         try:
             pos_resp = await _webull_get_with_retry(client, POSITIONS, AccountRequest(aid))
@@ -919,8 +916,7 @@ async def get_cc_chain_pnl(
     aid = client.ensure_account_id(account_id)
 
     if not start_date:
-        start_date = (date.today().replace(day=1) - __import__("datetime").timedelta(days=90)
-                       ).isoformat()
+        start_date = (date.today().replace(day=1) - timedelta(days=90)).isoformat()
 
     response = await client.get(
         ORDER_HISTORY,
@@ -1005,8 +1001,8 @@ async def _webull_get_with_retry(client: Any, endpoint: Any, request: Any, retri
     for attempt in range(retries + 1):
         try:
             return await client.get(endpoint, request)
-        except Exception as e:
-            if "429" in str(e) and attempt < retries:
+        except ApiError as e:
+            if e.status_code == 429 and attempt < retries:
                 await asyncio.sleep(2)
                 continue
             raise
@@ -1037,8 +1033,6 @@ async def get_portfolio_greeks(
 
     Requires [webull] and [tradier] sections in ~/.tradingrc.
     """
-    import tempfile
-
     from trading_clients.portfolio import (
         format_greeks_compact,
         format_greeks_detail,
@@ -1168,12 +1162,15 @@ async def get_option_chain(
 
     Requires [tradier] section in ~/.tradingrc.
     """
-    resp = await _tradier(ctx).get(t.CHAIN, t.GetChainRequest(symbol, expiration, greeks))
-    if resp.options and strike_count > 0:
+    tradier = _tradier(ctx)
+    quote_resp, resp = await asyncio.gather(
+        tradier.get(t.QUOTES, t.GetQuotesRequest(symbol, greeks=False)),
+        tradier.get(t.CHAIN, t.GetChainRequest(symbol, expiration, greeks)),
+    )
+    last_price = quote_resp.quotes[0].get("last", 0) if quote_resp.quotes else 0
+    if resp.options and strike_count > 0 and last_price:
         strikes = sorted({o["strike"] for o in resp.options})
-        mid = (strikes[0] + strikes[-1]) / 2
-        # Find the strike closest to midpoint of the tradeable range (≈ ATM)
-        atm_idx = min(range(len(strikes)), key=lambda i: abs(strikes[i] - mid))
+        atm_idx = min(range(len(strikes)), key=lambda i: abs(strikes[i] - last_price))
         lo = max(0, atm_idx - strike_count)
         hi = min(len(strikes), atm_idx + strike_count + 1)
         keep = set(strikes[lo:hi])
