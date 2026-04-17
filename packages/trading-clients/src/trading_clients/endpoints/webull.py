@@ -3,7 +3,7 @@
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from trading_clients.endpoint import BodyRequest, Endpoint, ParamsRequest
+from trading_clients.endpoint import CONTRACT_MULTIPLIER, BodyRequest, Endpoint, ParamsRequest
 from trading_clients.portfolio import CASH_EQUIVALENTS
 from trading_clients.table_helpers import fmt_number, kv_table, list_table
 
@@ -294,10 +294,10 @@ class PositionsResponse:
                         result.append(
                             {
                                 "symbol": symbol,
-                                "quantity": qty * 100,
+                                "quantity": qty * CONTRACT_MULTIPLIER,
                                 "last": sf(lg.get("last_price")),
                                 "cost": sf(lg.get("cost")),
-                                "value": sf(lg.get("last_price")) * qty * 100,
+                                "value": sf(lg.get("last_price")) * qty * CONTRACT_MULTIPLIER,
                                 "pnl": sf(lg.get("unrealized_profit_loss")),
                                 "pnl_pct": 0.0,
                                 "is_option": False,
@@ -313,7 +313,7 @@ class PositionsResponse:
                                 "quantity": opt_qty,
                                 "last": sf(lg.get("last_price")),
                                 "cost": sf(lg.get("cost")),
-                                "value": sf(lg.get("last_price")) * opt_qty * -100,
+                                "value": sf(lg.get("last_price")) * opt_qty * -CONTRACT_MULTIPLIER,
                                 "pnl": sf(lg.get("unrealized_profit_loss")),
                                 "pnl_pct": 0.0,
                                 "is_option": True,

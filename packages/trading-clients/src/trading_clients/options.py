@@ -6,6 +6,8 @@ Operates on option chain dicts (from Tradier) and OHLCV bar data.
 
 from math import log, sqrt
 
+from trading_clients.endpoint import CONTRACT_MULTIPLIER
+
 
 def parse_occ(symbol: str) -> tuple[str, str, str, float]:
     """Parse OCC option symbol into (underlying, expiration, option_type, strike).
@@ -79,7 +81,7 @@ def aggregate_greeks(
             )
             greeks = greeks_by_symbol.get(occ, {})
             qty = p.get("quantity", 0)
-            multiplier = qty * 100  # each contract = 100 shares
+            multiplier = qty * CONTRACT_MULTIPLIER
 
             pos_delta = (greeks.get("delta") or 0) * multiplier
             pos_gamma = (greeks.get("gamma") or 0) * multiplier

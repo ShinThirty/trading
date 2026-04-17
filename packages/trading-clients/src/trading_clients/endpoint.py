@@ -52,6 +52,10 @@ class ResponseModel(Protocol):
     def to_output(self) -> str: ...
 
 
+# ── Constants ──────────────────────────────────────────────
+
+CONTRACT_MULTIPLIER = 100
+
 # ── Errors ──────────────────────────────────────────────────
 
 

@@ -11,7 +11,7 @@ from trading_clients import options as opts
 from trading_clients import regime
 from trading_clients.alphavantage_client import AlphaVantageClient
 from trading_clients.config import load_config
-from trading_clients.endpoint import ApiError
+from trading_clients.endpoint import CONTRACT_MULTIPLIER, ApiError
 from trading_clients.endpoints import alphavantage as av
 from trading_clients.endpoints import finnhub as fh
 from trading_clients.endpoints import fmp, fred
@@ -617,7 +617,7 @@ async def get_csp_utilization(
                 continue
             strike = p.get("strike", 0)
             contracts = abs(qty)
-            collateral = strike * 100 * contracts
+            collateral = strike * CONTRACT_MULTIPLIER * contracts
             total_collateral += collateral
             csp_rows.append({
                 "Account": acct.label,
@@ -749,7 +749,7 @@ async def get_free_capital(
             if qty >= 0:
                 continue
             strike = p.get("strike", 0)
-            acct_collateral += strike * 100 * abs(qty)
+            acct_collateral += strike * CONTRACT_MULTIPLIER * abs(qty)
 
         acct_free = acct.cash - acct_collateral
 
@@ -853,7 +853,7 @@ async def get_cc_coverage(
         total_shares = shares_by_sym.get(sym, 0)
         calls = calls_by_sym.get(sym, [])
         covered_contracts = sum(abs(c.get("quantity", 0)) for c in calls)
-        covered_shares = covered_contracts * 100
+        covered_shares = covered_contracts * CONTRACT_MULTIPLIER
         uncovered = max(0, total_shares - covered_shares)
         coverage_pct = (covered_shares / total_shares * 100) if total_shares > 0 else 0
 
@@ -959,7 +959,7 @@ async def get_cc_chain_pnl(
         side = o.get("side", "")
         qty = _safe_float(o.get("filled_quantity"))
         price = _safe_float(o.get("filled_price"))
-        amount = price * qty * 100  # options are per-share, 100 shares per contract
+        amount = price * qty * CONTRACT_MULTIPLIER
         leg = o.get("legs", [{}])[0]
 
         if side == "SELL":
@@ -1445,7 +1445,7 @@ async def analyze_option_strategy(
     leg_qtys = [el.get("quantity", 1) for el in enriched_legs]
     units = gcd(*leg_qtys) if leg_qtys else 1
     per_share = net / units
-    total = net * 100
+    total = net * CONTRACT_MULTIPLIER
     if net >= 0:
         data["Net Credit"] = f"${fmt_number(per_share)} per share (${fmt_number(total)} total)"
     else:
@@ -1625,7 +1625,7 @@ async def analyze_roll(
             data["IV"] = f"{r[f'{prefix}mid_iv'] * 100:.1f}%"
 
     net = r["net"]
-    net_total = net * quantity * 100
+    net_total = net * quantity * CONTRACT_MULTIPLIER
     roll_data: dict[str, str] = {
         "Stock Price": fmt_number(stock_price),
         "Roll Type": r["roll_type"],
