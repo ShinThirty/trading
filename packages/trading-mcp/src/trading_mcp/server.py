@@ -2012,7 +2012,7 @@ async def get_basic_financials(ctx: Context, symbol: str) -> str:
 
 
 @mcp.tool()
-def get_eps_estimates(ctx: Context, symbol: str) -> str:
+async def get_eps_estimates(ctx: Context, symbol: str) -> str:
     """Get analyst EPS estimates for upcoming quarters and years: average, high, low,
     number of analysts, year-ago EPS, and growth rate.
 
@@ -2024,7 +2024,7 @@ def get_eps_estimates(ctx: Context, symbol: str) -> str:
     """
     from trading_clients.table_helpers import fmt_number, list_table
 
-    data = yfc.earnings_estimate(symbol)
+    data = await asyncio.to_thread(yfc.earnings_estimate, symbol)
     if not data:
         return f"(no EPS estimates for {symbol})"
     rows = [
@@ -2055,7 +2055,7 @@ async def get_recommendation_trends(ctx: Context, symbol: str) -> str:
 
 
 @mcp.tool()
-def get_price_target(ctx: Context, symbol: str) -> str:
+async def get_price_target(ctx: Context, symbol: str) -> str:
     """Get analyst consensus price target: current price, high, low, mean, and median
     target prices.
 
@@ -2065,7 +2065,7 @@ def get_price_target(ctx: Context, symbol: str) -> str:
     """
     from trading_clients.table_helpers import fmt_number, kv_table
 
-    data = yfc.analyst_price_targets(symbol)
+    data = await asyncio.to_thread(yfc.analyst_price_targets, symbol)
     if not data:
         return f"(no price targets for {symbol})"
     return kv_table(
@@ -2869,7 +2869,7 @@ async def backtest_strategy(
 
 
 @mcp.tool()
-def screen_stocks(
+async def screen_stocks(
     ctx: Context,
     criteria: list[dict],
     sort_field: str = "intradaymarketcap",
@@ -2911,12 +2911,13 @@ def screen_stocks(
 
     Uses Yahoo Finance via yfinance (no API key required). Data is 15-minute delayed.
     """
-    result = yfc.custom_screen(criteria, sort_field, sort_dir == "ASC", limit)
+    ascending = sort_dir == "ASC"
+    result = await asyncio.to_thread(yfc.custom_screen, criteria, sort_field, ascending, limit)
     return ScreenerResponse.from_response(result).to_output()
 
 
 @mcp.tool()
-def get_predefined_screen(ctx: Context, screen_id: str, count: int = 25) -> str:
+async def get_predefined_screen(ctx: Context, screen_id: str, count: int = 25) -> str:
     """Get a predefined stock screen from Yahoo Finance.
 
     screen_id: one of:
@@ -2933,11 +2934,12 @@ def get_predefined_screen(ctx: Context, screen_id: str, count: int = 25) -> str:
 
     Uses Yahoo Finance via yfinance (no API key required). Data is 15-minute delayed.
     """
-    return ScreenerResponse.from_response(yfc.predefined_screen(screen_id, count)).to_output()
+    result = await asyncio.to_thread(yfc.predefined_screen, screen_id, count)
+    return ScreenerResponse.from_response(result).to_output()
 
 
 @mcp.tool()
-def get_institutional_ownership(ctx: Context, symbol: str) -> str:
+async def get_institutional_ownership(ctx: Context, symbol: str) -> str:
     """Get top institutional holders of a stock: holder name, shares held, percentage
     held, position value, and recent change.
 
@@ -2950,7 +2952,7 @@ def get_institutional_ownership(ctx: Context, symbol: str) -> str:
     """
     from trading_clients.table_helpers import fmt_large, fmt_number, list_table
 
-    holders = yfc.institutional_holders(symbol)
+    holders = await asyncio.to_thread(yfc.institutional_holders, symbol)
     if not holders:
         return f"(no institutional ownership data for {symbol})"
     rows = [
@@ -2968,7 +2970,7 @@ def get_institutional_ownership(ctx: Context, symbol: str) -> str:
 
 
 @mcp.tool()
-def get_short_interest(ctx: Context, symbol: str) -> str:
+async def get_short_interest(ctx: Context, symbol: str) -> str:
     """Get short interest data for a stock: shares short, short ratio (days to cover),
     short % of float, and month-over-month change.
 
@@ -2980,7 +2982,7 @@ def get_short_interest(ctx: Context, symbol: str) -> str:
     """
     from trading_clients.table_helpers import fmt_large, fmt_number, kv_table
 
-    data = yfc.short_interest(symbol)
+    data = await asyncio.to_thread(yfc.short_interest, symbol)
     if not any(data.values()):
         return f"(no short interest data for {symbol})"
     result: dict[str, str] = {}
@@ -3001,7 +3003,7 @@ def get_short_interest(ctx: Context, symbol: str) -> str:
 
 
 @mcp.tool()
-def get_youtube_transcript(ctx: Context, url: str) -> str:
+async def get_youtube_transcript(ctx: Context, url: str) -> str:
     """Get the transcript of a YouTube video.
 
     Extracts auto-generated or manual captions and returns the full text.
@@ -3014,17 +3016,22 @@ def get_youtube_transcript(ctx: Context, url: str) -> str:
 
     from youtube_transcript_api import YouTubeTranscriptApi
 
-    # Extract video ID from URL or use as-is
     video_id = url
     m = re.search(r"(?:v=|youtu\.be/|shorts/)([A-Za-z0-9_-]{11})", url)
     if m:
         video_id = m.group(1)
 
-    api = YouTubeTranscriptApi()
-    transcript = api.fetch(video_id)
-    full_text = " ".join(s.text for s in transcript.snippets)
-    kind = "auto-generated" if transcript.is_generated else "manual"
-    return f"**Video ID:** {video_id}\n**Language:** {transcript.language} ({kind})\n\n{full_text}"
+    def _fetch() -> str:
+        api = YouTubeTranscriptApi()
+        transcript = api.fetch(video_id)
+        full_text = " ".join(s.text for s in transcript.snippets)
+        kind = "auto-generated" if transcript.is_generated else "manual"
+        return (
+            f"**Video ID:** {video_id}\n"
+            f"**Language:** {transcript.language} ({kind})\n\n{full_text}"
+        )
+
+    return await asyncio.to_thread(_fetch)
 
 
 # ═══════════════════════════════════════════════════════════════
