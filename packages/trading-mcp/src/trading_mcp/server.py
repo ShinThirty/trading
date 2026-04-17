@@ -1386,7 +1386,19 @@ async def analyze_option_strategy(
     if is_multi_exp:
         from trading_clients.options_multi_exp import analyze_multi_exp_strategy
 
-        result = analyze_multi_exp_strategy(enriched_legs, stock_price)
+        risk_free_rate = 0.0
+        try:
+            fred_client = _fred(ctx)
+            obs = await fred_client.get(
+                fred.OBSERVATIONS, fred.GetObservationsRequest("FEDFUNDS", 1)
+            )
+            if obs.observations:
+                val = obs.observations[0].get("value")
+                if val:
+                    risk_free_rate = float(val) / 100.0
+        except Exception:
+            pass
+        result = analyze_multi_exp_strategy(enriched_legs, stock_price, risk_free_rate)
     else:
         result = opts.strategy_analysis(enriched_legs, stock_price, equity_position)
 
@@ -1495,7 +1507,11 @@ async def analyze_option_strategy(
         data["Static Return"] = f"{result['static_return'] * 100:.2f}%"
 
     if is_multi_exp:
-        data["Note"] = "P&L evaluated at near expiration using Black-Scholes for far-dated legs"
+        rfr_pct = f"{risk_free_rate * 100:.2f}%"
+        data["Note"] = (
+            f"P&L evaluated at near expiration using Black-Scholes (r={rfr_pct})"
+            " for far-dated legs"
+        )
 
     wide_spread_legs = [
         el for el in enriched_legs if (el.get("spread_pct") or 0) > 10

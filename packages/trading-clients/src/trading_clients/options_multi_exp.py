@@ -28,20 +28,24 @@ def _bsm_price(
     tte: float,
     iv: float,
     option_type: str,
+    r: float = 0.0,
 ) -> float:
-    """Black-Scholes option price. tte in years, risk-free rate = 0."""
+    """Black-Scholes option price. tte in years, r = annualized risk-free rate."""
     if tte <= 0 or iv <= 0:
         if option_type == "call":
             return max(stock_price - strike, 0.0)
         return max(strike - stock_price, 0.0)
 
+    from math import exp
+
     sqrt_t = sqrt(tte)
-    d1 = (log(stock_price / strike) + 0.5 * iv * iv * tte) / (iv * sqrt_t)
+    d1 = (log(stock_price / strike) + (r + 0.5 * iv * iv) * tte) / (iv * sqrt_t)
     d2 = d1 - iv * sqrt_t
+    discount = exp(-r * tte)
 
     if option_type == "call":
-        return stock_price * _norm_cdf(d1) - strike * _norm_cdf(d2)
-    return strike * _norm_cdf(-d2) - stock_price * _norm_cdf(-d1)
+        return stock_price * _norm_cdf(d1) - strike * discount * _norm_cdf(d2)
+    return strike * discount * _norm_cdf(-d2) - stock_price * _norm_cdf(-d1)
 
 
 # ---------------------------------------------------------------------------
@@ -121,6 +125,7 @@ def _evaluate_pnl_multi_exp(
     price_high: float,
     near_exp: str,
     far_exp: str,
+    risk_free_rate: float = 0.0,
     steps: int = 1000,
 ) -> dict:
     """Evaluate P&L at the near-term expiration for multi-expiration strategies.
@@ -154,7 +159,7 @@ def _evaluate_pnl_multi_exp(
             else:
                 # Far-term leg: BSM value with remaining time
                 iv = leg.get("iv") or 0.30
-                value = _bsm_price(price, strike, remaining_years, iv, otype)
+                value = _bsm_price(price, strike, remaining_years, iv, otype, risk_free_rate)
 
             if leg["side"] == "sell":
                 pnl -= value * qty
@@ -196,11 +201,13 @@ def _evaluate_pnl_multi_exp(
 def analyze_multi_exp_strategy(
     legs: list[dict],
     stock_price: float,
+    risk_free_rate: float = 0.0,
 ) -> dict:
     """Analyze a multi-expiration option strategy.
 
     Each leg dict must include 'expiration' (YYYY-MM-DD) in addition to the
     standard fields (strike, option_type, side, premium, delta, iv, quantity).
+    risk_free_rate: annualized rate (e.g. 0.036 for 3.6%) for BSM pricing.
 
     Returns dict with: strategy_type, net_premium, max_profit, max_loss,
     breakevens, risk_reward_ratio, probability_of_profit, near_exp, far_exp.
@@ -220,7 +227,9 @@ def analyze_multi_exp_strategy(
     price_low = max(0, min(strikes) - margin)
     price_high = max(strikes) + margin
 
-    pnl = _evaluate_pnl_multi_exp(legs, net_premium, price_low, price_high, near_exp, far_exp)
+    pnl = _evaluate_pnl_multi_exp(
+        legs, net_premium, price_low, price_high, near_exp, far_exp, risk_free_rate
+    )
 
     result = _build_result(strategy_type, legs, net_premium, pnl)
     result["near_exp"] = near_exp

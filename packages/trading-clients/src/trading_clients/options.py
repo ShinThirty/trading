@@ -31,7 +31,7 @@ def build_occ(underlying: str, expiration: str, option_type: str, strike: float)
     # YYMMDD from YYYY-MM-DD
     date_part = expiration[2:4] + expiration[5:7] + expiration[8:10]
     cp = "C" if option_type.lower().startswith("c") else "P"
-    strike_int = int(strike * 1000)
+    strike_int = round(strike * 1000)
     return f"{underlying}{date_part}{cp}{strike_int:08d}"
 
 
