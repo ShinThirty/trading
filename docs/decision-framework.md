@@ -58,11 +58,11 @@ Collect these inputs — which ones matter depends on intent:
 
 | Signal | How to measure | Source | Used by |
 |--------|---------------|--------|---------|
-| **Drawdown** | % below 52-week high | `get_quote` (52W High) | Accumulate, Enter at discount |
-| **Revenue growth** | YoY quarterly revenue growth % | `get_income_statement` | Conviction (Step 1), Sizing via PEG (Step 4) |
-| **Operating margin** | Operating income / revenue, and trend | `get_income_statement` | Conviction — expanding margins = moat, compressing = red flag |
-| **ROE** | Net income / shareholders' equity | `get_basic_financials` | Conviction (Step 1) |
-| **P/E** | Price / TTM earnings | `get_basic_financials` | Sizing via PEG (Step 4) |
+| **Drawdown** | % below 52-week high | `get_conviction_metrics` | Accumulate, Enter at discount |
+| **Revenue growth** | YoY quarterly revenue growth % | `get_conviction_metrics` | Conviction (Step 1), Sizing via PEG (Step 4) |
+| **Operating margin** | Operating income / revenue, and trend | `get_conviction_metrics` | Conviction — expanding margins = moat, compressing = red flag |
+| **ROE** | Net income / shareholders' equity | `get_conviction_metrics` | Conviction (Step 1) |
+| **P/E** | Price / TTM earnings | `get_conviction_metrics` | Sizing via PEG (Step 4) |
 | **IV-HV spread** | IV 30d minus HV 30d | `get_iv_metrics` | All option strategies |
 | **IV Rank** | Current IV vs 52-week IV range | `get_iv_metrics` | Premium selling strategies |
 | **Earnings proximity** | Days to next report | `get_iv_metrics` (Earnings) | All strategies |
@@ -72,11 +72,7 @@ Collect these inputs — which ones matter depends on intent:
 | **Expected move** | ATM straddle price at target expiry | `get_expected_move` | Vol bets, premium harvesting |
 | **Options liquidity** | Liquidity rating + bid/ask spread + open interest | `get_iv_metrics` (Liq 1-4) + `get_option_chain` | All option strategies |
 
-**Revenue growth and operating margin must be pulled from `get_income_statement`, not estimated from memory or articles.** These feed directly into PEG sizing (Step 4) and conviction (Step 1). Compare at least 2 quarters to identify the trend — a single quarter can mislead.
-
-**Options liquidity check before any spread or roll.** Before approving a spread, CSP, or roll, check the bid/ask spread and open interest on the target contracts via `get_option_chain`. Wide bid/ask spreads bleed out credit on rolls and spreads — if the spread is >10% of the contract price, the fill economics are poor. TastyTrade's liquidity rating (Liq 1-4 from `get_iv_metrics`) is a quick screen: Liq 1-2 = tight markets, Liq 3-4 = proceed with caution on multi-leg strategies.
-
-**Earnings date cross-check.** The framework hinges on earnings timing ("always sell THROUGH the nearest earnings date"). Earnings dates from `get_iv_metrics` and `get_earnings_calendar` are estimates that can shift by a week. Before structuring a trade around an earnings date, cross-check both sources. If they disagree, use the later date to avoid expiring before the event.
+Revenue growth, operating margin, drawdown, and PEG are all computed by `get_conviction_metrics` — never estimate these from memory. Before any spread or roll, check liquidity via `get_iv_metrics` (Liq 1-2 = tight, Liq 3-4 = caution) and `get_option_chain` bid/ask spreads. Cross-check earnings dates from `get_iv_metrics` and `get_earnings_calendar`; if they disagree, use the later date.
 
 ### Signal Conflict Resolution
 
@@ -87,40 +83,20 @@ When signals conflict, **fundamentals override technicals, always.** Technicals 
 2. **IV environment** (IV rank, IV-HV) — determines strategy structure (buy vs sell premium)
 3. **Technicals** (RSI, SMA) — timing refinement within an already-approved trade
 
-**Circuit breakers for specific conflicts:**
+**Circuit breakers:**
 
-**1. Value Trap (technicals bullish + fundamentals bearish)**
+| Conflict | Condition | Action |
+|----------|-----------|--------|
+| **Value Trap** | RSI <30 but margins compressing or severe headwind | **Hard stop.** Drop to low conviction. Oversold for a reason. |
+| **Price Dislocation** | Downtrend but revenue accelerating + ROE >25% | **Proceed.** High-conviction Accumulate. Use Hybrid (CSP-heavy) entry. |
+| **FOMO Trap** | ATH + RSI >70 but PEG >3.0 | **Cap the size.** Reduced tier only. Prefer call spread over accumulation. |
+| **Front-Run Catalyst** | High conviction but stock rallied >8% in 2 weeks into catalyst + SPY RSI >65 | **Wait for post-catalyst reaction.** Overpaying on timing, not valuation. |
 
-Signals: `get_technical_indicators` shows RSI <30 (oversold) at a historical support level. But `get_income_statement` shows operating margins compressing for 2+ quarters, or `get_company_news` flags a severe headwind (lost customer, regulatory action, competitive displacement).
-
-Action: **Hard stop.** The stock is oversold for a reason — the business is deteriorating. Historical support is meaningless when the company is no longer the same company that established it. Drop to low conviction, reject Accumulate/Enter at discount.
-
-**2. Price Dislocation (technicals bearish + fundamentals bullish)**
-
-Signals: `get_technical_indicators` shows steep downtrend, below 200 SMA. But `get_income_statement` shows revenue growth accelerating and `get_basic_financials` confirms ROE >25%.
-
-Action: **Proceed — this is what the framework was built for.** Flag as high-conviction Accumulate. The bearish technicals dictate *how* to enter: favor the Hybrid (CSP-heavy) approach from the drawdown matrix to capture rich IV premium while the stock finds its floor.
-
-**3. FOMO Trap (technicals bullish + fundamentals overvalued)**
-
-Signals: Stock breaking to all-time highs, RSI >70, strong momentum. But Step 4 sizing calculates PEG >3.0 — you're overpaying for growth.
-
-Action: **Cap the size.** Allow the trade but force Reduced position size (1 contract / 50 shares) and limit to directional leverage (call spread) rather than full accumulation. Never full-size into a momentum chase.
-
-**4. Front-Run Catalyst (conviction high + stock/market extended into catalyst)**
-
-Signals: High-conviction fundamentals (ROE >25%, strong moat, PEG <1.5). But `get_market_regime` shows SPY RSI >65 near ATH, and the stock itself has rallied >8% in the prior 2 weeks into a known catalyst (earnings). The good news is already in the price.
-
-Action: **Wait for the catalyst to pass.** Conviction is real but timing is poor — the stock has front-run the expected beat, and the broad market is extended. Mean-reversion risk is elevated on both. The asymmetry favors patience: in most post-catalyst scenarios (flat, sell-the-news, dip), waiting gives a better entry. The only cost is missing a blowout rip, and a high-conviction name with durable growth will offer another entry.
-
-Checklist before entering near ATH into a catalyst:
-1. Has the stock rallied >8% in the prior 2 weeks? If yes, the catalyst is front-run.
-2. Has the catalyst's information content already leaked? Pre-announced revenue, pre-released guidance, or channel checks that went viral — if the market already knows the number, the "beat" is priced in and the bar for a positive reaction is higher than the headline suggests.
-3. Is SPY RSI >65? If yes, broad market mean-reversion risk is elevated.
-4. Is SPY IV Rank <25%? If yes, the market is complacent — any shock will be amplified.
-5. If three or more trigger: **wait for post-catalyst reaction before entering.** The name isn't running away.
-
-The distinction from FOMO Trap (#3): in a FOMO Trap, you're overpaying on *valuation* (PEG >3). Here, valuation is fair — you're overpaying on *timing*.
+Front-Run Catalyst checklist — if 3+ trigger, wait:
+1. Stock rallied >8% in prior 2 weeks
+2. Catalyst information already leaked (pre-announced revenue, viral channel checks)
+3. SPY RSI >65
+4. SPY IV Rank <25% (complacent — shocks amplified)
 
 ## Step 3: Choose Strategy
 
