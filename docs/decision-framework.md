@@ -32,14 +32,14 @@ Conviction drives intent. Intent drives strategy. Decide intent FIRST — everyt
 
 | Factor | High conviction | Low conviction |
 |--------|----------------|----------------|
-| **ROE** | >25% — elite capital efficiency (ADBE 62%). If D/E >3x, ROE is inflated by leverage — discount it (GDDY 384% ROE is buyback engineering, not profitability). | <15% — mediocre returns don't justify premium P/E |
-| **Moat** | Monopoly/deep switching costs (ADBE creative suite) | Commodity, crowded market, active disruption threat |
+| **ROE** | >25% — elite capital efficiency. If D/E >3x, ROE is inflated by leverage — discount it. | <15% — mediocre returns don't justify premium P/E |
+| **Moat** | Monopoly/deep switching costs | Commodity, crowded market, active disruption threat |
 | **Growth durability** | Recurring revenue, expanding TAM, secular tailwinds | Cyclical, geopolitical-dependent, or AI-threatened |
-| **AI ROI** (for software/adopter names) | AI features driving revenue growth *with stable or expanding margins* — AI is monetized profitably (ADBE Firefly upsell) | AI spending is growing revenue but compressing operating margins — inference costs eating profits. Revenue growth without margin stability = burning cash to look like an AI company. Immediately drop to low conviction. |
+| **AI ROI** (for software/adopter names) | AI features driving revenue growth *with stable or expanding margins* | AI spending growing revenue but compressing operating margins. Immediately drop to low conviction. |
 
-The AI ROI filter distinguishes **Builders** (semis/infra — revenue booms now but carries cycle risk) from **Adopters** (software — must prove AI monetization without margin destruction). A software company showing AI-driven revenue growth but compressing margins is failing the adopter test. The question evolves from "when will they stop spending?" to "where are they spending, and is it actually working?"
+The AI ROI filter distinguishes **Builders** (semis/infra — revenue booms now but carries cycle risk) from **Adopters** (software — must prove AI monetization without margin destruction).
 
-A stock can have a 50% drawdown and still deserve low conviction if the ROE is mediocre and the moat is under attack (WDAY, NOW). Conversely, a 30% drawdown on a 62% ROE monopoly is high conviction (ADBE). Drawdown alone is not conviction — the business quality determines whether the drawdown is an opportunity or a warning.
+Drawdown alone is not conviction — the business quality determines whether the drawdown is an opportunity or a warning.
 
 | Conviction | Intent | Goal | You're saying... |
 |-----------|--------|------|-----------------|
@@ -122,9 +122,9 @@ Run `get_conviction_metrics` — it computes PEG (revenue-based), drawdown %, op
 - Always reserve cash for T2 scale-in (don't deploy 100% on T1)
 - If running multiple CSPs, total collateral should not exceed 60% of cash account
 - Spreads allow more positions — reallocate freed capital across pipeline names
-- **Limit new entries to 5-7 names per month.** In March 2026, 18 names were bought in 10 days — the shotgun approach diluted conviction and made it impossible to size properly. Run each name through Steps 1-4 before adding the next.
+- **Limit new entries to 5-7 names per month.** Run each name through Steps 1-4 before adding the next.
 
-**Size for the drawdown, not just the upside.** Before entering, ask: "If this drops 40% over 2 months, will the dollar loss force me to sell?" If yes, the position is too large. The ALAB lesson: a $182 entry on a volatile semi name should have been half-size or structured with a CC, because the eventual -45% drawdown created a $14K emotional breaking point that forced a thesis-correct exit. Size so that the worst-case drawdown is painful but survivable without triggering an emotional sell.
+**Size for the drawdown, not just the upside.** Before entering, ask: "If this drops 40% over 2 months, will the dollar loss force me to sell?" If yes, the position is too large. Size so that the worst-case drawdown is painful but survivable without triggering an emotional sell.
 
 ## Step 5: Set Management Rules
 
