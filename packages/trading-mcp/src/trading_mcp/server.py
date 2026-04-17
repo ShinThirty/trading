@@ -1375,6 +1375,7 @@ async def analyze_option_strategy(
                 "iv": greeks.get("mid_iv"),
                 "bid": opt.get("bid"),
                 "ask": opt.get("ask"),
+                "spread_pct": opts.bid_ask_spread_pct(opt),
                 "occ_symbol": opt.get("symbol", ""),
                 "expiration": leg_exp,
             }
@@ -1419,6 +1420,8 @@ async def analyze_option_strategy(
         row["Bid"] = fmt_number(el["bid"])
         row["Ask"] = fmt_number(el["ask"])
         row["Mid"] = fmt_number(el["premium"])
+        sp = el.get("spread_pct")
+        row["Spread"] = f"{sp:.0f}%" if sp is not None else ""
         row["Delta"] = fmt_number(el["delta"], 3) if el["delta"] else ""
         row["IV"] = f"{el['iv'] * 100:.1f}%" if el["iv"] else ""
         row["Qty"] = str(el["quantity"])
@@ -1494,6 +1497,10 @@ async def analyze_option_strategy(
     if is_multi_exp:
         data["Note"] = "P&L evaluated at near expiration using Black-Scholes for far-dated legs"
 
+    wide_spread_legs = [
+        el for el in enriched_legs if (el.get("spread_pct") or 0) > 10
+    ]
+
     sections = [
         f"## {symbol} {result.get('strategy_type', 'Strategy')} Analysis",
         "",
@@ -1503,6 +1510,20 @@ async def analyze_option_strategy(
         "### Summary",
         kv_table(data),
     ]
+    if wide_spread_legs:
+        warnings = []
+        for el in wide_spread_legs:
+            warnings.append(
+                f"- {el['option_type'].upper()} {fmt_number(el['strike'])} {el['expiration']}"
+                f": {el['spread_pct']:.0f}% spread (bid {fmt_number(el['bid'])}"
+                f" / ask {fmt_number(el['ask'])})"
+            )
+        sections.extend([
+            "",
+            "### Liquidity Warning",
+            "Wide bid-ask spread (>10% of ask) — mid price may be unreliable:",
+            *warnings,
+        ])
     return "\n".join(sections)
 
 

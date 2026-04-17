@@ -217,11 +217,20 @@ def find_atm_options(chain: list[dict], stock_price: float) -> tuple[dict | None
 
 def mid_price(option: dict) -> float:
     """Compute mid price from bid/ask."""
-    bid = option.get("bid") or 0
-    ask = option.get("ask") or 0
-    if bid and ask:
+    bid = option.get("bid")
+    ask = option.get("ask")
+    if bid is not None and ask is not None and ask > 0:
         return (bid + ask) / 2
     return option.get("last") or 0
+
+
+def bid_ask_spread_pct(option: dict) -> float | None:
+    """Return bid-ask spread as a percentage of the ask price, or None if unavailable."""
+    bid = option.get("bid")
+    ask = option.get("ask")
+    if bid is not None and ask is not None and ask > 0:
+        return (ask - bid) / ask * 100
+    return None
 
 
 def expected_move(chain: list[dict], stock_price: float) -> dict[str, float | None]:
