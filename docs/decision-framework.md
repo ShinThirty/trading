@@ -90,13 +90,7 @@ When signals conflict, **fundamentals override technicals, always.** Technicals 
 | **Value Trap** | RSI <30 but margins compressing or severe headwind | **Hard stop.** Drop to low conviction. Oversold for a reason. |
 | **Price Dislocation** | Downtrend but revenue accelerating + ROE >25% | **Proceed.** High-conviction Accumulate. Use Hybrid (CSP-heavy) entry. |
 | **FOMO Trap** | ATH + RSI >70 but PEG >3.0 | **Cap the size.** Reduced tier only. Prefer call spread over accumulation. |
-| **Front-Run Catalyst** | High conviction but stock rallied >8% in 2 weeks into catalyst + SPY RSI >65 | **Wait for post-catalyst reaction.** Overpaying on timing, not valuation. |
-
-Front-Run Catalyst checklist — if 3+ trigger, wait:
-1. Stock rallied >8% in prior 2 weeks
-2. Catalyst information already leaked (pre-announced revenue, viral channel checks)
-3. SPY RSI >65
-4. SPY IV Rank <25% (complacent — shocks amplified)
+| **Front-Run Catalyst** | Stock rallied >8% in 2 weeks into catalyst + catalyst info already leaked | **Wait for post-catalyst reaction.** Overpaying on timing, not valuation. |
 
 ## Step 3: Choose Strategy
 
