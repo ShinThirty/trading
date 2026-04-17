@@ -372,6 +372,8 @@ class FinancialsReportedResponse:
             row: dict[str, Any] = {
                 "period": r.get("endDate", "")[:10],
                 "form": r.get("form", ""),
+                "fiscal_year": r.get("year"),
+                "fiscal_quarter": r.get("quarter"),
             }
             for display_name, concept_names in items:
                 for cn in concept_names:

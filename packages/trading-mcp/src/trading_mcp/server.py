@@ -2499,27 +2499,17 @@ async def get_conviction_metrics(ctx: Context, symbol: str) -> str:
     if len(quarters) >= 2:
         current_q = quarters[0]
         current_rev = current_q.get("Revenue")
-        current_period = current_q.get("period", "")
-        # Find the same quarter from prior year (period ~12 months earlier)
-        if current_rev and current_period:
-            try:
-                from datetime import date as dt_date
-
-                cp = dt_date.fromisoformat(current_period)
-                for q_row in quarters[1:]:
-                    qp = q_row.get("period", "")
-                    if not qp:
-                        continue
-                    pp = dt_date.fromisoformat(qp)
-                    months_diff = (cp.year - pp.year) * 12 + (cp.month - pp.month)
-                    if 10 <= months_diff <= 14:
-                        prior_rev = q_row.get("Revenue")
-                        if prior_rev and prior_rev > 0:
-                            prior_q = q_row
-                            rev_growth = (current_rev - prior_rev) / prior_rev * 100
-                        break
-            except ValueError:
-                pass
+        cur_fy = current_q.get("fiscal_year")
+        cur_fq = current_q.get("fiscal_quarter")
+        if current_rev and cur_fy and cur_fq:
+            # Match by fiscal quarter identifier (Q1→Q1, Q2→Q2)
+            for q_row in quarters[1:]:
+                if q_row.get("fiscal_quarter") == cur_fq and q_row.get("fiscal_year") == cur_fy - 1:
+                    prior_rev = q_row.get("Revenue")
+                    if prior_rev and prior_rev > 0:
+                        prior_q = q_row
+                        rev_growth = (current_rev - prior_rev) / prior_rev * 100
+                    break
 
     # ── Operating margin trend ──
     margins: list[tuple[str, float]] = []
