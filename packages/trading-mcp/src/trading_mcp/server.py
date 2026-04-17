@@ -619,26 +619,30 @@ async def get_csp_utilization(
             contracts = abs(qty)
             collateral = strike * CONTRACT_MULTIPLIER * contracts
             total_collateral += collateral
-            csp_rows.append({
-                "Account": acct.label,
-                "Underlying": p.get("underlying", p.get("symbol", "")),
-                "Strike": fmt_number(strike),
-                "Exp": p.get("expiration", ""),
-                "Qty": fmt_number(contracts, 0),
-                "Collateral": fmt_number(collateral),
-            })
+            csp_rows.append(
+                {
+                    "Account": acct.label,
+                    "Underlying": p.get("underlying", p.get("symbol", "")),
+                    "Strike": fmt_number(strike),
+                    "Exp": p.get("expiration", ""),
+                    "Qty": fmt_number(contracts, 0),
+                    "Collateral": fmt_number(collateral),
+                }
+            )
 
     # 4. Build output
     utilization = (total_collateral / total_cash * 100) if total_cash > 0 else 0
     remaining = total_cash - total_collateral
     status = "OVER LIMIT" if utilization > 60 else "OK"
 
-    summary = kv_table({
-        "Total Cash (incl. SGOV)": f"${fmt_number(total_cash)}",
-        "Total CSP Collateral": f"${fmt_number(total_collateral)}",
-        "Utilization": f"{utilization:.1f}% ({status} — limit 60%)",
-        "Remaining Capacity": f"${fmt_number(remaining)}",
-    })
+    summary = kv_table(
+        {
+            "Total Cash (incl. SGOV)": f"${fmt_number(total_cash)}",
+            "Total CSP Collateral": f"${fmt_number(total_collateral)}",
+            "Utilization": f"{utilization:.1f}% ({status} — limit 60%)",
+            "Remaining Capacity": f"${fmt_number(remaining)}",
+        }
+    )
 
     sections = [f"## CSP Collateral Utilization\n\n{summary}"]
     if csp_rows:
@@ -753,14 +757,16 @@ async def get_free_capital(
 
         acct_free = acct.cash - acct_collateral
 
-        rows.append({
-            "Account": acct.label,
-            "Broker": acct.broker,
-            "Cash/MM": f"${fmt_number(acct_cash_mm)}",
-            "SGOV": f"${fmt_number(acct_liquid)}",
-            "CSP Collateral": f"${fmt_number(acct_collateral)}",
-            "Free Capital": f"${fmt_number(acct_free)}",
-        })
+        rows.append(
+            {
+                "Account": acct.label,
+                "Broker": acct.broker,
+                "Cash/MM": f"${fmt_number(acct_cash_mm)}",
+                "SGOV": f"${fmt_number(acct_liquid)}",
+                "CSP Collateral": f"${fmt_number(acct_collateral)}",
+                "Free Capital": f"${fmt_number(acct_free)}",
+            }
+        )
 
         grand_cash += acct_cash_mm
         grand_collateral += acct_collateral
@@ -768,25 +774,29 @@ async def get_free_capital(
         grand_free += acct_free
 
     # Total row
-    rows.append({
-        "Account": "**Total**",
-        "Broker": "",
-        "Cash/MM": f"**${fmt_number(grand_cash)}**",
-        "SGOV": f"**${fmt_number(grand_liquid)}**",
-        "CSP Collateral": f"**${fmt_number(grand_collateral)}**",
-        "Free Capital": f"**${fmt_number(grand_free)}**",
-    })
+    rows.append(
+        {
+            "Account": "**Total**",
+            "Broker": "",
+            "Cash/MM": f"**${fmt_number(grand_cash)}**",
+            "SGOV": f"**${fmt_number(grand_liquid)}**",
+            "CSP Collateral": f"**${fmt_number(grand_collateral)}**",
+            "Free Capital": f"**${fmt_number(grand_free)}**",
+        }
+    )
 
     # 4. Build output
     total_available = grand_cash + grand_liquid
     utilization = (grand_collateral / total_available * 100) if total_available > 0 else 0
 
-    summary = kv_table({
-        "Total Available (Cash + SGOV)": f"${fmt_number(total_available)}",
-        "Total CSP Collateral": f"${fmt_number(grand_collateral)}",
-        "Total Free Capital": f"${fmt_number(grand_free)}",
-        "Collateral Utilization": f"{utilization:.1f}%",
-    })
+    summary = kv_table(
+        {
+            "Total Available (Cash + SGOV)": f"${fmt_number(total_available)}",
+            "Total CSP Collateral": f"${fmt_number(grand_collateral)}",
+            "Total Free Capital": f"${fmt_number(grand_free)}",
+            "Collateral Utilization": f"{utilization:.1f}%",
+        }
+    )
 
     sections = [f"## Free Capital\n\n{summary}"]
     sections.append(f"\n### Per Account\n\n{list_table(rows)}")
@@ -881,8 +891,7 @@ async def get_cc_coverage(
         # Show call details inline if any
         if calls:
             call_details = ", ".join(
-                f"${fmt_number(c.get('strike'))} {c.get('expiration', '')}"
-                for c in calls
+                f"${fmt_number(c.get('strike'))} {c.get('expiration', '')}" for c in calls
             )
             row["Calls"] = call_details
 
@@ -967,28 +976,32 @@ async def get_cc_chain_pnl(
         else:
             total_debit += amount
 
-        rows.append({
-            "Date": (o.get("filled_time_at") or o.get("place_time_at") or "")[:10],
-            "Side": side,
-            "Strike": fmt_number(leg.get("strike_price")),
-            "Exp": leg.get("option_expire_date", ""),
-            "Qty": fmt_number(qty, 0),
-            "Fill": fmt_number(price),
-            "Amount": f"{'+' if side == 'SELL' else '-'}${fmt_number(amount)}",
-        })
+        rows.append(
+            {
+                "Date": (o.get("filled_time_at") or o.get("place_time_at") or "")[:10],
+                "Side": side,
+                "Strike": fmt_number(leg.get("strike_price")),
+                "Exp": leg.get("option_expire_date", ""),
+                "Qty": fmt_number(qty, 0),
+                "Fill": fmt_number(price),
+                "Amount": f"{'+' if side == 'SELL' else '-'}${fmt_number(amount)}",
+            }
+        )
 
     chain_pnl = total_credit - total_debit
     pnl_sign = "+" if chain_pnl >= 0 else ""
 
     type_label = "Covered Call" if opt_type == "call" else "CSP"
-    summary = kv_table({
-        "Symbol": symbol.upper(),
-        "Chain Type": type_label,
-        "Total Credits (SELL)": f"+${fmt_number(total_credit)}",
-        "Total Debits (BUY)": f"-${fmt_number(total_debit)}",
-        "Chain P&L": f"{pnl_sign}${fmt_number(chain_pnl)}",
-        "Orders": str(len(chain_orders)),
-    })
+    summary = kv_table(
+        {
+            "Symbol": symbol.upper(),
+            "Chain Type": type_label,
+            "Total Credits (SELL)": f"+${fmt_number(total_credit)}",
+            "Total Debits (BUY)": f"-${fmt_number(total_debit)}",
+            "Chain P&L": f"{pnl_sign}${fmt_number(chain_pnl)}",
+            "Orders": str(len(chain_orders)),
+        }
+    )
 
     sections = [f"## {symbol.upper()} {type_label} Chain P&L\n\n{summary}"]
     sections.append(f"\n### Order History\n\n{list_table(rows)}")
@@ -1509,13 +1522,10 @@ async def analyze_option_strategy(
     if is_multi_exp:
         rfr_pct = f"{risk_free_rate * 100:.2f}%"
         data["Note"] = (
-            f"P&L evaluated at near expiration using Black-Scholes (r={rfr_pct})"
-            " for far-dated legs"
+            f"P&L evaluated at near expiration using Black-Scholes (r={rfr_pct}) for far-dated legs"
         )
 
-    wide_spread_legs = [
-        el for el in enriched_legs if (el.get("spread_pct") or 0) > 10
-    ]
+    wide_spread_legs = [el for el in enriched_legs if (el.get("spread_pct") or 0) > 10]
 
     sections = [
         f"## {symbol} {result.get('strategy_type', 'Strategy')} Analysis",
@@ -1534,12 +1544,14 @@ async def analyze_option_strategy(
                 f": {el['spread_pct']:.0f}% spread (bid {fmt_number(el['bid'])}"
                 f" / ask {fmt_number(el['ask'])})"
             )
-        sections.extend([
-            "",
-            "### Liquidity Warning",
-            "Wide bid-ask spread (>10% of ask) — mid price may be unreliable:",
-            *warnings,
-        ])
+        sections.extend(
+            [
+                "",
+                "### Liquidity Warning",
+                "Wide bid-ask spread (>10% of ask) — mid price may be unreliable:",
+                *warnings,
+            ]
+        )
     return "\n".join(sections)
 
 
@@ -2501,9 +2513,7 @@ async def get_conviction_metrics(ctx: Context, symbol: str) -> str:
 
     basics_r, fin_r, quote_r = await asyncio.gather(
         finnhub.get(fh.BASIC_FINANCIALS, fh.BasicFinancialsRequest(symbol)),
-        finnhub.get(
-            fh.FINANCIALS_REPORTED, fh.FinancialsReportedRequest(symbol, "quarterly")
-        ),
+        finnhub.get(fh.FINANCIALS_REPORTED, fh.FinancialsReportedRequest(symbol, "quarterly")),
         tradier.get(t.QUOTES, t.GetQuotesRequest(symbol)),
         return_exceptions=True,
     )
@@ -2684,14 +2694,16 @@ async def calculate_position_size(
     dollars = total_assets * frac
     shares = int(dollars / price)
 
-    return kv_table({
-        "Symbol": symbol,
-        "Price": f"${price:,.2f}",
-        "Total Assets": f"${total_assets:,.0f}",
-        "Tier": f"{tier.capitalize()} ({frac:.0%})",
-        "Allocation": f"${dollars:,.0f}",
-        "Shares": str(shares),
-    })
+    return kv_table(
+        {
+            "Symbol": symbol,
+            "Price": f"${price:,.2f}",
+            "Total Assets": f"${total_assets:,.0f}",
+            "Tier": f"{tier.capitalize()} ({frac:.0%})",
+            "Allocation": f"${dollars:,.0f}",
+            "Shares": str(shares),
+        }
+    )
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -3021,17 +3033,11 @@ async def get_youtube_transcript(ctx: Context, url: str) -> str:
     if m:
         video_id = m.group(1)
 
-    def _fetch() -> str:
-        api = YouTubeTranscriptApi()
-        transcript = api.fetch(video_id)
-        full_text = " ".join(s.text for s in transcript.snippets)
-        kind = "auto-generated" if transcript.is_generated else "manual"
-        return (
-            f"**Video ID:** {video_id}\n"
-            f"**Language:** {transcript.language} ({kind})\n\n{full_text}"
-        )
-
-    return await asyncio.to_thread(_fetch)
+    api = YouTubeTranscriptApi()
+    transcript = await asyncio.to_thread(api.fetch, video_id)
+    full_text = " ".join(s.text for s in transcript.snippets)
+    kind = "auto-generated" if transcript.is_generated else "manual"
+    return f"**Video ID:** {video_id}\n**Language:** {transcript.language} ({kind})\n\n{full_text}"
 
 
 # ═══════════════════════════════════════════════════════════════
