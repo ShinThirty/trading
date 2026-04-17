@@ -189,29 +189,14 @@ Run `get_conviction_metrics` — it computes PEG (revenue-based), drawdown %, op
 Don't watch the ticker and feel pain. Run this checklist:
 
 1. **Is the end customer still spending?** Check the demand environment upstream of your company. If the buyers of your company's products are still deploying capital, the thesis is intact.
-2. **Is this company-specific or sector-wide?** Company-specific drawdowns need more scrutiny. Sector-wide drawdowns are *often* noise — but not always. **A sector-wide drawdown is also exactly what the beginning of a cycle turn looks like.** If you are actively timing a macro thesis (e.g., semi cycle peaking mid-2027), ask: "Is this the cycle turn I've been expecting, or a temporary pullback?" Check: are hyperscaler capex guides being cut? Are neocloud earnings missing? Is GPU rental rate compression showing up in data? If the sector drawdown aligns with your exit thesis signals, it's not noise — it's the signal you've been waiting for.
-3. **Has the competitive moat actually narrowed?** Check for concrete evidence: lost customers, cancelled contracts, actual product displacement by a competitor. A narrative shift in financial media is not the same as lost revenue. Narrative ≠ reality.
-4. **Is the thesis timeline still valid?** A 2-month drawdown inside an 18-month thesis is noise, not signal. If the thesis hasn't had time to play out, price action alone isn't a reason to exit.
-5. **Would I buy this at today's price if I had no position?** Strip away anchoring to your entry. If the thesis was buyable at $182, it's *more* buyable at $100. The only thing that changed is your P&L, not the company.
+2. **Is this company-specific or sector-wide?** Company-specific drawdowns need more scrutiny. Sector-wide drawdowns are *often* noise — but not always. A sector-wide drawdown can also be the beginning of a cycle turn. If the drawdown aligns with your exit thesis signals, it's not noise — it's the signal.
+3. **Has the competitive moat actually narrowed?** Check for concrete evidence: lost customers, cancelled contracts, actual product displacement. A narrative shift in financial media is not the same as lost revenue.
+4. **Is the thesis timeline still valid?** A 2-month drawdown inside an 18-month thesis is noise, not signal.
+5. **Would I buy this at today's price if I had no position?** Strip away anchoring to your entry.
 
 If all five pass → hold or add. If any fail → exit regardless of price.
 
-**Example — ALAB (Apr 2026):** All five passed. Hyperscaler capex still growing, sector-wide drawdown (not ALAB-specific), no competitive moat change, thesis timeline intact (semi cycle through mid-2027), stock was cheaper by every metric. The exit at $125 was emotional, not analytical. Stock ripped 29% in the 4 days after selling.
-
-**Example — CRDO (Mar 2026):** Arguably harder — had a specific narrative headwind ("optical replaces copper"). But all five still passed: customers still shipping AECs, Nvidia said "both copper AND optical," patent settlements proved the tech was valuable, semi cycle timeline intact. Held through -30%. Recovered +53% from the low. DustPhotonics acquisition later removed the narrative risk entirely.
-
 ### Selling Into Strength vs Selling Into Recovery
-
-These look similar on a chart but are psychologically opposite:
-
-**Selling into strength:** Your position is working. The stock is at or near highs, and you're taking profits because the price has reached a level where you're happy to sell. *You're selling because the stock went up.*
-
-- LITE: Bought $650 → sold tranches at $692, $780, $790, $910. Each sell was higher than the last.
-- XLE: Bought $56.60 → sold $60.30. Clean exit at a profit target.
-
-**Selling into recovery:** Your position was deeply underwater. The stock bounced partially, and you sell because the bounce gave you a "chance to get out" — not because you've reached a profit target. *You're selling because the stock stopped going down.*
-
-- ALAB: Bought $182 → ground to $100 (-45%) → bounced to $129 → sold. The recovery brought relief, not confidence. The sell was about exhaustion, not analysis.
 
 **The diagnostic test:** "Am I selling because I've won, or because I've survived?"
 
@@ -220,6 +205,6 @@ These look similar on a chart but are psychologically opposite:
 | Position P&L | Green or solidly profitable | Still red or barely recovered |
 | Motivation | "I've hit my target" | "I can finally get out" |
 | Emotion | Confidence, maybe mild FOMO | Relief, exhaustion |
-| Usually right? | Yes — disciplined profit-taking | Usually wrong — you paid the full emotional cost of the drawdown but captured none of the recovery |
+| Usually right? | Yes — disciplined profit-taking | Usually wrong — you paid the emotional cost of the drawdown but captured none of the recovery |
 
-**The rule:** If you held from $182 to $100 and survived the worst, a bounce to $129 should confirm the thesis, not trigger an exit. The crash is the tax. The recovery is the refund. Selling into a recovery is paying the tax and walking away before the refund arrives.
+**The rule:** If you survived the worst of a drawdown, a partial bounce should confirm the thesis, not trigger an exit. The crash is the tax. The recovery is the refund. Don't walk away before the refund arrives.
