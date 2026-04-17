@@ -141,23 +141,9 @@ Once intent is set and signals are collected, match to the right strategy. See [
 
 ## Step 4: Size the Position
 
-Base sizing on **growth-adjusted valuation** (PEG) and **portfolio concentration**:
+Base sizing on **growth-adjusted valuation** (PEG) and **portfolio concentration**.
 
-**How to calculate PEG:**
-1. Pull `get_income_statement` — get the most recent quarter's revenue and the same quarter from the prior year.
-2. Calculate YoY revenue growth: `(current_quarter - same_quarter_prior_year) / same_quarter_prior_year × 100`.
-3. PEG = P/E (from `get_basic_financials`) ÷ YoY revenue growth %.
-4. Use **revenue growth**, not earnings growth — earnings are volatile on high-growth names due to stock comp, one-time charges, and investment cycles. Revenue growth is the more stable signal.
-5. If growth is negative or near-zero, PEG is meaningless — fall back to raw P/E sizing (P/E <15x Full, 15-25x Standard, >25x Reduced).
-6. **Margin compression invalidates PEG.** If operating margins are shrinking quarter-over-quarter, PEG is unreliable — the company may be buying revenue growth through heavy spend while destroying profitability. When margins are compressing, fall back to raw P/E sizing regardless of PEG. Revenue growth without margin stability (or expansion) is not durable growth.
-
-| PEG | Position size | Rationale |
-|-----|--------------|-----------|
-| <1.5 | **Full** (2 contracts / 200 shares) | Paying less than fair value for growth (ADBE PEG ~1.2) |
-| 1.5-3.0 | **Standard** (1 contract / 100 shares) | Fair value for growth (NOW PEG ~2.4) |
-| >3.0 | **Reduced** (1 contract or 50 shares) | Overpaying for growth (PLTR PEG ~6.7) |
-
-**P/E hard cap:** Regardless of PEG, never full-size above 80x P/E — extreme multiples amplify downside on any growth deceleration.
+Run `get_conviction_metrics` — it computes PEG (revenue-based), drawdown %, operating margin trend, and position size tier in one call. The tool handles all edge cases: margin compression fallback to raw P/E, negative/zero growth, and the 80x P/E hard cap.
 
 **Additional sizing rules:**
 - Never allocate >15% of portfolio to a single name at entry
