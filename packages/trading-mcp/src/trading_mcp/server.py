@@ -44,6 +44,15 @@ from trading_clients.endpoints.yahoo import ScreenerResponse
 from trading_clients.finnhub_client import FinnhubClient
 from trading_clients.fmp_client import FmpClient
 from trading_clients.fred_client import FredClient
+from trading_clients.portfolio import (
+    AccountSummary,
+    PortfolioSummary,
+    compact_portfolio_summary,
+    format_greeks_compact,
+    format_greeks_detail,
+    format_portfolio_summary,
+    parse_fidelity_folder,
+)
 from trading_clients.tastytrade_client import TastyTradeClient
 from trading_clients.tradier_client import TradierClient
 from trading_clients.webull_client import WebullClient
@@ -188,8 +197,6 @@ async def _fetch_accounts(
     Returns (list[AccountSummary], errors dict). Cash equivalents (SGOV, etc.)
     are reclassified from market_value to cash in each AccountSummary.
     """
-    from trading_clients.portfolio import AccountSummary, parse_fidelity_folder
-
     summaries: list[AccountSummary] = []
     errors: dict[str, str] = {}
 
@@ -257,8 +264,6 @@ async def _fetch_all_positions(
     Returns (positions, errors). Lighter than _fetch_accounts — skips
     balance calls. Used by tools that only need positions (greeks, hedge).
     """
-    from trading_clients.portfolio import parse_fidelity_folder
-
     all_positions: list[dict] = []
     errors: list[str] = []
 
@@ -724,12 +729,6 @@ async def get_portfolio_summary(
 
     Note: fetches Webull data sequentially to respect rate limits (~1 req/second).
     """
-    from trading_clients.portfolio import (
-        PortfolioSummary,
-        compact_portfolio_summary,
-        format_portfolio_summary,
-    )
-
     summaries, errors = await _fetch_accounts(_webull(ctx), fidelity_folder)
     portfolio = PortfolioSummary(summaries, errors)
     full_output = format_portfolio_summary(portfolio)
@@ -1120,8 +1119,6 @@ async def get_portfolio_greeks(
 
     Requires [webull] and [tradier] sections in ~/.tradingrc.
     """
-    from trading_clients.portfolio import format_greeks_compact, format_greeks_detail
-
     webull = _webull(ctx)
     tradier = _tradier(ctx)
 
