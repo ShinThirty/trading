@@ -2716,6 +2716,7 @@ async def calculate_hedge(
     expiration: str | None = None,
     strike: float | None = None,
     hedge_ratio: float = 1.0,
+    delta_adjusted: bool = False,
 ) -> str:
     """Calculate put contracts needed to hedge the portfolio.
 
@@ -2726,6 +2727,8 @@ async def calculate_hedge(
     expiration: option expiration (YYYY-MM-DD). Defaults to nearest monthly >=30 DTE.
     strike: put strike. Defaults to ~5% OTM.
     hedge_ratio: fraction to hedge, 0.0-1.0 (default 1.0 = 100%).
+    delta_adjusted: if True, divide by put delta for continuous 1:1 hedging.
+      Default False = tail-risk mode (sized for full payout when puts go ITM).
 
     Requires [webull] and [tradier] sections in ~/.tradingrc.
     """
@@ -2818,8 +2821,8 @@ async def calculate_hedge(
         else:
             strike = round(target_strike)
 
-    # Compute per-symbol betas
-    benchmark_closes = [d["close"] for d in history_data.get(hedge_index, [])]
+    # Compute per-symbol betas (date-aligned)
+    benchmark_bars = history_data.get(hedge_index, [])
     weighted_beta = 0.0
     beta_count = 0
     fallback_count = 0
@@ -2827,8 +2830,8 @@ async def calculate_hedge(
     for p in equities:
         sym = p["symbol"]
         weight = p["value"] / total_equity
-        sym_closes = [d["close"] for d in history_data.get(sym, [])]
-        b = ta.beta(sym_closes, benchmark_closes)
+        sym_bars = history_data.get(sym, [])
+        b = ta.beta(sym_bars, benchmark_bars)
         if b is not None:
             weighted_beta += weight * b
             beta_count += 1
@@ -2839,13 +2842,7 @@ async def calculate_hedge(
     # Adjust for cash: portfolio beta = (equity / total) * equity_beta
     portfolio_beta = (total_equity / total_nlv) * weighted_beta if total_nlv > 0 else weighted_beta
 
-    # Calculate contracts
-    contracts = (total_nlv * portfolio_beta * hedge_ratio) / (index_price * CONTRACT_MULTIPLIER)
-    contracts = round(contracts)
-    if contracts < 1:
-        contracts = 1
-
-    # Phase 3: Fetch put quote
+    # Phase 3: Fetch put quote (needed before contract calc in delta-adjusted mode)
     occ = opts.build_occ(hedge_index, expiration, "put", strike)
     try:
         put_resp = await tradier.get(t.QUOTES, t.GetQuotesRequest(occ, greeks=True))
@@ -2858,9 +2855,20 @@ async def calculate_hedge(
     put_delta = put_q.get("greeks", {}).get("delta", "")
     put_iv = put_q.get("greeks", {}).get("mid_iv", "")
 
+    # Calculate contracts
+    notional = (total_nlv * portfolio_beta * hedge_ratio) / (index_price * CONTRACT_MULTIPLIER)
+    if delta_adjusted and put_delta:
+        contracts = round(notional / abs(float(put_delta)))
+    else:
+        contracts = round(notional)
+    if contracts < 1:
+        contracts = 1
+
     total_cost = put_ask * CONTRACT_MULTIPLIER * contracts
     cost_pct = (total_cost / total_nlv * 100) if total_nlv > 0 else 0
     drawdown_trigger = (1 - strike / index_price) * 100
+
+    sizing_mode = "delta-adjusted (continuous)" if delta_adjusted else "notional (tail-risk)"
 
     data = {
         "Portfolio Value": f"${total_nlv:,.0f}",
@@ -2868,6 +2876,7 @@ async def calculate_hedge(
         "Equity Symbols": f"{len(symbols)} ({beta_count} with beta, {fallback_count} fallback)",
         "Portfolio Beta": f"{portfolio_beta:.2f}",
         "Hedge Ratio": f"{hedge_ratio:.0%}",
+        "Sizing Mode": sizing_mode,
         "---": "---",
         "Hedge Index": f"{hedge_index} @ ${index_price:,.2f}",
         "Put Strike": f"${strike:,.2f} ({drawdown_trigger:.1f}% OTM)",

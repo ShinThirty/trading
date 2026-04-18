@@ -133,16 +133,26 @@ def log_returns(closes: list[float]) -> list[float]:
     return [log(closes[i] / closes[i - 1]) for i in range(1, len(closes))]
 
 
-def beta(asset_closes: list[float], benchmark_closes: list[float]) -> float | None:
-    """OLS beta of an asset vs a benchmark from aligned daily closing prices.
+def beta(
+    asset_bars: list[dict],
+    benchmark_bars: list[dict],
+    min_points: int = 20,
+) -> float | None:
+    """OLS beta of an asset vs a benchmark, aligned by date.
 
-    Returns None if fewer than 20 data points.
+    Each bar must have 'date' and 'close' keys. Bars are aligned on matching
+    dates to avoid misalignment from trading halts or API gaps.
+    Returns None if fewer than min_points aligned data points.
     """
-    n = min(len(asset_closes), len(benchmark_closes))
-    if n < 21:
+    asset_by_date = {b["date"]: b["close"] for b in asset_bars}
+    bench_by_date = {b["date"]: b["close"] for b in benchmark_bars}
+    common = sorted(asset_by_date.keys() & bench_by_date.keys())
+    if len(common) < min_points + 1:
         return None
-    a_ret = log_returns(asset_closes[-n:])
-    b_ret = log_returns(benchmark_closes[-n:])
+    a_closes = [asset_by_date[d] for d in common]
+    b_closes = [bench_by_date[d] for d in common]
+    a_ret = log_returns(a_closes)
+    b_ret = log_returns(b_closes)
     mean_a = sum(a_ret) / len(a_ret)
     mean_b = sum(b_ret) / len(b_ret)
     cov = sum((a - mean_a) * (b - mean_b) for a, b in zip(a_ret, b_ret)) / len(a_ret)
