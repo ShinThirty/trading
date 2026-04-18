@@ -1,8 +1,10 @@
 import asyncio
+import re
 import tempfile
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import date, timedelta
+from math import gcd
 from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
@@ -1520,8 +1522,6 @@ async def analyze_option_strategy(
         data["Shares"] = str(equity_position["shares"])
 
     net = result["net_premium"]
-    from math import gcd
-
     leg_qtys = [el.get("quantity", 1) for el in enriched_legs]
     units = gcd(*leg_qtys) if leg_qtys else 1
     per_share = net / units
@@ -2209,8 +2209,6 @@ async def get_income_statement(
         return output
 
     # Fallback to Yahoo Finance (blocking I/O — run in thread)
-    import asyncio
-
     data = await asyncio.to_thread(yfc.income_statement, symbol, freq, limit)
     if not data:
         return f"(no income statement data for {symbol})"
@@ -3305,8 +3303,6 @@ async def get_youtube_transcript(ctx: Context, url: str) -> str:
     url: YouTube video URL or video ID (e.g. 'https://www.youtube.com/watch?v=abc123'
       or just 'abc123').
     """
-    import re
-
     from youtube_transcript_api import YouTubeTranscriptApi
 
     video_id = url
