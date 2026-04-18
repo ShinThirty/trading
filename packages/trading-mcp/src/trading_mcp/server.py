@@ -55,7 +55,14 @@ from trading_clients.portfolio import (
     format_portfolio_summary,
     parse_fidelity_folder,
 )
-from trading_clients.table_helpers import fmt_large, fmt_number, kv_table, list_table, to_float
+from trading_clients.table_helpers import (
+    fmt_large,
+    fmt_number,
+    kv_table,
+    list_table,
+    to_float,
+    to_float_zero,
+)
 from trading_clients.tastytrade_client import TastyTradeClient
 from trading_clients.tradier_client import TradierClient
 from trading_clients.webull_client import WebullClient
@@ -178,15 +185,6 @@ async def _webull_get_with_retry(client: Any, endpoint: Any, request: Any, retri
             raise
 
 
-def _safe_float(val: Any) -> float:
-    if val is None or val == "":
-        return 0.0
-    try:
-        return float(str(val).replace(",", ""))
-    except (ValueError, TypeError):
-        return 0.0
-
-
 async def _write_temp_file(content: str, suffix: str, prefix: str) -> str:
 
     def _sync_write() -> str:
@@ -228,9 +226,9 @@ async def _fetch_accounts(
             errors[label] = str(e)
             continue
 
-        nlv = _safe_float(bal.net_liquidation)
-        cash = _safe_float(bal.cash_balance)
-        mv = _safe_float(bal.market_value)
+        nlv = to_float_zero(bal.net_liquidation)
+        cash = to_float_zero(bal.cash_balance)
+        mv = to_float_zero(bal.market_value)
 
         try:
             pos_resp = await _webull_get_with_retry(webull, POSITIONS, AccountRequest(aid))
@@ -252,8 +250,8 @@ async def _fetch_accounts(
                 nlv=nlv,
                 cash=cash,
                 market_value=mv,
-                day_pnl=_safe_float(bal.day_pnl),
-                unrealized_pnl=_safe_float(bal.unrealized_pnl),
+                day_pnl=to_float_zero(bal.day_pnl),
+                unrealized_pnl=to_float_zero(bal.unrealized_pnl),
                 positions=positions,
             )
         )
@@ -317,7 +315,7 @@ async def _fetch_total_nlv(webull: Any) -> float:
         aid = acct.get("account_id", "")
         try:
             bal = await _webull_get_with_retry(webull, BALANCE, AccountRequest(aid))
-            total += _safe_float(bal.net_liquidation)
+            total += to_float_zero(bal.net_liquidation)
         except Exception:
             continue
     return total
@@ -1075,8 +1073,8 @@ async def get_cc_chain_pnl(
 
     for o in chain_orders:
         side = o.get("side", "")
-        qty = _safe_float(o.get("filled_quantity"))
-        price = _safe_float(o.get("filled_price"))
+        qty = to_float_zero(o.get("filled_quantity"))
+        price = to_float_zero(o.get("filled_price"))
         amount = price * qty * CONTRACT_MULTIPLIER
         leg = o.get("legs", [{}])[0]
 

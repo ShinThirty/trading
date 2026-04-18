@@ -51,9 +51,14 @@ def to_float(val: Any) -> float | None:
     if val is None or val == "":
         return None
     try:
-        return float(val)
+        return float(str(val).replace(",", ""))
     except (ValueError, TypeError):
         return None
+
+
+def to_float_zero(val: Any) -> float:
+    """Safely convert a value to float. Returns 0.0 if not possible."""
+    return to_float(val) or 0.0
 
 
 def fmt_number(val: Any, decimals: int = 2) -> str:
