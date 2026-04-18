@@ -240,7 +240,8 @@ async def _fetch_accounts(
 
     if fidelity_folder:
         try:
-            summaries.extend(parse_fidelity_folder(fidelity_folder))
+            fidelity = await asyncio.to_thread(parse_fidelity_folder, fidelity_folder)
+            summaries.extend(fidelity)
         except Exception as e:
             errors["Fidelity"] = str(e)
 
@@ -272,7 +273,8 @@ async def _fetch_all_positions(
             errors.append(f"{label}: {e}")
 
     if fidelity_folder:
-        for acct in parse_fidelity_folder(fidelity_folder):
+        fidelity = await asyncio.to_thread(parse_fidelity_folder, fidelity_folder)
+        for acct in fidelity:
             all_positions.extend(acct.positions)
 
     return all_positions, errors
