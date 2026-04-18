@@ -2493,28 +2493,14 @@ async def get_market_regime(ctx: Context) -> str:
 
 
 @mcp.tool()
-async def get_conviction_metrics(ctx: Context, symbol: str) -> str:
-    """Compute position sizing metrics from the decision framework: PEG ratio,
-    drawdown %, operating margin trend, and recommended position size tier.
-
-    Pulls P/E + ROE from Finnhub basic financials, quarterly revenue and operating
-    income from SEC filings, and current price / 52W high from Tradier quotes.
-    Returns all computed values in one call — replaces manual math across
-    get_basic_financials + get_income_statement + get_quote.
-
-    symbol: ticker symbol (e.g. 'ADBE').
-
-    Requires [finnhub] and [tradier] sections in ~/.tradingrc.
-    """
-    from trading_clients.table_helpers import kv_table
-
-    finnhub = _finnhub(ctx)
-    tradier = _tradier(ctx)
-
+async def _conviction_data(finnhub_client, tradier_client, symbol: str) -> dict[str, Any]:
+    """Shared conviction computation used by get_conviction_metrics and get_entry_signals."""
     basics_r, fin_r, quote_r = await asyncio.gather(
-        finnhub.get(fh.BASIC_FINANCIALS, fh.BasicFinancialsRequest(symbol)),
-        finnhub.get(fh.FINANCIALS_REPORTED, fh.FinancialsReportedRequest(symbol, "quarterly")),
-        tradier.get(t.QUOTES, t.GetQuotesRequest(symbol)),
+        finnhub_client.get(fh.BASIC_FINANCIALS, fh.BasicFinancialsRequest(symbol)),
+        finnhub_client.get(
+            fh.FINANCIALS_REPORTED, fh.FinancialsReportedRequest(symbol, "quarterly")
+        ),
+        tradier_client.get(t.QUOTES, t.GetQuotesRequest(symbol)),
         return_exceptions=True,
     )
 
@@ -2533,13 +2519,10 @@ async def get_conviction_metrics(ctx: Context, symbol: str) -> str:
 
     quarters = fin.income_numeric(8) if fin else []
 
-    # ── Drawdown ──
     drawdown_pct = None
     if price and high_52w and high_52w > 0:
         drawdown_pct = (price - high_52w) / high_52w * 100
 
-    # ── Revenue growth (YoY) ──
-    # Match most recent quarter to same quarter ~1 year ago by period date
     rev_growth = None
     current_q = None
     prior_q = None
@@ -2549,7 +2532,6 @@ async def get_conviction_metrics(ctx: Context, symbol: str) -> str:
         cur_fy = current_q.get("fiscal_year")
         cur_fq = current_q.get("fiscal_quarter")
         if current_rev and cur_fy and cur_fq:
-            # Match by fiscal quarter identifier (Q1→Q1, Q2→Q2)
             for q_row in quarters[1:]:
                 if q_row.get("fiscal_quarter") == cur_fq and q_row.get("fiscal_year") == cur_fy - 1:
                     prior_rev = q_row.get("Revenue")
@@ -2558,7 +2540,6 @@ async def get_conviction_metrics(ctx: Context, symbol: str) -> str:
                         rev_growth = (current_rev - prior_rev) / prior_rev * 100
                     break
 
-    # ── Operating margin trend ──
     margins: list[tuple[str, float]] = []
     for q_row in quarters[:4]:
         rev = q_row.get("Revenue")
@@ -2569,7 +2550,6 @@ async def get_conviction_metrics(ctx: Context, symbol: str) -> str:
 
     margin_trend = None
     if len(margins) >= 2:
-        # Compare most recent to previous quarter
         if margins[0][1] > margins[1][1] + 0.5:
             margin_trend = "Expanding"
         elif margins[0][1] < margins[1][1] - 0.5:
@@ -2577,7 +2557,6 @@ async def get_conviction_metrics(ctx: Context, symbol: str) -> str:
         else:
             margin_trend = "Stable"
 
-    # ── PEG ──
     peg = None
     peg_valid = True
     peg_note = ""
@@ -2594,7 +2573,6 @@ async def get_conviction_metrics(ctx: Context, symbol: str) -> str:
         else:
             peg = pe / rev_growth
 
-    # ── Position size recommendation ──
     if peg is not None and peg_valid:
         if peg < 1.5:
             size = "Full — PEG < 1.5"
@@ -2616,47 +2594,72 @@ async def get_conviction_metrics(ctx: Context, symbol: str) -> str:
     else:
         size = "Unable to determine — missing P/E data"
 
-    # ── Build output ──
+    return {
+        "pe": pe, "roe": roe, "de": de, "price": price, "high_52w": high_52w,
+        "drawdown_pct": drawdown_pct, "rev_growth": rev_growth,
+        "current_q": current_q, "prior_q": prior_q,
+        "margins": margins, "margin_trend": margin_trend,
+        "peg": peg, "peg_valid": peg_valid, "peg_note": peg_note, "size": size,
+    }
+
+
+@mcp.tool()
+async def get_conviction_metrics(ctx: Context, symbol: str) -> str:
+    """Compute position sizing metrics from the decision framework: PEG ratio,
+    drawdown %, operating margin trend, and recommended position size tier.
+
+    Pulls P/E + ROE from Finnhub basic financials, quarterly revenue and operating
+    income from SEC filings, and current price / 52W high from Tradier quotes.
+    Returns all computed values in one call — replaces manual math across
+    get_basic_financials + get_income_statement + get_quote.
+
+    symbol: ticker symbol (e.g. 'ADBE').
+
+    Requires [finnhub] and [tradier] sections in ~/.tradingrc.
+    """
+    from trading_clients.table_helpers import kv_table
+
+    d = await _conviction_data(_finnhub(ctx), _tradier(ctx), symbol)
+
     data: dict[str, str] = {"Symbol": symbol}
 
-    if price:
-        data["Price"] = f"${price:,.2f}"
-    if high_52w:
-        data["52W High"] = f"${high_52w:,.2f}"
-    if drawdown_pct is not None:
-        data["Drawdown"] = f"{drawdown_pct:+.1f}%"
+    if d["price"]:
+        data["Price"] = f"${d['price']:,.2f}"
+    if d["high_52w"]:
+        data["52W High"] = f"${d['high_52w']:,.2f}"
+    if d["drawdown_pct"] is not None:
+        data["Drawdown"] = f"{d['drawdown_pct']:+.1f}%"
 
-    if pe is not None:
-        data["P/E (TTM)"] = f"{pe:.1f}"
-    if roe is not None:
-        data["ROE (TTM)"] = f"{roe:.1f}%"
-    if de is not None:
-        data["Debt/Equity"] = f"{de:.2f}"
+    if d["pe"] is not None:
+        data["P/E (TTM)"] = f"{d['pe']:.1f}"
+    if d["roe"] is not None:
+        data["ROE (TTM)"] = f"{d['roe']:.1f}%"
+    if d["de"] is not None:
+        data["Debt/Equity"] = f"{d['de']:.2f}"
 
-    if current_q and prior_q:
-        cr = current_q.get("Revenue")
-        pr = prior_q.get("Revenue")
+    if d["current_q"] and d["prior_q"]:
+        cr = d["current_q"].get("Revenue")
+        pr = d["prior_q"].get("Revenue")
         data["Revenue (Current Q)"] = (
             f"${cr / 1e9:.2f}B" if cr and cr >= 1e9 else (f"${cr / 1e6:.0f}M" if cr else "N/A")
         )
         data["Revenue (Prior YoY Q)"] = (
             f"${pr / 1e9:.2f}B" if pr and pr >= 1e9 else (f"${pr / 1e6:.0f}M" if pr else "N/A")
         )
-    if rev_growth is not None:
-        data["Revenue Growth (YoY)"] = f"{rev_growth:.1f}%"
+    if d["rev_growth"] is not None:
+        data["Revenue Growth (YoY)"] = f"{d['rev_growth']:.1f}%"
 
-    if margins:
-        margin_strs = [f"{p[:7]} {m:.1f}%" for p, m in margins]
-        data["Operating Margin"] = " → ".join(margin_strs)
-    if margin_trend:
-        data["Margin Trend"] = margin_trend
+    if d["margins"]:
+        data["Operating Margin"] = " → ".join(f"{p[:7]} {m:.1f}%" for p, m in d["margins"])
+    if d["margin_trend"]:
+        data["Margin Trend"] = d["margin_trend"]
 
-    if peg is not None and peg_valid:
-        data["PEG"] = f"{peg:.2f}"
-    elif peg_note:
-        data["PEG"] = peg_note
+    if d["peg"] is not None and d["peg_valid"]:
+        data["PEG"] = f"{d['peg']:.2f}"
+    elif d["peg_note"]:
+        data["PEG"] = d["peg_note"]
 
-    data["Position Size"] = size
+    data["Position Size"] = d["size"]
 
     return kv_table(data)
 
@@ -2704,6 +2707,175 @@ async def calculate_position_size(
             "Shares": str(shares),
         }
     )
+
+
+@mcp.tool()
+async def get_entry_signals(ctx: Context, symbol: str) -> str:
+    """Aggregate conviction, IV, and momentum signals for a stock and detect
+    circuit breakers from the decision framework (Steps 1-2).
+
+    Combines get_conviction_metrics + get_iv_metrics + get_technical_indicators
+    into one call. Automatically flags triggered circuit breakers:
+    - Value Trap: RSI <30 but margins compressing or severe headwind
+    - Price Dislocation: downtrend but revenue accelerating + ROE >25%
+    - FOMO Trap: near ATH + RSI >70 but PEG >3.0
+    - Front-Run Catalyst: stock rallied >8% in prior 2 weeks
+
+    symbol: ticker symbol (e.g. 'ULTA').
+
+    Requires [finnhub], [tradier], and [tastytrade] sections in ~/.tradingrc.
+    """
+    from trading_clients.table_helpers import kv_table
+
+    finnhub = _finnhub(ctx)
+    tradier = _tradier(ctx)
+    tastytrade = _tastytrade(ctx)
+
+    conv_task = _conviction_data(finnhub, tradier, symbol)
+    iv_task = tastytrade.get(tt.MARKET_METRICS, tt.MarketMetricsRequest(symbol))
+    hist_task = tradier.get(t.HISTORY, t.GetHistoryRequest(symbol, "daily"))
+
+    conv_r, iv_r, hist_r = await asyncio.gather(
+        conv_task, iv_task, hist_task, return_exceptions=True
+    )
+
+    d = conv_r if not isinstance(conv_r, BaseException) else {}
+    iv_resp = None if isinstance(iv_r, BaseException) else iv_r
+    hist_resp = None if isinstance(hist_r, BaseException) else hist_r
+
+    price = d.get("price")
+    drawdown_pct = d.get("drawdown_pct")
+    pe = d.get("pe")
+    roe = d.get("roe")
+    de = d.get("de")
+    rev_growth = d.get("rev_growth")
+    margins = d.get("margins", [])
+    margin_trend = d.get("margin_trend")
+    peg = d.get("peg")
+    peg_valid = d.get("peg_valid", False)
+    size = d.get("size", "Unknown")
+
+    # ── IV metrics ──
+    iv_item = iv_resp.items[0] if iv_resp and iv_resp.items else {}
+    iv_rank_raw = iv_item.get("tw-implied-volatility-index-rank")
+    iv_rank = iv_rank_raw * 100 if iv_rank_raw is not None else None
+    iv_30d = iv_item.get("implied-volatility-30-day")
+    hv_30d = iv_item.get("historical-volatility-30-day")
+    iv_hv_raw = iv_item.get("iv-hv-30-day-difference")
+    iv_hv = iv_hv_raw * 100 if iv_hv_raw is not None else None
+    earnings = iv_item.get("earnings", {})
+    earnings_date = earnings.get("expected-report-date") if isinstance(earnings, dict) else None
+    liq = iv_item.get("liquidity-rating")
+
+    # ── Technical indicators ──
+    bars = hist_resp.days if hist_resp else []
+    closes = [float(b["close"]) for b in bars] if bars else []
+
+    rsi_val = None
+    sma50_val = None
+    sma200_val = None
+    above_sma50 = None
+    above_sma200 = None
+    rally_2w_pct = None
+
+    if closes:
+        rsi_vals = ta.rsi(closes)
+        rsi_val = rsi_vals[-1] if rsi_vals else None
+
+        sma50_vals = ta.sma(closes, 50)
+        sma50_val = sma50_vals[-1]
+        if sma50_val is not None and price:
+            above_sma50 = price > sma50_val
+
+        sma200_vals = ta.sma(closes, 200)
+        sma200_val = sma200_vals[-1]
+        if sma200_val is not None and price:
+            above_sma200 = price > sma200_val
+
+        if len(closes) >= 10:
+            price_2w_ago = closes[-10]
+            if price_2w_ago > 0:
+                rally_2w_pct = (closes[-1] - price_2w_ago) / price_2w_ago * 100
+
+    # ── Circuit breakers ──
+    breakers: list[str] = []
+
+    if rsi_val is not None and rsi_val < 30 and margin_trend == "Compressing":
+        breakers.append("Value Trap — RSI <30 but margins compressing. Hard stop.")
+
+    in_downtrend = above_sma50 is False and above_sma200 is False
+    if in_downtrend and rev_growth is not None and rev_growth > 0 and roe is not None and roe > 25:
+        breakers.append(
+            "Price Dislocation — downtrend but revenue accelerating + ROE >25%. "
+            "Proceed with Hybrid (CSP-heavy) entry."
+        )
+
+    near_ath = drawdown_pct is not None and drawdown_pct > -5
+    if near_ath and rsi_val is not None and rsi_val > 70 and peg is not None and peg > 3.0:
+        breakers.append("FOMO Trap — near ATH + RSI >70 + PEG >3. Reduced tier only.")
+
+    if rally_2w_pct is not None and rally_2w_pct > 8 and earnings_date:
+        breakers.append(
+            f"Front-Run Catalyst — rallied {rally_2w_pct:.1f}% in 2 weeks into "
+            f"{earnings_date} earnings. Wait for post-catalyst reaction."
+        )
+
+    # ── Build output ──
+    data: dict[str, str] = {"Symbol": symbol}
+
+    if price:
+        data["Price"] = f"${price:,.2f}"
+    if drawdown_pct is not None:
+        data["Drawdown"] = f"{drawdown_pct:+.1f}%"
+
+    if roe is not None:
+        roe_str = f"{roe:.1f}%"
+        if de is not None and de > 3:
+            roe_str += f" (D/E {de:.1f} — leverage-inflated)"
+        data["ROE"] = roe_str
+    if pe is not None:
+        data["P/E"] = f"{pe:.1f}"
+    if rev_growth is not None:
+        data["Revenue Growth (YoY)"] = f"{rev_growth:.1f}%"
+    if margins:
+        data["Op Margin"] = " → ".join(f"{p[:7]} {m:.1f}%" for p, m in margins)
+    if margin_trend:
+        data["Margin Trend"] = margin_trend
+    if peg is not None and peg_valid:
+        data["PEG"] = f"{peg:.2f}"
+    data["Size Tier"] = size
+
+    if iv_rank is not None:
+        data["IV Rank"] = f"{iv_rank:.0f}%"
+    if iv_hv is not None:
+        data["IV-HV"] = f"{iv_hv:+.1f}%"
+    if iv_30d is not None:
+        data["IV 30d"] = f"{iv_30d * 100:.1f}%"
+    if hv_30d is not None:
+        data["HV 30d"] = f"{hv_30d * 100:.1f}%"
+    if earnings_date:
+        data["Earnings"] = earnings_date
+    if liq is not None:
+        data["Liquidity"] = str(liq)
+
+    if rsi_val is not None:
+        level = "oversold" if rsi_val < 30 else "overbought" if rsi_val > 70 else "neutral"
+        data["RSI(14)"] = f"{rsi_val:.1f} ({level})"
+    if sma50_val is not None:
+        rel = "above" if above_sma50 else "below"
+        data["SMA(50)"] = f"{sma50_val:.2f} (price {rel})"
+    if sma200_val is not None:
+        rel = "above" if above_sma200 else "below"
+        data["SMA(200)"] = f"{sma200_val:.2f} (price {rel})"
+    if rally_2w_pct is not None:
+        data["2W Rally"] = f"{rally_2w_pct:+.1f}%"
+
+    if breakers:
+        data["Circuit Breakers"] = " | ".join(breakers)
+    else:
+        data["Circuit Breakers"] = "None"
+
+    return kv_table(data)
 
 
 # ═══════════════════════════════════════════════════════════════
