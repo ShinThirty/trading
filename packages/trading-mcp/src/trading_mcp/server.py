@@ -187,6 +187,17 @@ def _safe_float(val: Any) -> float:
         return 0.0
 
 
+async def _write_temp_file(content: str, suffix: str, prefix: str) -> str:
+
+    def _sync_write() -> str:
+        f = tempfile.NamedTemporaryFile(mode="w", suffix=suffix, prefix=prefix, delete=False)
+        f.write(content)
+        f.close()
+        return f.name
+
+    return await asyncio.to_thread(_sync_write)
+
+
 # ── Portfolio helpers ────────────────────────────────────────
 
 
@@ -249,8 +260,7 @@ async def _fetch_accounts(
 
     if fidelity_folder:
         try:
-            fidelity = await asyncio.to_thread(parse_fidelity_folder, fidelity_folder)
-            summaries.extend(fidelity)
+            summaries.extend(await parse_fidelity_folder(fidelity_folder))
         except Exception as e:
             errors["Fidelity"] = str(e)
 
@@ -280,8 +290,7 @@ async def _fetch_all_positions(
             errors.append(f"{label}: {e}")
 
     if fidelity_folder:
-        fidelity = await asyncio.to_thread(parse_fidelity_folder, fidelity_folder)
-        for acct in fidelity:
+        for acct in await parse_fidelity_folder(fidelity_folder):
             all_positions.extend(acct.positions)
 
     return all_positions, errors
@@ -746,11 +755,9 @@ async def get_portfolio_summary(
     full_output = format_portfolio_summary(portfolio)
 
     # Save full details to temp file, return compact summary
-    f = tempfile.NamedTemporaryFile(mode="w", suffix=".md", prefix="portfolio_", delete=False)
-    f.write(full_output)
-    f.close()
+    path = await _write_temp_file(full_output, ".md", "portfolio_")
 
-    return compact_portfolio_summary(portfolio, f.name)
+    return compact_portfolio_summary(portfolio, path)
 
 
 @mcp.tool()
@@ -1152,11 +1159,10 @@ async def get_portfolio_greeks(
     # 4. Aggregate and format
     result = opts.aggregate_greeks(all_positions, greeks_by_symbol)
 
-    f = tempfile.NamedTemporaryFile(mode="w", suffix=".md", prefix="greeks_", delete=False)
-    f.write(format_greeks_detail(result["totals"], result["by_underlying"]))
-    f.close()
+    detail = format_greeks_detail(result["totals"], result["by_underlying"])
+    path = await _write_temp_file(detail, ".md", "greeks_")
 
-    output = format_greeks_compact(result["totals"], len(option_positions), f.name)
+    output = format_greeks_compact(result["totals"], len(option_positions), path)
     if errors:
         output += "\nErrors: " + "; ".join(errors)
     return output
@@ -2088,7 +2094,7 @@ async def get_eps_estimates(ctx: Context, symbol: str) -> str:
     Uses Yahoo Finance via yfinance (no API key required).
     """
 
-    data = await asyncio.to_thread(yfc.earnings_estimate, symbol)
+    data = await yfc.earnings_estimate(symbol)
     if not data:
         return f"(no EPS estimates for {symbol})"
     rows = [
@@ -2128,7 +2134,7 @@ async def get_price_target(ctx: Context, symbol: str) -> str:
     Uses Yahoo Finance via yfinance (no API key required).
     """
 
-    data = await asyncio.to_thread(yfc.analyst_price_targets, symbol)
+    data = await yfc.analyst_price_targets(symbol)
     if not data:
         return f"(no price targets for {symbol})"
     return kv_table(
@@ -2206,8 +2212,8 @@ async def get_income_statement(
     if output != "(no data)":
         return output
 
-    # Fallback to Yahoo Finance (blocking I/O — run in thread)
-    data = await asyncio.to_thread(yfc.income_statement, symbol, freq, limit)
+    # Fallback to Yahoo Finance
+    data = await yfc.income_statement(symbol, freq, limit)
     if not data:
         return f"(no income statement data for {symbol})"
 
@@ -3194,7 +3200,7 @@ async def screen_stocks(
     Uses Yahoo Finance via yfinance (no API key required). Data is 15-minute delayed.
     """
     ascending = sort_dir == "ASC"
-    result = await asyncio.to_thread(yfc.custom_screen, criteria, sort_field, ascending, limit)
+    result = await yfc.custom_screen(criteria, sort_field, ascending, limit)
     return ScreenerResponse.from_response(result).to_output()
 
 
@@ -3216,7 +3222,7 @@ async def get_predefined_screen(ctx: Context, screen_id: str, count: int = 25) -
 
     Uses Yahoo Finance via yfinance (no API key required). Data is 15-minute delayed.
     """
-    result = await asyncio.to_thread(yfc.predefined_screen, screen_id, count)
+    result = await yfc.predefined_screen(screen_id, count)
     return ScreenerResponse.from_response(result).to_output()
 
 
@@ -3233,7 +3239,7 @@ async def get_institutional_ownership(ctx: Context, symbol: str) -> str:
     Uses Yahoo Finance via yfinance (no API key required).
     """
 
-    holders = await asyncio.to_thread(yfc.institutional_holders, symbol)
+    holders = await yfc.institutional_holders(symbol)
     if not holders:
         return f"(no institutional ownership data for {symbol})"
     rows = [
@@ -3262,7 +3268,7 @@ async def get_short_interest(ctx: Context, symbol: str) -> str:
     Uses Yahoo Finance via yfinance (no API key required).
     """
 
-    data = await asyncio.to_thread(yfc.short_interest, symbol)
+    data = await yfc.short_interest(symbol)
     if not any(data.values()):
         return f"(no short interest data for {symbol})"
     result: dict[str, str] = {}

@@ -4,6 +4,7 @@ Parses Fidelity CSVs and composes Webull API data into a consolidated
 cross-account portfolio summary.
 """
 
+import asyncio
 import csv
 import re
 from dataclasses import dataclass, field
@@ -83,7 +84,7 @@ class FidelityFormatError(ValueError):
     """Raised when a Fidelity CSV doesn't match the expected format."""
 
 
-def parse_fidelity_csv(path: str) -> AccountSummary:
+async def parse_fidelity_csv(path: str) -> AccountSummary:
     """Parse a single-account Fidelity positions CSV.
 
     Handles the current Fidelity export format:
@@ -93,7 +94,7 @@ def parse_fidelity_csv(path: str) -> AccountSummary:
 
     Raises FidelityFormatError if the CSV format is unrecognized.
     """
-    text = Path(path).read_text(encoding="utf-8-sig").splitlines()
+    text = (await asyncio.to_thread(Path(path).read_text, encoding="utf-8-sig")).splitlines()
 
     # Find header row
     header_idx = -1
@@ -211,13 +212,13 @@ def parse_fidelity_csv(path: str) -> AccountSummary:
     )
 
 
-def parse_fidelity_folder(folder: str) -> list[AccountSummary]:
+async def parse_fidelity_folder(folder: str) -> list[AccountSummary]:
     """Parse all Fidelity position CSVs in a folder."""
     folder_path = Path(folder).expanduser()
     if not folder_path.is_dir():
         return []
     csvs = sorted(folder_path.glob("*Positions*.csv"))
-    return [parse_fidelity_csv(str(p)) for p in csvs]
+    return await asyncio.gather(*(parse_fidelity_csv(str(p)) for p in csvs))
 
 
 def compact_portfolio_summary(summary: PortfolioSummary, file_path: str) -> str:

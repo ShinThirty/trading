@@ -1,3 +1,4 @@
+import asyncio
 import configparser
 from dataclasses import dataclass
 from pathlib import Path
@@ -132,12 +133,16 @@ def load_config(path: Path = RC_PATH) -> AppConfig:
     )
 
 
-def save_webull_token(token: str, path: Path = RC_PATH) -> None:
+async def save_webull_token(token: str, path: Path = RC_PATH) -> None:
     """Save a new Webull access token to ~/.tradingrc."""
-    parser = configparser.ConfigParser()
-    parser.read(path)
-    if not parser.has_section("webull"):
-        raise KeyError("[webull] section missing in " + str(path))
-    parser.set("webull", "token", token)
-    with open(path, "w") as f:
-        parser.write(f)
+
+    def _sync_save() -> None:
+        parser = configparser.ConfigParser()
+        parser.read(path)
+        if not parser.has_section("webull"):
+            raise KeyError("[webull] section missing in " + str(path))
+        parser.set("webull", "token", token)
+        with open(path, "w") as f:
+            parser.write(f)
+
+    await asyncio.to_thread(_sync_save)

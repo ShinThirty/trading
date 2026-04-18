@@ -1,4 +1,3 @@
-import threading
 import time
 from typing import Any
 
@@ -8,8 +7,6 @@ class TTLCache:
 
     Safe in async contexts without locks: all operations are synchronous dict
     mutations with no await points, so no coroutine can interleave mid-operation.
-
-    NOT thread-safe — use ThreadSafeTTLCache for multi-thread access.
     """
 
     def __init__(self) -> None:
@@ -34,23 +31,3 @@ class TTLCache:
         else:
             for k in [k for k in self._store if k.startswith(prefix)]:
                 del self._store[k]
-
-
-class ThreadSafeTTLCache(TTLCache):
-    """TTLCache with a lock for safe access from multiple threads (e.g. asyncio.to_thread)."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self._lock = threading.Lock()
-
-    def get(self, key: str, ttl: int) -> Any | None:
-        with self._lock:
-            return super().get(key, ttl)
-
-    def put(self, key: str, value: Any) -> None:
-        with self._lock:
-            super().put(key, value)
-
-    def invalidate(self, prefix: str | None = None) -> None:
-        with self._lock:
-            super().invalidate(prefix)

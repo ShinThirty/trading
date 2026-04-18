@@ -145,7 +145,7 @@ class WebullClient(BaseClient):
             raise RuntimeError(f"Failed to create Webull token: {resp.status_code} — {msg}")
         data = resp.json()
         token = data["token"]
-        save_webull_token(token)
+        await save_webull_token(token)
         self._token = token
         return token
 
