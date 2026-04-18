@@ -69,9 +69,7 @@ class ObservationsResponse:
     def to_output(self) -> str:
         if not self.observations:
             return "(no data)"
-        return ", ".join(
-            f"{o.get('date', '')}: {o.get('value', '')}" for o in self.observations
-        )
+        return ", ".join(f"{o.get('date', '')}: {o.get('value', '')}" for o in self.observations)
 
 
 @dataclass
@@ -108,9 +106,7 @@ class ReleasesResponse:
     def to_output(self) -> str:
         if not self.releases:
             return "(no releases)"
-        return ", ".join(
-            f"{r.get('date', '')} {r.get('release_name', '')}" for r in self.releases
-        )
+        return ", ".join(f"{r.get('date', '')} {r.get('release_name', '')}" for r in self.releases)
 
 
 @dataclass

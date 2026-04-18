@@ -258,6 +258,7 @@ KEY_METRICS = Endpoint("/key-metrics", cache_ttl=3600, response_model=KeyMetrics
 
 EARNINGS = Endpoint("/earnings", cache_ttl=3600, response_model=FmpEarningsResponse)
 
+
 @dataclass
 class SectorPerformanceResponse:
     sectors: list[dict]

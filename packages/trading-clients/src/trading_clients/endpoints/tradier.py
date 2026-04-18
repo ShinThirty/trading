@@ -445,6 +445,3 @@ CLOCK = Endpoint(
     response_model=ClockResponse,
     extract=lambda d: d.get("clock", {}),
 )
-
-
-

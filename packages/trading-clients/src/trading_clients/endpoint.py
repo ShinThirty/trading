@@ -135,9 +135,7 @@ class BaseClient(ABC):
         """Send a DELETE request and return the typed response model."""
         async with self._semaphore:
             path = self._resolve_path(endpoint, request)
-            data = await self._request(
-                "DELETE", endpoint, path=path, params=request.to_params()
-            )
+            data = await self._request("DELETE", endpoint, path=path, params=request.to_params())
             return self._decode(endpoint, data)
 
     @staticmethod

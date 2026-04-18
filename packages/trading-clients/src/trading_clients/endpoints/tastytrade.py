@@ -166,8 +166,7 @@ class WatchlistsResponse:
         if not self.watchlists:
             return "(no watchlists)"
         entries = [
-            f"{w.get('name', '')} ({len(w.get('watchlist-entries', []))})"
-            for w in self.watchlists
+            f"{w.get('name', '')} ({len(w.get('watchlist-entries', []))})" for w in self.watchlists
         ]
         return ", ".join(entries)
 

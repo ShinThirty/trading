@@ -251,11 +251,15 @@ PEERS = Endpoint("/stock/peers", cache_ttl=3600, response_model=PeersResponse)
 # First match wins; order matters for fallback.
 
 _IC_ITEMS: list[tuple[str, list[str]]] = [
-    ("Revenue", [
-        "RevenueFromContractWithCustomerExcludingAssessedTax",
-        "RevenueFromContractWithCustomerIncludingAssessedTax",
-        "Revenues", "SalesRevenueNet",
-    ]),
+    (
+        "Revenue",
+        [
+            "RevenueFromContractWithCustomerExcludingAssessedTax",
+            "RevenueFromContractWithCustomerIncludingAssessedTax",
+            "Revenues",
+            "SalesRevenueNet",
+        ],
+    ),
     ("Cost of Revenue", ["CostOfGoodsAndServicesSold", "CostOfRevenue"]),
     ("Gross Profit", ["GrossProfit"]),
     ("Operating Income", ["OperatingIncomeLoss"]),
@@ -264,40 +268,58 @@ _IC_ITEMS: list[tuple[str, list[str]]] = [
 ]
 
 _BS_ITEMS: list[tuple[str, list[str]]] = [
-    ("Cash", [
-        "CashAndCashEquivalentsAtCarryingValue",
-        "CashCashEquivalentsAndShortTermInvestments",
-    ]),
+    (
+        "Cash",
+        [
+            "CashAndCashEquivalentsAtCarryingValue",
+            "CashCashEquivalentsAndShortTermInvestments",
+        ],
+    ),
     ("Current Assets", ["AssetsCurrent"]),
     ("Total Assets", ["Assets"]),
     ("Current Liabilities", ["LiabilitiesCurrent"]),
     ("Long-term Debt", ["LongTermDebtNoncurrent", "LongTermDebt"]),
     ("Total Liabilities", ["Liabilities"]),
-    ("Total Equity", [
-        "StockholdersEquity",
-        "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
-    ]),
+    (
+        "Total Equity",
+        [
+            "StockholdersEquity",
+            "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
+        ],
+    ),
 ]
 
 _CF_ITEMS: list[tuple[str, list[str]]] = [
-    ("Operating CF", [
-        "NetCashProvidedByUsedInOperatingActivities",
-        "NetCashProvidedByOperatingActivities",
-    ]),
-    ("Capex", [
-        "PaymentsToAcquirePropertyPlantAndEquipment",
-        "PaymentsToAcquireProductiveAssets",
-    ]),
-    ("Investing CF", [
-        "NetCashProvidedByUsedInInvestingActivities",
-        "NetCashProvidedByUsedInInvestingActivitiesContinuingOperations",
-    ]),
+    (
+        "Operating CF",
+        [
+            "NetCashProvidedByUsedInOperatingActivities",
+            "NetCashProvidedByOperatingActivities",
+        ],
+    ),
+    (
+        "Capex",
+        [
+            "PaymentsToAcquirePropertyPlantAndEquipment",
+            "PaymentsToAcquireProductiveAssets",
+        ],
+    ),
+    (
+        "Investing CF",
+        [
+            "NetCashProvidedByUsedInInvestingActivities",
+            "NetCashProvidedByUsedInInvestingActivitiesContinuingOperations",
+        ],
+    ),
     ("Dividends", ["PaymentsOfDividends", "PaymentsOfDividendsCommonStock"]),
     ("Buybacks", ["PaymentsForRepurchaseOfCommonStock"]),
-    ("Financing CF", [
-        "NetCashProvidedByUsedInFinancingActivities",
-        "NetCashProvidedByUsedInFinancingActivitiesContinuingOperations",
-    ]),
+    (
+        "Financing CF",
+        [
+            "NetCashProvidedByUsedInFinancingActivities",
+            "NetCashProvidedByUsedInFinancingActivitiesContinuingOperations",
+        ],
+    ),
 ]
 
 
@@ -329,9 +351,7 @@ class FinancialsReportedResponse:
                 result[suffix] = item
         return result
 
-    def _extract_section(
-        self, section: str, items: list[tuple[str, list[str]]], limit: int
-    ) -> str:
+    def _extract_section(self, section: str, items: list[tuple[str, list[str]]], limit: int) -> str:
         if not self.reports:
             return "(no data)"
         rows = []
