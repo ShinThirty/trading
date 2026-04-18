@@ -55,6 +55,7 @@ from trading_clients.portfolio import (
     format_portfolio_summary,
     parse_fidelity_folder,
 )
+from trading_clients.table_helpers import fmt_large, fmt_number, kv_table, list_table
 from trading_clients.tastytrade_client import TastyTradeClient
 from trading_clients.tradier_client import TradierClient
 from trading_clients.webull_client import WebullClient
@@ -86,7 +87,6 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
 
 
 mcp = FastMCP("trading-mcp", lifespan=lifespan)
-
 
 # ═══════════════════════════════════════════════════════════════
 # Helpers
@@ -416,11 +416,21 @@ async def _conviction_data(finnhub_client, tradier_client, symbol: str) -> dict[
         size = "Unable to determine — missing P/E data"
 
     return {
-        "pe": pe, "roe": roe, "de": de, "price": price, "high_52w": high_52w,
-        "drawdown_pct": drawdown_pct, "rev_growth": rev_growth,
-        "current_q": current_q, "prior_q": prior_q,
-        "margins": margins, "margin_trend": margin_trend,
-        "peg": peg, "peg_valid": peg_valid, "peg_note": peg_note, "size": size,
+        "pe": pe,
+        "roe": roe,
+        "de": de,
+        "price": price,
+        "high_52w": high_52w,
+        "drawdown_pct": drawdown_pct,
+        "rev_growth": rev_growth,
+        "current_q": current_q,
+        "prior_q": prior_q,
+        "margins": margins,
+        "margin_trend": margin_trend,
+        "peg": peg,
+        "peg_valid": peg_valid,
+        "peg_note": peg_note,
+        "size": size,
     }
 
 
@@ -757,7 +767,6 @@ async def get_csp_utilization(
     fidelity_folder: path to folder containing Fidelity Positions_*.csv files
       (e.g. '~/Downloads/fidelity'). Omit to show Webull only.
     """
-    from trading_clients.table_helpers import fmt_number, kv_table, list_table
 
     summaries, _ = await _fetch_accounts(_webull(ctx), fidelity_folder)
 
@@ -833,7 +842,6 @@ async def get_free_capital(
     fidelity_folder: path to folder containing Fidelity Portfolio_Positions_*.csv
       files (e.g. '~/Downloads/fidelity'). Omit to show Webull only.
     """
-    from trading_clients.table_helpers import fmt_number, kv_table, list_table
 
     summaries, errors = await _fetch_accounts(_webull(ctx), fidelity_folder)
 
@@ -923,7 +931,6 @@ async def get_cc_coverage(
 
     account_id: Webull account ID.
     """
-    from trading_clients.table_helpers import fmt_number, list_table
 
     client = _webull(ctx)
     aid = client.ensure_account_id(account_id)
@@ -1015,7 +1022,6 @@ async def get_cc_chain_pnl(
     option_type: 'call' for covered calls, 'put' for CSPs (default 'call').
     start_date: earliest date to search (YYYY-MM-DD). Defaults to 90 days ago.
     """
-    from trading_clients.table_helpers import fmt_number, kv_table, list_table
 
     client = _webull(ctx)
     aid = client.ensure_account_id(account_id)
@@ -1275,7 +1281,6 @@ async def get_expected_move(ctx: Context, symbol: str, expiration: str) -> str:
 
     Requires [tradier] section in ~/.tradingrc.
     """
-    from trading_clients.table_helpers import fmt_number, kv_table
 
     tradier = _tradier(ctx)
 
@@ -1380,7 +1385,6 @@ async def analyze_option_strategy(
 
     Requires [tradier] section in ~/.tradingrc.
     """
-    from trading_clients.table_helpers import fmt_number, kv_table
 
     tradier = _tradier(ctx)
 
@@ -1470,7 +1474,6 @@ async def analyze_option_strategy(
         result = opts.strategy_analysis(enriched_legs, stock_price, equity_position)
 
     # Build leg detail table
-    from trading_clients.table_helpers import list_table
 
     leg_rows = []
     if equity_position:
@@ -1631,7 +1634,6 @@ async def analyze_roll(
 
     Requires [tradier] section in ~/.tradingrc.
     """
-    from trading_clients.table_helpers import fmt_number, kv_table
 
     tradier = _tradier(ctx)
 
@@ -1977,7 +1979,6 @@ async def get_technical_indicators(
 
     # Recent history table
     sections.append("\n### Recent Values")
-    from trading_clients.table_helpers import fmt_number, list_table
 
     rows = []
     start = max(0, len(bars) - tail)
@@ -2086,7 +2087,6 @@ async def get_eps_estimates(ctx: Context, symbol: str) -> str:
 
     Uses Yahoo Finance via yfinance (no API key required).
     """
-    from trading_clients.table_helpers import fmt_number, list_table
 
     data = await asyncio.to_thread(yfc.earnings_estimate, symbol)
     if not data:
@@ -2127,7 +2127,6 @@ async def get_price_target(ctx: Context, symbol: str) -> str:
 
     Uses Yahoo Finance via yfinance (no API key required).
     """
-    from trading_clients.table_helpers import fmt_number, kv_table
 
     data = await asyncio.to_thread(yfc.analyst_price_targets, symbol)
     if not data:
@@ -2198,7 +2197,6 @@ async def get_income_statement(
     Requires [finnhub] section in ~/.tradingrc. Falls back to Yahoo Finance
     if Finnhub has no data for the symbol.
     """
-    from trading_clients.table_helpers import fmt_number, list_table
 
     freq = "quarterly" if period in ("quarter", "quarterly") else "annual"
     result = await _finnhub(ctx).get(
@@ -2537,8 +2535,6 @@ async def get_market_regime(ctx: Context) -> str:
         if parts:
             data["IV Context"] = f"SPY {', '.join(parts)}"
 
-    from trading_clients.table_helpers import kv_table
-
     return f"## Market Regime\n\n{kv_table(data)}"
 
 
@@ -2556,7 +2552,6 @@ async def get_conviction_metrics(ctx: Context, symbol: str) -> str:
 
     Requires [finnhub] and [tradier] sections in ~/.tradingrc.
     """
-    from trading_clients.table_helpers import kv_table
 
     d = await _conviction_data(_finnhub(ctx), _tradier(ctx), symbol)
 
@@ -2621,7 +2616,6 @@ async def calculate_position_size(
     total_assets: total portfolio value in the target account (e.g. 500000).
     tier: sizing tier from get_conviction_metrics — 'full', 'standard', or 'reduced'.
     """
-    from trading_clients.table_helpers import kv_table
 
     fracs = {"full": 0.10, "standard": 0.05, "reduced": 0.02}
     frac = fracs.get(tier.lower())
@@ -2671,7 +2665,6 @@ async def calculate_hedge(
 
     Requires [webull] and [tradier] sections in ~/.tradingrc.
     """
-    from trading_clients.table_helpers import kv_table
 
     if hedge_index.upper() not in ("SPY", "QQQ"):
         return "hedge_index must be 'SPY' or 'QQQ'"
@@ -2696,7 +2689,8 @@ async def calculate_hedge(
 
     # Filter to equity-only positions with value
     equities = [
-        p for p in positions
+        p
+        for p in positions
         if not p.get("is_option") and not p.get("is_cash") and p.get("value", 0) > 0
     ]
     if not equities:
@@ -2723,9 +2717,7 @@ async def calculate_hedge(
     }
     strikes_task = tradier.get(t.STRIKES, t.GetStrikesRequest(hedge_index, expiration))
 
-    results = await asyncio.gather(
-        *history_tasks.values(), strikes_task, return_exceptions=True
-    )
+    results = await asyncio.gather(*history_tasks.values(), strikes_task, return_exceptions=True)
 
     history_keys = list(history_tasks.keys())
     history_data: dict[str, list[dict]] = {}
@@ -2832,7 +2824,6 @@ async def get_entry_signals(ctx: Context, symbol: str) -> str:
 
     Requires [finnhub], [tradier], and [tastytrade] sections in ~/.tradingrc.
     """
-    from trading_clients.table_helpers import kv_table
 
     finnhub = _finnhub(ctx)
     tradier = _tradier(ctx)
@@ -3241,7 +3232,6 @@ async def get_institutional_ownership(ctx: Context, symbol: str) -> str:
 
     Uses Yahoo Finance via yfinance (no API key required).
     """
-    from trading_clients.table_helpers import fmt_large, fmt_number, list_table
 
     holders = await asyncio.to_thread(yfc.institutional_holders, symbol)
     if not holders:
@@ -3271,7 +3261,6 @@ async def get_short_interest(ctx: Context, symbol: str) -> str:
 
     Uses Yahoo Finance via yfinance (no API key required).
     """
-    from trading_clients.table_helpers import fmt_large, fmt_number, kv_table
 
     data = await asyncio.to_thread(yfc.short_interest, symbol)
     if not any(data.values()):
