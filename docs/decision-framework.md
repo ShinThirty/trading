@@ -26,7 +26,7 @@ After screening confirms (or rejects) a thesis, run through these steps in order
 
 Conviction drives intent. Intent drives strategy. Decide intent FIRST — everything else follows.
 
-**Quick start:** Run `get_conviction_metrics` for ROE, D/E, revenue growth, and margin trend. Moat and AI ROI require qualitative judgment — use `get_company_news` and `get_income_statement` for supporting evidence.
+**Quick start:** Run `get_entry_signals` for all quantitative conviction inputs (ROE, D/E, revenue growth, margin trend, PEG, sizing tier) plus IV and momentum signals in one call. Moat and AI ROI require qualitative judgment — use `get_company_news` and `get_income_statement` for supporting evidence.
 
 **Conviction inputs — what raises or lowers conviction:**
 
@@ -54,27 +54,9 @@ Drawdown alone is not conviction — the business quality determines whether the
 
 ## Step 2: Read the Signals
 
-**Quick start:** Run `get_market_regime` for a snapshot of volatility, trend, macro, and sector conditions before diving into individual signals. See [market-regime.md](market-regime.md) for how each regime label maps to strategy preferences.
+**Quick start:** Run `get_entry_signals` for all stock-level signals (conviction, IV, momentum) and circuit breaker detection in one call. Run `get_market_regime` for market-level context. See [market-regime.md](market-regime.md) for how each regime label maps to strategy preferences. Supplement with `get_company_news` for headwinds and `get_expected_move` for vol bets.
 
-Collect these inputs — which ones matter depends on intent:
-
-| Signal | How to measure | Source | Used by |
-|--------|---------------|--------|---------|
-| **Drawdown** | % below 52-week high | `get_conviction_metrics` | Accumulate, Enter at discount |
-| **Revenue growth** | YoY quarterly revenue growth % | `get_conviction_metrics` | Conviction (Step 1), Sizing via PEG (Step 4) |
-| **Operating margin** | Operating income / revenue, and trend | `get_conviction_metrics` | Conviction — expanding margins = moat, compressing = red flag |
-| **ROE** | Net income / shareholders' equity | `get_conviction_metrics` | Conviction (Step 1) |
-| **P/E** | Price / TTM earnings | `get_conviction_metrics` | Sizing via PEG (Step 4) |
-| **IV-HV spread** | IV 30d minus HV 30d | `get_iv_metrics` | All option strategies |
-| **IV Rank** | Current IV vs 52-week IV range | `get_iv_metrics` | Premium selling strategies |
-| **Earnings proximity** | Days to next report | `get_iv_metrics` (Earnings) | All strategies |
-| **Momentum** | RSI (14-day): <30 oversold/falling, >70 overbought. SMA 50 vs 200 for trend. | `get_technical_indicators` | Accumulate, Enter at discount |
-| **Headwinds** | Active stock-specific risk | `get_company_news` | All strategies |
-| **Market context** | SPY RSI, broad market proximity to ATH, recent rally magnitude | `get_market_regime` + `get_technical_indicators` (SPY) | All strategies (timing gate) |
-| **Expected move** | ATM straddle price at target expiry | `get_expected_move` | Vol bets, premium harvesting |
-| **Options liquidity** | Liquidity rating + bid/ask spread + open interest | `get_iv_metrics` (Liq 1-4) + `get_option_chain` | All option strategies |
-
-Revenue growth, operating margin, drawdown, and PEG are all computed by `get_conviction_metrics` — never estimate these from memory. Before any spread or roll, check liquidity via `get_iv_metrics` (Liq 1-2 = tight, Liq 3-4 = caution) and `get_option_chain` bid/ask spreads. Cross-check earnings dates from `get_iv_metrics` and `get_earnings_calendar`; if they disagree, use the later date.
+Before any spread or roll, check liquidity via `get_iv_metrics` (Liq 1-2 = tight, Liq 3-4 = caution) and `get_option_chain` bid/ask spreads. Cross-check earnings dates from `get_iv_metrics` and `get_earnings_calendar`; if they disagree, use the later date.
 
 ### Signal Conflict Resolution
 
@@ -85,7 +67,7 @@ When signals conflict, **fundamentals override technicals, always.** Technicals 
 2. **IV environment** (IV rank, IV-HV) — determines strategy structure (buy vs sell premium)
 3. **Technicals** (RSI, SMA) — timing refinement within an already-approved trade
 
-**Circuit breakers:**
+**Circuit breakers** (auto-detected by `get_entry_signals`):
 
 | Conflict | Condition | Action |
 |----------|-----------|--------|
@@ -115,7 +97,7 @@ Once intent is set and signals are collected, match to the right strategy. See [
 
 Base sizing on **growth-adjusted valuation** (PEG) and **portfolio concentration**.
 
-Run `get_conviction_metrics` — it computes PEG (revenue-based), drawdown %, operating margin trend, and position size tier in one call. The tool handles all edge cases: margin compression fallback to raw P/E, negative/zero growth, and the 80x P/E hard cap.
+Run `get_entry_signals` or `get_conviction_metrics` — both compute PEG (revenue-based), drawdown %, operating margin trend, and position size tier. The tools handle all edge cases: margin compression fallback to raw P/E, negative/zero growth, and the 80x P/E hard cap.
 
 **Additional sizing rules:**
 - Never allocate >15% of portfolio to a single name at entry
