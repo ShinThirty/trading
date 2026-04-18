@@ -77,7 +77,9 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
 mcp = FastMCP("trading-mcp", lifespan=lifespan)
 
 
-# ── Helpers ─────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════
+# Helpers
+# ═══════════════════════════════════════════════════════════════
 
 
 def _year_ago(d: date) -> date:
@@ -86,9 +88,6 @@ def _year_ago(d: date) -> date:
         return d.replace(year=d.year - 1)
     except ValueError:
         return d.replace(year=d.year - 1, day=28)
-
-
-# ── Client helpers ──────────────────────────────────────────
 
 
 def _webull(ctx: Context) -> WebullClient:
@@ -156,9 +155,271 @@ async def _check_market(ctx: Context, order_type: str, extended_hours: bool) -> 
         )
 
 
+async def _webull_get_with_retry(client: Any, endpoint: Any, request: Any, retries: int = 2) -> Any:
+    """Call client.get with retry on 429 rate limit errors."""
+    for attempt in range(retries + 1):
+        try:
+            return await client.get(endpoint, request)
+        except ApiError as e:
+            if e.status_code == 429 and attempt < retries:
+                await asyncio.sleep(2)
+                continue
+            raise
+
+
+def _safe_float(val: Any) -> float:
+    if val is None or val == "":
+        return 0.0
+    try:
+        return float(str(val).replace(",", ""))
+    except (ValueError, TypeError):
+        return 0.0
+
+
+# ── Portfolio helpers ────────────────────────────────────────
+
+
+async def _fetch_accounts(
+    webull: Any,
+    fidelity_folder: str | None = None,
+) -> tuple[list, dict[str, str]]:
+    """Fetch balance + positions for all Webull accounts, optionally including Fidelity.
+
+    Returns (list[AccountSummary], errors dict). Cash equivalents (SGOV, etc.)
+    are reclassified from market_value to cash in each AccountSummary.
+    """
+    from trading_clients.portfolio import AccountSummary, parse_fidelity_folder
+
+    summaries: list[AccountSummary] = []
+    errors: dict[str, str] = {}
+
+    account_list = await webull.get(ACCOUNT_LIST, EmptyRequest())
+    if not account_list.accounts:
+        errors["Webull"] = "No accounts found"
+
+    for acct in account_list.accounts:
+        aid = acct.get("account_id", "")
+        label = acct.get("account_label", acct.get("account_type", aid))
+        atype = acct.get("account_type", "")
+
+        try:
+            bal = await _webull_get_with_retry(webull, BALANCE, AccountRequest(aid))
+        except Exception as e:
+            errors[label] = str(e)
+            continue
+
+        nlv = _safe_float(bal.net_liquidation)
+        cash = _safe_float(bal.cash_balance)
+        mv = _safe_float(bal.market_value)
+
+        try:
+            pos_resp = await _webull_get_with_retry(webull, POSITIONS, AccountRequest(aid))
+            positions = pos_resp.to_normalized()
+        except Exception as e:
+            positions = []
+            errors[f"{label} (positions)"] = str(e)
+
+        cash_equiv_value = sum(p["value"] for p in positions if p.get("is_cash"))
+        cash += cash_equiv_value
+        mv -= cash_equiv_value
+
+        summaries.append(
+            AccountSummary(
+                account_id=aid,
+                label=label,
+                broker="Webull",
+                account_type=atype,
+                nlv=nlv,
+                cash=cash,
+                market_value=mv,
+                day_pnl=_safe_float(bal.day_pnl),
+                unrealized_pnl=_safe_float(bal.unrealized_pnl),
+                positions=positions,
+            )
+        )
+
+    if fidelity_folder:
+        try:
+            summaries.extend(parse_fidelity_folder(fidelity_folder))
+        except Exception as e:
+            errors["Fidelity"] = str(e)
+
+    return summaries, errors
+
+
+async def _fetch_all_positions(
+    webull: Any,
+    fidelity_folder: str | None = None,
+) -> tuple[list[dict], list[str]]:
+    """Fetch a flat list of normalized positions across all accounts.
+
+    Returns (positions, errors). Lighter than _fetch_accounts — skips
+    balance calls. Used by tools that only need positions (greeks, hedge).
+    """
+    from trading_clients.portfolio import parse_fidelity_folder
+
+    all_positions: list[dict] = []
+    errors: list[str] = []
+
+    account_list = await webull.get(ACCOUNT_LIST, EmptyRequest())
+    for acct in account_list.accounts:
+        aid = acct.get("account_id", "")
+        label = acct.get("account_label", aid)
+        try:
+            pos_resp = await _webull_get_with_retry(webull, POSITIONS, AccountRequest(aid))
+            all_positions.extend(pos_resp.to_normalized())
+        except Exception as e:
+            errors.append(f"{label}: {e}")
+
+    if fidelity_folder:
+        for acct in parse_fidelity_folder(fidelity_folder):
+            all_positions.extend(acct.positions)
+
+    return all_positions, errors
+
+
+def _compute_csp_collateral(positions: list[dict]) -> float:
+    """Sum collateral for all short puts in a position list."""
+    total = 0.0
+    for p in positions:
+        if not p.get("is_option") or p.get("option_type") != "put":
+            continue
+        qty = p.get("quantity", 0)
+        if qty >= 0:
+            continue
+        total += p.get("strike", 0) * CONTRACT_MULTIPLIER * abs(qty)
+    return total
+
+
+async def _fetch_total_nlv(webull: Any) -> float:
+    """Sum NLV across all Webull accounts."""
+    account_list = await webull.get(ACCOUNT_LIST, EmptyRequest())
+    total = 0.0
+    for acct in account_list.accounts:
+        aid = acct.get("account_id", "")
+        try:
+            bal = await _webull_get_with_retry(webull, BALANCE, AccountRequest(aid))
+            total += _safe_float(bal.net_liquidation)
+        except Exception:
+            continue
+    return total
+
+
+async def _conviction_data(finnhub_client, tradier_client, symbol: str) -> dict[str, Any]:
+    """Shared conviction computation used by get_conviction_metrics and get_entry_signals."""
+    basics_r, fin_r, quote_r = await asyncio.gather(
+        finnhub_client.get(fh.BASIC_FINANCIALS, fh.BasicFinancialsRequest(symbol)),
+        finnhub_client.get(
+            fh.FINANCIALS_REPORTED, fh.FinancialsReportedRequest(symbol, "quarterly")
+        ),
+        tradier_client.get(t.QUOTES, t.GetQuotesRequest(symbol)),
+        return_exceptions=True,
+    )
+
+    basics = None if isinstance(basics_r, BaseException) else basics_r
+    fin = None if isinstance(fin_r, BaseException) else fin_r
+    quote_resp = None if isinstance(quote_r, BaseException) else quote_r
+
+    metric = basics.data.get("metric", {}) if basics else {}
+    pe = metric.get("peNormalizedAnnual")
+    roe = metric.get("roeTTM")
+    de = metric.get("totalDebt/totalEquityAnnual")
+
+    q = quote_resp.quotes[0] if quote_resp and quote_resp.quotes else {}
+    price = q.get("last")
+    high_52w = q.get("week_52_high")
+
+    quarters = fin.income_numeric(8) if fin else []
+
+    drawdown_pct = None
+    if price and high_52w and high_52w > 0:
+        drawdown_pct = (price - high_52w) / high_52w * 100
+
+    rev_growth = None
+    current_q = None
+    prior_q = None
+    if len(quarters) >= 2:
+        current_q = quarters[0]
+        current_rev = current_q.get("Revenue")
+        cur_fy = current_q.get("fiscal_year")
+        cur_fq = current_q.get("fiscal_quarter")
+        if current_rev and cur_fy and cur_fq:
+            for q_row in quarters[1:]:
+                if q_row.get("fiscal_quarter") == cur_fq and q_row.get("fiscal_year") == cur_fy - 1:
+                    prior_rev = q_row.get("Revenue")
+                    if prior_rev and prior_rev > 0:
+                        prior_q = q_row
+                        rev_growth = (current_rev - prior_rev) / prior_rev * 100
+                    break
+
+    margins: list[tuple[str, float]] = []
+    for q_row in quarters[:4]:
+        rev = q_row.get("Revenue")
+        op_inc = q_row.get("Operating Income")
+        period = q_row.get("period", "")
+        if rev and op_inc and rev > 0:
+            margins.append((period, op_inc / rev * 100))
+
+    margin_trend = None
+    if len(margins) >= 2:
+        if margins[0][1] > margins[1][1] + 0.5:
+            margin_trend = "Expanding"
+        elif margins[0][1] < margins[1][1] - 0.5:
+            margin_trend = "Compressing"
+        else:
+            margin_trend = "Stable"
+
+    peg = None
+    peg_valid = True
+    peg_note = ""
+    if pe is not None and rev_growth is not None:
+        if pe < 0:
+            peg_valid = False
+            peg_note = "Negative P/E (unprofitable) — PEG not meaningful, use raw P/E"
+        elif rev_growth <= 0:
+            peg_valid = False
+            peg_note = "Negative/zero growth — PEG not meaningful, use raw P/E"
+        elif margin_trend == "Compressing":
+            peg_valid = False
+            peg_note = "Margins compressing — PEG unreliable, use raw P/E"
+        else:
+            peg = pe / rev_growth
+
+    if peg is not None and peg_valid:
+        if peg < 1.5:
+            size = "Full — PEG < 1.5"
+        elif peg <= 3.0:
+            size = "Standard — PEG 1.5-3.0"
+        else:
+            size = "Reduced — PEG > 3.0"
+        if pe and pe > 80:
+            size = "Reduced — PEG > 3.0 | P/E >80 hard cap: never full-size"
+    elif pe is not None and pe > 0:
+        if pe < 15:
+            size = "Full — P/E < 15"
+        elif pe <= 25:
+            size = "Standard — P/E 15-25"
+        else:
+            size = "Reduced — P/E > 25"
+    elif pe is not None and pe < 0:
+        size = "Reduced — negative P/E (unprofitable)"
+    else:
+        size = "Unable to determine — missing P/E data"
+
+    return {
+        "pe": pe, "roe": roe, "de": de, "price": price, "high_52w": high_52w,
+        "drawdown_pct": drawdown_pct, "rev_growth": rev_growth,
+        "current_q": current_q, "prior_q": prior_q,
+        "margins": margins, "margin_trend": margin_trend,
+        "peg": peg, "peg_valid": peg_valid, "peg_note": peg_note, "size": size,
+    }
+
+
 # ═══════════════════════════════════════════════════════════════
-# WEBULL — Brokerage (Account, Orders, Market Data)
+# MCP Tools
 # ═══════════════════════════════════════════════════════════════
+
+# ── Webull — Brokerage (Account, Orders, Market Data) ────────
 
 # ── Account ──────────────────────────────────────────────────
 
@@ -462,72 +723,12 @@ async def get_portfolio_summary(
     Note: fetches Webull data sequentially to respect rate limits (~1 req/second).
     """
     from trading_clients.portfolio import (
-        AccountSummary,
         PortfolioSummary,
         compact_portfolio_summary,
         format_portfolio_summary,
-        parse_fidelity_folder,
     )
 
-    client = _webull(ctx)
-    summaries: list[AccountSummary] = []
-    errors: dict[str, str] = {}
-
-    # 1. Discover all Webull accounts
-    account_list = await client.get(ACCOUNT_LIST, EmptyRequest())
-    if not account_list.accounts:
-        errors["Webull"] = "No accounts found"
-
-    # 2. Fetch balance + positions for each Webull account
-    for acct in account_list.accounts:
-        aid = acct.get("account_id", "")
-        label = acct.get("account_label", acct.get("account_type", aid))
-        atype = acct.get("account_type", "")
-
-        try:
-            bal = await _webull_get_with_retry(client, BALANCE, AccountRequest(aid))
-        except Exception as e:
-            errors[label] = str(e)
-            continue
-
-        nlv = _safe_float(bal.net_liquidation)
-        cash = _safe_float(bal.cash_balance)
-        mv = _safe_float(bal.market_value)
-
-        try:
-            pos_resp = await _webull_get_with_retry(client, POSITIONS, AccountRequest(aid))
-            positions = pos_resp.to_normalized()
-        except Exception as e:
-            positions = []
-            errors[f"{label} (positions)"] = str(e)
-
-        # Reclassify cash equivalents (SGOV, etc.) from market_value to cash
-        cash_equiv_value = sum(p["value"] for p in positions if p.get("is_cash"))
-        cash += cash_equiv_value
-        mv -= cash_equiv_value
-
-        summaries.append(
-            AccountSummary(
-                account_id=aid,
-                label=label,
-                broker="Webull",
-                account_type=atype,
-                nlv=nlv,
-                cash=cash,
-                market_value=mv,
-                day_pnl=_safe_float(bal.day_pnl),
-                unrealized_pnl=_safe_float(bal.unrealized_pnl),
-                positions=positions,
-            )
-        )
-
-    # 3. Parse Fidelity CSVs if folder provided
-    if fidelity_folder:
-        try:
-            summaries.extend(parse_fidelity_folder(fidelity_folder))
-        except Exception as e:
-            errors["Fidelity"] = str(e)
-
+    summaries, errors = await _fetch_accounts(_webull(ctx), fidelity_folder)
     portfolio = PortfolioSummary(summaries, errors)
     full_output = format_portfolio_summary(portfolio)
 
@@ -553,54 +754,10 @@ async def get_csp_utilization(
     fidelity_folder: path to folder containing Fidelity Positions_*.csv files
       (e.g. '~/Downloads/fidelity'). Omit to show Webull only.
     """
-    from trading_clients.portfolio import AccountSummary, parse_fidelity_folder
     from trading_clients.table_helpers import fmt_number, kv_table, list_table
 
-    client = _webull(ctx)
-    summaries: list[AccountSummary] = []
+    summaries, _ = await _fetch_accounts(_webull(ctx), fidelity_folder)
 
-    # 1. Fetch Webull accounts, balances, and positions
-    account_list = await client.get(ACCOUNT_LIST, EmptyRequest())
-    for acct in account_list.accounts:
-        aid = acct.get("account_id", "")
-        label = acct.get("account_label", acct.get("account_type", aid))
-        atype = acct.get("account_type", "")
-
-        try:
-            bal = await _webull_get_with_retry(client, BALANCE, AccountRequest(aid))
-        except Exception:
-            continue
-
-        cash = _safe_float(bal.cash_balance)
-
-        try:
-            pos_resp = await _webull_get_with_retry(client, POSITIONS, AccountRequest(aid))
-            positions = pos_resp.to_normalized()
-        except Exception:
-            positions = []
-
-        cash_equiv_value = sum(p["value"] for p in positions if p.get("is_cash"))
-        cash += cash_equiv_value
-
-        summaries.append(
-            AccountSummary(
-                account_id=aid,
-                label=label,
-                broker="Webull",
-                account_type=atype,
-                cash=cash,
-                positions=positions,
-            )
-        )
-
-    # 2. Parse Fidelity CSVs if provided
-    if fidelity_folder:
-        try:
-            summaries.extend(parse_fidelity_folder(fidelity_folder))
-        except Exception:
-            pass
-
-    # 3. Find all short puts and compute collateral
     csp_rows: list[dict[str, str]] = []
     total_collateral = 0.0
     total_cash = 0.0
@@ -608,9 +765,7 @@ async def get_csp_utilization(
     for acct in summaries:
         total_cash += acct.cash
         for p in acct.positions:
-            if not p.get("is_option"):
-                continue
-            if p.get("option_type") != "put":
+            if not p.get("is_option") or p.get("option_type") != "put":
                 continue
             qty = p.get("quantity", 0)
             if qty >= 0:
@@ -675,57 +830,10 @@ async def get_free_capital(
     fidelity_folder: path to folder containing Fidelity Portfolio_Positions_*.csv
       files (e.g. '~/Downloads/fidelity'). Omit to show Webull only.
     """
-    from trading_clients.portfolio import AccountSummary, parse_fidelity_folder
     from trading_clients.table_helpers import fmt_number, kv_table, list_table
 
-    client = _webull(ctx)
-    summaries: list[AccountSummary] = []
-    errors: dict[str, str] = {}
+    summaries, errors = await _fetch_accounts(_webull(ctx), fidelity_folder)
 
-    # 1. Fetch Webull accounts, balances, and positions
-    account_list = await client.get(ACCOUNT_LIST, EmptyRequest())
-    for acct in account_list.accounts:
-        aid = acct.get("account_id", "")
-        label = acct.get("account_label", acct.get("account_type", aid))
-        atype = acct.get("account_type", "")
-
-        try:
-            bal = await _webull_get_with_retry(client, BALANCE, AccountRequest(aid))
-        except Exception as e:
-            errors[label] = str(e)
-            continue
-
-        cash = _safe_float(bal.cash_balance)
-
-        try:
-            pos_resp = await _webull_get_with_retry(client, POSITIONS, AccountRequest(aid))
-            positions = pos_resp.to_normalized()
-        except Exception as e:
-            positions = []
-            errors[f"{label} (positions)"] = str(e)
-
-        cash_equiv_value = sum(p["value"] for p in positions if p.get("is_cash"))
-        cash += cash_equiv_value
-
-        summaries.append(
-            AccountSummary(
-                account_id=aid,
-                label=label,
-                broker="Webull",
-                account_type=atype,
-                cash=cash,
-                positions=positions,
-            )
-        )
-
-    # 2. Parse Fidelity CSVs if provided
-    if fidelity_folder:
-        try:
-            summaries.extend(parse_fidelity_folder(fidelity_folder))
-        except Exception as e:
-            errors["Fidelity"] = str(e)
-
-    # 3. Compute per-account free capital
     rows: list[dict[str, str]] = []
     grand_cash = 0.0
     grand_collateral = 0.0
@@ -733,28 +841,13 @@ async def get_free_capital(
     grand_free = 0.0
 
     for acct in summaries:
-        # Separate SGOV (liquid holdings) from cash total
-        # acct.cash already includes SGOV from CASH_EQUIVALENTS reclassification
         acct_liquid = sum(
             p.get("value", 0.0)
             for p in acct.positions
             if p.get("is_cash") and p.get("symbol", "").upper() == "SGOV"
         )
         acct_cash_mm = acct.cash - acct_liquid
-
-        # CSP collateral: short puts only
-        acct_collateral = 0.0
-        for p in acct.positions:
-            if not p.get("is_option"):
-                continue
-            if p.get("option_type") != "put":
-                continue
-            qty = p.get("quantity", 0)
-            if qty >= 0:
-                continue
-            strike = p.get("strike", 0)
-            acct_collateral += strike * CONTRACT_MULTIPLIER * abs(qty)
-
+        acct_collateral = _compute_csp_collateral(acct.positions)
         acct_free = acct.cash - acct_collateral
 
         rows.append(
@@ -1009,27 +1102,6 @@ async def get_cc_chain_pnl(
     return "\n".join(sections)
 
 
-async def _webull_get_with_retry(client: Any, endpoint: Any, request: Any, retries: int = 2) -> Any:
-    """Call client.get with retry on 429 rate limit errors."""
-    for attempt in range(retries + 1):
-        try:
-            return await client.get(endpoint, request)
-        except ApiError as e:
-            if e.status_code == 429 and attempt < retries:
-                await asyncio.sleep(2)
-                continue
-            raise
-
-
-def _safe_float(val: Any) -> float:
-    if val is None or val == "":
-        return 0.0
-    try:
-        return float(str(val).replace(",", ""))
-    except (ValueError, TypeError):
-        return 0.0
-
-
 @mcp.tool()
 async def get_portfolio_greeks(
     ctx: Context,
@@ -1046,33 +1118,14 @@ async def get_portfolio_greeks(
 
     Requires [webull] and [tradier] sections in ~/.tradingrc.
     """
-    from trading_clients.portfolio import (
-        format_greeks_compact,
-        format_greeks_detail,
-        parse_fidelity_folder,
-    )
+    from trading_clients.portfolio import format_greeks_compact, format_greeks_detail
 
     webull = _webull(ctx)
     tradier = _tradier(ctx)
 
-    # 1. Collect all positions across accounts
-    all_positions: list[dict] = []
-    account_list = await webull.get(ACCOUNT_LIST, EmptyRequest())
-    errors: list[str] = []
-    for acct in account_list.accounts:
-        aid = acct.get("account_id", "")
-        label = acct.get("account_label", aid)
-        try:
-            pos_resp = await _webull_get_with_retry(webull, POSITIONS, AccountRequest(aid))
-            all_positions.extend(pos_resp.to_normalized())
-        except Exception as e:
-            errors.append(f"{label}: {e}")
+    all_positions, errors = await _fetch_all_positions(webull, fidelity_folder)
 
-    if fidelity_folder:
-        for acct in parse_fidelity_folder(fidelity_folder):
-            all_positions.extend(acct.positions)
-
-    # 2. Build OCC symbols for all option positions
+    # Build OCC symbols for all option positions
     option_positions = [p for p in all_positions if p.get("is_option")]
     if not option_positions:
         return "(no option positions found)"
@@ -2493,117 +2546,6 @@ async def get_market_regime(ctx: Context) -> str:
 
 
 @mcp.tool()
-async def _conviction_data(finnhub_client, tradier_client, symbol: str) -> dict[str, Any]:
-    """Shared conviction computation used by get_conviction_metrics and get_entry_signals."""
-    basics_r, fin_r, quote_r = await asyncio.gather(
-        finnhub_client.get(fh.BASIC_FINANCIALS, fh.BasicFinancialsRequest(symbol)),
-        finnhub_client.get(
-            fh.FINANCIALS_REPORTED, fh.FinancialsReportedRequest(symbol, "quarterly")
-        ),
-        tradier_client.get(t.QUOTES, t.GetQuotesRequest(symbol)),
-        return_exceptions=True,
-    )
-
-    basics = None if isinstance(basics_r, BaseException) else basics_r
-    fin = None if isinstance(fin_r, BaseException) else fin_r
-    quote_resp = None if isinstance(quote_r, BaseException) else quote_r
-
-    metric = basics.data.get("metric", {}) if basics else {}
-    pe = metric.get("peNormalizedAnnual")
-    roe = metric.get("roeTTM")
-    de = metric.get("totalDebt/totalEquityAnnual")
-
-    q = quote_resp.quotes[0] if quote_resp and quote_resp.quotes else {}
-    price = q.get("last")
-    high_52w = q.get("week_52_high")
-
-    quarters = fin.income_numeric(8) if fin else []
-
-    drawdown_pct = None
-    if price and high_52w and high_52w > 0:
-        drawdown_pct = (price - high_52w) / high_52w * 100
-
-    rev_growth = None
-    current_q = None
-    prior_q = None
-    if len(quarters) >= 2:
-        current_q = quarters[0]
-        current_rev = current_q.get("Revenue")
-        cur_fy = current_q.get("fiscal_year")
-        cur_fq = current_q.get("fiscal_quarter")
-        if current_rev and cur_fy and cur_fq:
-            for q_row in quarters[1:]:
-                if q_row.get("fiscal_quarter") == cur_fq and q_row.get("fiscal_year") == cur_fy - 1:
-                    prior_rev = q_row.get("Revenue")
-                    if prior_rev and prior_rev > 0:
-                        prior_q = q_row
-                        rev_growth = (current_rev - prior_rev) / prior_rev * 100
-                    break
-
-    margins: list[tuple[str, float]] = []
-    for q_row in quarters[:4]:
-        rev = q_row.get("Revenue")
-        op_inc = q_row.get("Operating Income")
-        period = q_row.get("period", "")
-        if rev and op_inc and rev > 0:
-            margins.append((period, op_inc / rev * 100))
-
-    margin_trend = None
-    if len(margins) >= 2:
-        if margins[0][1] > margins[1][1] + 0.5:
-            margin_trend = "Expanding"
-        elif margins[0][1] < margins[1][1] - 0.5:
-            margin_trend = "Compressing"
-        else:
-            margin_trend = "Stable"
-
-    peg = None
-    peg_valid = True
-    peg_note = ""
-    if pe is not None and rev_growth is not None:
-        if pe < 0:
-            peg_valid = False
-            peg_note = "Negative P/E (unprofitable) — PEG not meaningful, use raw P/E"
-        elif rev_growth <= 0:
-            peg_valid = False
-            peg_note = "Negative/zero growth — PEG not meaningful, use raw P/E"
-        elif margin_trend == "Compressing":
-            peg_valid = False
-            peg_note = "Margins compressing — PEG unreliable, use raw P/E"
-        else:
-            peg = pe / rev_growth
-
-    if peg is not None and peg_valid:
-        if peg < 1.5:
-            size = "Full — PEG < 1.5"
-        elif peg <= 3.0:
-            size = "Standard — PEG 1.5-3.0"
-        else:
-            size = "Reduced — PEG > 3.0"
-        if pe and pe > 80:
-            size = "Reduced — PEG > 3.0 | P/E >80 hard cap: never full-size"
-    elif pe is not None and pe > 0:
-        if pe < 15:
-            size = "Full — P/E < 15"
-        elif pe <= 25:
-            size = "Standard — P/E 15-25"
-        else:
-            size = "Reduced — P/E > 25"
-    elif pe is not None and pe < 0:
-        size = "Reduced — negative P/E (unprofitable)"
-    else:
-        size = "Unable to determine — missing P/E data"
-
-    return {
-        "pe": pe, "roe": roe, "de": de, "price": price, "high_52w": high_52w,
-        "drawdown_pct": drawdown_pct, "rev_growth": rev_growth,
-        "current_q": current_q, "prior_q": prior_q,
-        "margins": margins, "margin_trend": margin_trend,
-        "peg": peg, "peg_valid": peg_valid, "peg_note": peg_note, "size": size,
-    }
-
-
-@mcp.tool()
 async def get_conviction_metrics(ctx: Context, symbol: str) -> str:
     """Compute position sizing metrics from the decision framework: PEG ratio,
     drawdown %, operating margin trend, and recommended position size tier.
@@ -2741,27 +2683,13 @@ async def calculate_hedge(
     webull = _webull(ctx)
     tradier = _tradier(ctx)
 
-    # Phase 1: Fetch positions + index quote + expirations in parallel
-    async def fetch_positions() -> list[dict]:
-        account_list = await webull.get(ACCOUNT_LIST, EmptyRequest())
-        all_positions: list[dict] = []
-        for acct in account_list.accounts:
-            aid = acct.get("account_id", "")
-            try:
-                pos_resp = await _webull_get_with_retry(
-                    webull, POSITIONS, AccountRequest(aid)
-                )
-                all_positions.extend(pos_resp.to_normalized())
-            except Exception:
-                continue
-        return all_positions
-
-    positions_task = fetch_positions()
+    # Phase 1: Fetch positions + index quote + expirations + NLV in parallel
+    positions_task = _fetch_all_positions(webull)
     quote_task = tradier.get(t.QUOTES, t.GetQuotesRequest(hedge_index, greeks=False))
     exp_task = tradier.get(t.EXPIRATIONS, t.GetExpirationsRequest(hedge_index))
     bal_task = _fetch_total_nlv(webull)
 
-    positions, quote_resp, exp_resp, total_nlv = await asyncio.gather(
+    (positions, _pos_errors), quote_resp, exp_resp, total_nlv = await asyncio.gather(
         positions_task, quote_task, exp_task, bal_task
     )
 
@@ -2889,20 +2817,6 @@ async def calculate_hedge(
     }
 
     return kv_table(data)
-
-
-async def _fetch_total_nlv(webull: Any) -> float:
-    """Sum NLV across all Webull accounts."""
-    account_list = await webull.get(ACCOUNT_LIST, EmptyRequest())
-    total = 0.0
-    for acct in account_list.accounts:
-        aid = acct.get("account_id", "")
-        try:
-            bal = await _webull_get_with_retry(webull, BALANCE, AccountRequest(aid))
-            total += _safe_float(bal.net_liquidation)
-        except Exception:
-            continue
-    return total
 
 
 @mcp.tool()
