@@ -55,7 +55,7 @@ from trading_clients.portfolio import (
     format_portfolio_summary,
     parse_fidelity_folder,
 )
-from trading_clients.table_helpers import fmt_large, fmt_number, kv_table, list_table
+from trading_clients.table_helpers import fmt_large, fmt_number, kv_table, list_table, to_float
 from trading_clients.tastytrade_client import TastyTradeClient
 from trading_clients.tradier_client import TradierClient
 from trading_clients.webull_client import WebullClient
@@ -339,13 +339,13 @@ async def _conviction_data(finnhub_client, tradier_client, symbol: str) -> dict[
     quote_resp = None if isinstance(quote_r, BaseException) else quote_r
 
     metric = basics.data.get("metric", {}) if basics else {}
-    pe = metric.get("peNormalizedAnnual")
-    roe = metric.get("roeTTM")
-    de = metric.get("totalDebt/totalEquityAnnual")
+    pe = to_float(metric.get("peNormalizedAnnual"))
+    roe = to_float(metric.get("roeTTM"))
+    de = to_float(metric.get("totalDebt/totalEquityAnnual"))
 
     q = quote_resp.quotes[0] if quote_resp and quote_resp.quotes else {}
-    price = q.get("last")
-    high_52w = q.get("week_52_high")
+    price = to_float(q.get("last"))
+    high_52w = to_float(q.get("week_52_high"))
 
     quarters = fin.income_numeric(8) if fin else []
 
@@ -2861,12 +2861,11 @@ async def get_entry_signals(ctx: Context, symbol: str) -> str:
 
     # ── IV metrics ──
     iv_item = iv_resp.items[0] if iv_resp and iv_resp.items else {}
-    iv_rank_raw = iv_item.get("tw-implied-volatility-index-rank")
+    iv_rank_raw = to_float(iv_item.get("tw-implied-volatility-index-rank"))
     iv_rank = iv_rank_raw * 100 if iv_rank_raw is not None else None
-    iv_30d = iv_item.get("implied-volatility-30-day")
-    hv_30d = iv_item.get("historical-volatility-30-day")
-    iv_hv_raw = iv_item.get("iv-hv-30-day-difference")
-    iv_hv = iv_hv_raw * 100 if iv_hv_raw is not None else None
+    iv_30d = to_float(iv_item.get("implied-volatility-30-day"))
+    hv_30d = to_float(iv_item.get("historical-volatility-30-day"))
+    iv_hv = to_float(iv_item.get("iv-hv-30-day-difference"))
     earnings = iv_item.get("earnings", {})
     earnings_date = earnings.get("expected-report-date") if isinstance(earnings, dict) else None
     liq = iv_item.get("liquidity-rating")
@@ -2954,9 +2953,9 @@ async def get_entry_signals(ctx: Context, symbol: str) -> str:
     if iv_hv is not None:
         data["IV-HV"] = f"{iv_hv:+.1f}%"
     if iv_30d is not None:
-        data["IV 30d"] = f"{iv_30d * 100:.1f}%"
+        data["IV 30d"] = f"{iv_30d:.1f}%"
     if hv_30d is not None:
-        data["HV 30d"] = f"{hv_30d * 100:.1f}%"
+        data["HV 30d"] = f"{hv_30d:.1f}%"
     if earnings_date:
         data["Earnings"] = earnings_date
     if liq is not None:

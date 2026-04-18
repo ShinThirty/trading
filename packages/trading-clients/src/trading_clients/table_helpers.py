@@ -46,6 +46,16 @@ def list_table(items: list[dict], columns: list[str] | None = None) -> str:
     return md_table(columns, rows)
 
 
+def to_float(val: Any) -> float | None:
+    """Safely convert a value to float. Returns None if not possible."""
+    if val is None or val == "":
+        return None
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return None
+
+
 def fmt_number(val: Any, decimals: int = 2) -> str:
     """Format a number with commas and fixed decimals, or return '' if None."""
     if val is None:
