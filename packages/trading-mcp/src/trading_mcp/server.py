@@ -2710,6 +2710,193 @@ async def calculate_position_size(
 
 
 @mcp.tool()
+async def calculate_hedge(
+    ctx: Context,
+    hedge_index: str = "SPY",
+    expiration: str | None = None,
+    strike: float | None = None,
+    hedge_ratio: float = 1.0,
+) -> str:
+    """Calculate put contracts needed to hedge the portfolio.
+
+    Computes portfolio beta vs the hedge index from trailing 90-day returns,
+    then sizes the hedge and prices it from the current option chain.
+
+    hedge_index: 'SPY' or 'QQQ' (default 'SPY').
+    expiration: option expiration (YYYY-MM-DD). Defaults to nearest monthly >=30 DTE.
+    strike: put strike. Defaults to ~5% OTM.
+    hedge_ratio: fraction to hedge, 0.0-1.0 (default 1.0 = 100%).
+
+    Requires [webull] and [tradier] sections in ~/.tradingrc.
+    """
+    from trading_clients.table_helpers import kv_table
+
+    if hedge_index.upper() not in ("SPY", "QQQ"):
+        return "hedge_index must be 'SPY' or 'QQQ'"
+    hedge_index = hedge_index.upper()
+
+    webull = _webull(ctx)
+    tradier = _tradier(ctx)
+
+    # Phase 1: Fetch positions + index quote + expirations in parallel
+    async def fetch_positions() -> list[dict]:
+        account_list = await webull.get(ACCOUNT_LIST, EmptyRequest())
+        all_positions: list[dict] = []
+        for acct in account_list.accounts:
+            aid = acct.get("account_id", "")
+            try:
+                pos_resp = await _webull_get_with_retry(
+                    webull, POSITIONS, AccountRequest(aid)
+                )
+                all_positions.extend(pos_resp.to_normalized())
+            except Exception:
+                continue
+        return all_positions
+
+    positions_task = fetch_positions()
+    quote_task = tradier.get(t.QUOTES, t.GetQuotesRequest(hedge_index, greeks=False))
+    exp_task = tradier.get(t.EXPIRATIONS, t.GetExpirationsRequest(hedge_index))
+    bal_task = _fetch_total_nlv(webull)
+
+    positions, quote_resp, exp_resp, total_nlv = await asyncio.gather(
+        positions_task, quote_task, exp_task, bal_task
+    )
+
+    index_price = quote_resp.quotes[0].get("last", 0) if quote_resp.quotes else 0
+    if not index_price:
+        return f"Could not get quote for {hedge_index}"
+
+    # Filter to equity-only positions with value
+    equities = [
+        p for p in positions
+        if not p.get("is_option") and not p.get("is_cash") and p.get("value", 0) > 0
+    ]
+    if not equities:
+        return "No equity positions found"
+
+    total_equity = sum(p["value"] for p in equities)
+    symbols = list({p["symbol"] for p in equities})
+
+    # Resolve expiration
+    if not expiration:
+        target = date.today() + timedelta(days=30)
+        for d in exp_resp.dates:
+            if d >= target.isoformat():
+                expiration = d
+                break
+        if not expiration:
+            return "No suitable expiration found >=30 DTE"
+
+    # Phase 2: Fetch historical data for all symbols + index + strikes
+    lookback_start = (date.today() - timedelta(days=120)).isoformat()
+    history_tasks = {
+        sym: tradier.get(t.HISTORY, t.GetHistoryRequest(sym, "daily", start=lookback_start))
+        for sym in symbols + [hedge_index]
+    }
+    strikes_task = tradier.get(t.STRIKES, t.GetStrikesRequest(hedge_index, expiration))
+
+    results = await asyncio.gather(
+        *history_tasks.values(), strikes_task, return_exceptions=True
+    )
+
+    history_keys = list(history_tasks.keys())
+    history_data: dict[str, list[dict]] = {}
+    for i, key in enumerate(history_keys):
+        r = results[i]
+        if not isinstance(r, Exception) and hasattr(r, "days"):
+            history_data[key] = r.days
+
+    strikes_resp = results[-1]
+    available_strikes = strikes_resp.strikes if not isinstance(strikes_resp, Exception) else []
+
+    # Resolve strike (~5% OTM if not specified)
+    if not strike:
+        target_strike = index_price * 0.95
+        if available_strikes:
+            strike = min(available_strikes, key=lambda s: abs(float(s) - target_strike))
+            strike = float(strike)
+        else:
+            strike = round(target_strike)
+
+    # Compute per-symbol betas
+    benchmark_closes = [d["close"] for d in history_data.get(hedge_index, [])]
+    weighted_beta = 0.0
+    beta_count = 0
+    fallback_count = 0
+
+    for p in equities:
+        sym = p["symbol"]
+        weight = p["value"] / total_equity
+        sym_closes = [d["close"] for d in history_data.get(sym, [])]
+        b = ta.beta(sym_closes, benchmark_closes)
+        if b is not None:
+            weighted_beta += weight * b
+            beta_count += 1
+        else:
+            weighted_beta += weight * 1.0
+            fallback_count += 1
+
+    # Adjust for cash: portfolio beta = (equity / total) * equity_beta
+    portfolio_beta = (total_equity / total_nlv) * weighted_beta if total_nlv > 0 else weighted_beta
+
+    # Calculate contracts
+    contracts = (total_nlv * portfolio_beta * hedge_ratio) / (index_price * CONTRACT_MULTIPLIER)
+    contracts = round(contracts)
+    if contracts < 1:
+        contracts = 1
+
+    # Phase 3: Fetch put quote
+    occ = opts.build_occ(hedge_index, expiration, "put", strike)
+    try:
+        put_resp = await tradier.get(t.QUOTES, t.GetQuotesRequest(occ, greeks=True))
+        put_q = put_resp.quotes[0] if put_resp.quotes else {}
+    except Exception:
+        put_q = {}
+
+    put_ask = put_q.get("ask", 0) or 0
+    put_bid = put_q.get("bid", 0) or 0
+    put_delta = put_q.get("greeks", {}).get("delta", "")
+    put_iv = put_q.get("greeks", {}).get("mid_iv", "")
+
+    total_cost = put_ask * CONTRACT_MULTIPLIER * contracts
+    cost_pct = (total_cost / total_nlv * 100) if total_nlv > 0 else 0
+    drawdown_trigger = (1 - strike / index_price) * 100
+
+    data = {
+        "Portfolio Value": f"${total_nlv:,.0f}",
+        "Equity Value": f"${total_equity:,.0f}",
+        "Equity Symbols": f"{len(symbols)} ({beta_count} with beta, {fallback_count} fallback)",
+        "Portfolio Beta": f"{portfolio_beta:.2f}",
+        "Hedge Ratio": f"{hedge_ratio:.0%}",
+        "---": "---",
+        "Hedge Index": f"{hedge_index} @ ${index_price:,.2f}",
+        "Put Strike": f"${strike:,.2f} ({drawdown_trigger:.1f}% OTM)",
+        "Expiration": expiration,
+        "Contracts": str(contracts),
+        "Put Bid / Ask": f"${put_bid:.2f} / ${put_ask:.2f}",
+        "Total Cost": f"${total_cost:,.0f} ({cost_pct:.2f}% of portfolio)",
+        "Put Delta": f"{put_delta}" if put_delta else "N/A",
+        "Put IV": f"{float(put_iv) * 100:.1f}%" if put_iv else "N/A",
+    }
+
+    return kv_table(data)
+
+
+async def _fetch_total_nlv(webull: Any) -> float:
+    """Sum NLV across all Webull accounts."""
+    account_list = await webull.get(ACCOUNT_LIST, EmptyRequest())
+    total = 0.0
+    for acct in account_list.accounts:
+        aid = acct.get("account_id", "")
+        try:
+            bal = await _webull_get_with_retry(webull, BALANCE, AccountRequest(aid))
+            total += _safe_float(bal.net_liquidation)
+        except Exception:
+            continue
+    return total
+
+
+@mcp.tool()
 async def get_entry_signals(ctx: Context, symbol: str) -> str:
     """Aggregate conviction, IV, and momentum signals for a stock and detect
     circuit breakers from the decision framework (Steps 1-2).

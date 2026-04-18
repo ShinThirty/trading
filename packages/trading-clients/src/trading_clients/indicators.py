@@ -4,7 +4,7 @@ All functions take a list of bar dicts (with 'open', 'high', 'low', 'close', 'vo
 ordered oldest-first and return computed values aligned to the same indices.
 """
 
-from math import sqrt
+from math import log, sqrt
 
 
 def sma(closes: list[float], period: int) -> list[float | None]:
@@ -126,6 +126,30 @@ def bollinger_bands(
         lower[i] = mean - num_std * std
 
     return upper, middle, lower
+
+
+def log_returns(closes: list[float]) -> list[float]:
+    """Daily log returns from a list of closing prices (oldest-first)."""
+    return [log(closes[i] / closes[i - 1]) for i in range(1, len(closes))]
+
+
+def beta(asset_closes: list[float], benchmark_closes: list[float]) -> float | None:
+    """OLS beta of an asset vs a benchmark from aligned daily closing prices.
+
+    Returns None if fewer than 20 data points.
+    """
+    n = min(len(asset_closes), len(benchmark_closes))
+    if n < 21:
+        return None
+    a_ret = log_returns(asset_closes[-n:])
+    b_ret = log_returns(benchmark_closes[-n:])
+    mean_a = sum(a_ret) / len(a_ret)
+    mean_b = sum(b_ret) / len(b_ret)
+    cov = sum((a - mean_a) * (b - mean_b) for a, b in zip(a_ret, b_ret)) / len(a_ret)
+    var_b = sum((b - mean_b) ** 2 for b in b_ret) / len(b_ret)
+    if var_b == 0:
+        return None
+    return cov / var_b
 
 
 def atr(bars: list[dict], period: int = 14) -> list[float | None]:
