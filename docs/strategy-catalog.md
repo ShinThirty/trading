@@ -182,7 +182,7 @@ The key difference from Accumulate/Enter at Discount: you have **timing convicti
 **Key decision factors:**
 - Iron condor: wider wings = less premium but higher probability of profit
 - Iron butterfly: max profit if stock pins at center strike — rare but lucrative
-- Butterfly: cheapest of all neutral strategies. Very high reward-to-risk if stock pins, but narrow profit zone. Best for "I think ADBE settles around $240 by May expiry" type thesis.
+- Butterfly: cheapest of all neutral strategies. Very high reward-to-risk if stock pins, but narrow profit zone. Best for pinning-at-a-price thesis.
 - Calendar: profits from time decay differential + IV mean reversion
 - Avoid these on stocks you'd be happy to own — use CSP/direct instead
 
@@ -221,7 +221,7 @@ The key difference from Accumulate/Enter at Discount: you have **timing convicti
 **Put backspread management:** This structure has a "Valley of Death" — if the stock drifts slowly into the long put strikes (instead of crashing through them), the short put is at max loss while the long puts have little intrinsic value. The backspread requires a *violent* move, not a slow bleed. Close early if the underlying is grinding toward the long strikes without momentum. The worst outcome is a slow decline that pins between your short and long strikes at expiry.
 
 **When to use:**
-- Thesis is explicitly bearish (CRWV pattern)
+- Thesis is explicitly bearish
 - Hedging portfolio beta (index puts on SPY/QQQ)
 
 **Key decision factors:**
