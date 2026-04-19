@@ -187,6 +187,31 @@ def classify_halving_cycle(as_of: date | None = None) -> tuple[str, str]:
     return label, detail
 
 
+def classify_fear_greed(value: int | None) -> tuple[str, str]:
+    """Classify Crypto Fear & Greed Index (0-100).
+
+    Contrarian indicator: extreme fear = buying opportunity,
+    extreme greed = distribution / top signal.
+
+    value: index value from Alternative.me API (0-100).
+    """
+    if value is None:
+        return "Unknown", "no Fear & Greed data"
+
+    if value <= 20:
+        label = "Extreme Fear"
+    elif value <= 40:
+        label = "Fear"
+    elif value <= 60:
+        label = "Neutral"
+    elif value <= 80:
+        label = "Greed"
+    else:
+        label = "Extreme Greed"
+
+    return label, f"Fear & Greed {value}/100"
+
+
 BULLISH_LABELS: dict[str, set[str]] = {
     "Liquidity": {"Expanding"},
     "Monetary Policy": {"Easing"},
@@ -194,6 +219,7 @@ BULLISH_LABELS: dict[str, set[str]] = {
     "Real Rates": {"Negative", "Low"},
     "Risk Appetite": {"Risk-On", "Neutral"},
     "Halving Cycle": {"Early Bull", "Peak Bull"},
+    "Sentiment": {"Extreme Fear", "Fear"},
 }
 
 BEARISH_LABELS: dict[str, set[str]] = {
@@ -203,6 +229,7 @@ BEARISH_LABELS: dict[str, set[str]] = {
     "Real Rates": {"High"},
     "Risk Appetite": {"Crisis"},
     "Halving Cycle": {"Distribution", "Late Cycle"},
+    "Sentiment": {"Extreme Greed"},
 }
 
 

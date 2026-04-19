@@ -7,6 +7,7 @@ from datetime import date, timedelta
 from math import gcd
 from typing import Any
 
+import httpx
 from mcp.server.fastmcp import Context, FastMCP
 from trading_clients import btc_regime as btc
 from trading_clients import indicators as ta
@@ -2551,6 +2552,22 @@ async def get_market_regime(ctx: Context) -> str:
 # BTC MACRO SIGNALS — Bitcoin Entry Signal Aggregation
 # ═══════════════════════════════════════════════════════════════
 
+_FNG_URL = "https://api.alternative.me/fng/"
+
+
+async def _fetch_fear_greed() -> int | None:
+    """Fetch current Crypto Fear & Greed Index from Alternative.me."""
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(_FNG_URL, params={"limit": "1", "format": "json"})
+            resp.raise_for_status()
+            data = resp.json().get("data", [])
+            if data:
+                return int(data[0]["value"])
+    except (httpx.HTTPError, KeyError, ValueError, TypeError):
+        pass
+    return None
+
 
 @mcp.tool()
 async def get_crypto_quote(ctx: Context, symbols: str = "BTCUSD") -> str:
@@ -2579,6 +2596,7 @@ async def get_btc_entry_signals(ctx: Context) -> str:
     - Dollar: DXY 20d/60d trend (weak dollar = bullish BTC)
     - Real Rates: 10Y yield minus CPI (negative = bullish BTC)
     - Risk Appetite: VIX level
+    - Sentiment: Crypto Fear & Greed Index (contrarian indicator)
 
     Price technicals (from Webull crypto bars):
     - BTC price, drawdown from ATH
@@ -2599,6 +2617,7 @@ async def get_btc_entry_signals(ctx: Context) -> str:
         fred_client.get(fred.OBSERVATIONS, fred.GetObservationsRequest("VIXCLS", 1)),
         webull.get(CRYPTO_BARS, CryptoBarsRequest("BTCUSD", timespan="D", count=250)),
         webull.get(CRYPTO_SNAPSHOT, CryptoSnapshotRequest("BTCUSD")),
+        _fetch_fear_greed(),
     ]
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -2611,6 +2630,7 @@ async def get_btc_entry_signals(ctx: Context) -> str:
     vix_resp = results[5] if not isinstance(results[5], BaseException) else None
     bars_resp = results[6] if not isinstance(results[6], BaseException) else None
     snap_resp = results[7] if not isinstance(results[7], BaseException) else None
+    fng_val = results[8] if not isinstance(results[8], BaseException) else None
 
     data: dict[str, str | None] = {}
     labels: dict[str, str] = {}
@@ -2721,6 +2741,11 @@ async def get_btc_entry_signals(ctx: Context) -> str:
     label, detail = btc.classify_risk_appetite(vix_val)
     data["Risk Appetite"] = f"{label} — {detail}"
     labels["Risk Appetite"] = label
+
+    # Sentiment (Crypto Fear & Greed Index — contrarian)
+    label, detail = btc.classify_fear_greed(fng_val)
+    data["Sentiment"] = f"{label} — {detail}"
+    labels["Sentiment"] = label
 
     # Composite scorecard
     data["Composite"] = btc.macro_scorecard(labels)
