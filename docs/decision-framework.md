@@ -71,10 +71,14 @@ When signals conflict, **fundamentals override technicals, always.** Technicals 
 
 | Conflict | Condition | Action |
 |----------|-----------|--------|
-| **Value Trap** | RSI <30 but margins compressing or severe headwind | **Hard stop.** Drop to low conviction. Oversold for a reason. |
+| **Value Trap** | RSI <30 but margins compressing | **Hard stop.** Drop to low conviction. Oversold for a reason. |
+| **Justified Rally** | RSI >70 but margins expanding | **Don't short.** Overbought is justified by improving fundamentals. Momentum has fundamental backing. |
 | **Price Dislocation** | Downtrend but revenue accelerating + ROE >25% | **Proceed.** High-conviction Accumulate. Use Hybrid (CSP-heavy) entry. |
+| **Deteriorating Rally** | Uptrend but revenue declining | **Bearish setup.** Technicals mask weakening fundamentals. Rally is on borrowed time. |
 | **FOMO Trap** | ATH + RSI >70 but PEG >3.0 | **Cap the size.** Reduced tier only. Prefer call spread over accumulation. |
-| **Front-Run Catalyst** | Stock rallied >8% in 2 weeks into catalyst + catalyst info already leaked | **Wait for post-catalyst reaction.** Overpaying on timing, not valuation. |
+| **Capitulation Bargain** | Near 52W low + RSI <30 + PEG <1 + margins not compressing | **Genuine bargain.** Not a value trap — cheap valuation with intact margins. High-conviction accumulate. |
+| **Front-Run Catalyst** | Stock rallied >8% in 2 weeks into catalyst + catalyst info already leaked | **Bullish: wait for post-catalyst reaction.** Overpaying on timing, not valuation. **Bearish: rally provides higher entry for puts/bear spreads** — the run-up is your opportunity, not a warning. |
+| **Pre-Priced Selloff** | Stock dropped >8% in 2 weeks into catalyst + bad news already known | **Bearish: wait for post-catalyst reaction.** Downside may already be priced in. **Bullish: selloff provides cheaper entry for shares/CSPs** — the drop is your opportunity, not a warning. |
 
 ## Step 3: Choose Strategy
 

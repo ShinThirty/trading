@@ -3088,10 +3088,14 @@ async def get_entry_signals(ctx: Context, symbol: str) -> str:
 
     Combines get_conviction_metrics + get_iv_metrics + get_technical_indicators
     into one call. Automatically flags triggered circuit breakers:
-    - Value Trap: RSI <30 but margins compressing or severe headwind
+    - Value Trap: RSI <30 but margins compressing
+    - Justified Rally: RSI >70 but margins expanding (mirror of Value Trap)
     - Price Dislocation: downtrend but revenue accelerating + ROE >25%
-    - FOMO Trap: near ATH + RSI >70 but PEG >3.0
-    - Front-Run Catalyst: stock rallied >8% in prior 2 weeks
+    - Deteriorating Rally: uptrend but revenue declining (mirror of Price Dislocation)
+    - FOMO Trap: near ATH + RSI >70 + PEG >3.0
+    - Capitulation Bargain: near 52W low + RSI <30 + PEG <1 + margins ok (mirror of FOMO Trap)
+    - Front-Run Catalyst: stock rallied >8% in prior 2 weeks (intent-aware)
+    - Pre-Priced Selloff: stock dropped >8% in prior 2 weeks (intent-aware)
 
     symbol: ticker symbol (e.g. 'ULTA').
 
@@ -3173,6 +3177,12 @@ async def get_entry_signals(ctx: Context, symbol: str) -> str:
     if rsi_val is not None and rsi_val < 30 and margin_trend == "Compressing":
         breakers.append("Value Trap — RSI <30 but margins compressing. Hard stop.")
 
+    if rsi_val is not None and rsi_val > 70 and margin_trend == "Expanding":
+        breakers.append(
+            "Justified Rally — RSI >70 but margins expanding. "
+            "Overbought is justified by improving fundamentals. Don't short this."
+        )
+
     in_downtrend = above_sma50 is False and above_sma200 is False
     if in_downtrend and rev_growth is not None and rev_growth > 0 and roe is not None and roe > 25:
         breakers.append(
@@ -3180,14 +3190,45 @@ async def get_entry_signals(ctx: Context, symbol: str) -> str:
             "Proceed with Hybrid (CSP-heavy) entry."
         )
 
+    in_uptrend = above_sma50 is True and above_sma200 is True
+    if in_uptrend and rev_growth is not None and rev_growth < 0:
+        breakers.append(
+            "Deteriorating Rally — uptrend but revenue declining. "
+            "Technicals mask weakening fundamentals. Bearish setup."
+        )
+
     near_ath = drawdown_pct is not None and drawdown_pct > -5
     if near_ath and rsi_val is not None and rsi_val > 70 and peg is not None and peg > 3.0:
         breakers.append("FOMO Trap — near ATH + RSI >70 + PEG >3. Reduced tier only.")
 
+    near_52w_low = drawdown_pct is not None and drawdown_pct < -40
+    if (
+        near_52w_low
+        and rsi_val is not None
+        and rsi_val < 30
+        and peg is not None
+        and peg > 0
+        and peg < 1.0
+        and margin_trend != "Compressing"
+    ):
+        breakers.append(
+            "Capitulation Bargain — near 52W low + RSI <30 + PEG <1 + margins not compressing. "
+            "Genuine bargain, not a value trap. High-conviction accumulate."
+        )
+
     if rally_2w_pct is not None and rally_2w_pct > 8 and earnings_date:
         breakers.append(
             f"Front-Run Catalyst — rallied {rally_2w_pct:.1f}% in 2 weeks into "
-            f"{earnings_date} earnings. Wait for post-catalyst reaction."
+            f"{earnings_date} earnings. Bullish: wait for post-catalyst reaction. "
+            f"Bearish: rally provides higher entry for puts/bear spreads."
+        )
+
+    if rally_2w_pct is not None and rally_2w_pct < -8 and earnings_date:
+        breakers.append(
+            f"Pre-Priced Selloff — dropped {rally_2w_pct:.1f}% in 2 weeks into "
+            f"{earnings_date} earnings. Bearish: wait for post-catalyst reaction "
+            f"(downside may be priced in). "
+            f"Bullish: selloff provides cheaper entry for shares/CSPs."
         )
 
     # ── Build output ──
