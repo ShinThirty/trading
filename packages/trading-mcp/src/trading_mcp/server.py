@@ -352,6 +352,7 @@ async def _conviction_data(finnhub_client, tradier_client, symbol: str) -> dict[
     high_52w = to_float(q.get("week_52_high"))
 
     quarters = fin.income_numeric(8) if fin else []
+    cf_quarters = fin.cf_numeric(4) if fin else []
 
     drawdown_pct = None
     if price and high_52w and high_52w > 0:
@@ -428,6 +429,99 @@ async def _conviction_data(finnhub_client, tradier_client, symbol: str) -> dict[
     else:
         size = "Unable to determine — missing P/E data"
 
+    # ── Conviction scoring (4-tier: Bullish / Moderate / Neutral / Negative) ──
+    factor_scores: dict[str, str] = {}
+
+    leverage_inflated = de is not None and de > 3
+    if roe is not None:
+        if roe < 5 or (leverage_inflated and (pe is None or pe < 0)):
+            detail = f"{roe:.0f}%"
+            if leverage_inflated:
+                detail += f", D/E {de:.0f}x"
+            factor_scores["ROE"] = f"Negative ({detail})"
+        elif roe < 15:
+            factor_scores["ROE"] = f"Neutral ({roe:.0f}%)"
+        elif roe >= 25 and not leverage_inflated:
+            factor_scores["ROE"] = f"Bullish ({roe:.0f}%)"
+        elif leverage_inflated:
+            factor_scores["ROE"] = f"Neutral ({roe:.0f}%, D/E {de:.0f}x)"
+        else:
+            factor_scores["ROE"] = f"Moderate ({roe:.0f}%)"
+    else:
+        factor_scores["ROE"] = "N/A (no data)"
+
+    if rev_growth is not None:
+        if rev_growth < 0 or margin_trend == "Compressing":
+            parts = []
+            if rev_growth < 0:
+                parts.append(f"rev {rev_growth:+.0f}%")
+            if margin_trend == "Compressing":
+                parts.append("margins compressing")
+            factor_scores["Growth"] = f"Negative ({', '.join(parts)})"
+        elif rev_growth > 10 and margin_trend != "Compressing":
+            factor_scores["Growth"] = f"Bullish (rev +{rev_growth:.0f}%)"
+        elif rev_growth > 5 and margin_trend != "Compressing":
+            factor_scores["Growth"] = f"Moderate (rev +{rev_growth:.0f}%)"
+        else:
+            factor_scores["Growth"] = f"Neutral (rev +{rev_growth:.0f}%)"
+    else:
+        factor_scores["Growth"] = "N/A (no revenue data)"
+
+    most_recent_margin = margins[0][1] if margins else None
+    if most_recent_margin is not None:
+        if most_recent_margin < 0:
+            factor_scores["Margins"] = f"Negative ({most_recent_margin:.1f}%)"
+        elif most_recent_margin < 10:
+            factor_scores["Margins"] = f"Neutral ({most_recent_margin:.1f}%)"
+        elif most_recent_margin < 20:
+            factor_scores["Margins"] = f"Moderate ({most_recent_margin:.1f}%)"
+        else:
+            factor_scores["Margins"] = f"Bullish ({most_recent_margin:.1f}%)"
+    else:
+        factor_scores["Margins"] = "N/A (no data)"
+
+    # FCF = Operating CF - Capex. Two consecutive negative quarters = cash burn.
+    fcf_values: list[float] = []
+    for cfq in cf_quarters[:2]:
+        op_cf = cfq.get("Operating CF")
+        capex = cfq.get("Capex")
+        if op_cf is not None:
+            fcf = op_cf - (capex or 0)
+            fcf_values.append(fcf)
+    if len(fcf_values) >= 1:
+        latest_fcf = fcf_values[0]
+        burning = all(f < 0 for f in fcf_values) and len(fcf_values) >= 2
+        if burning:
+            fmt = f"-${abs(latest_fcf) / 1e6:.0f}M"
+            factor_scores["Cash Flow"] = f"Negative (FCF {fmt}, burning)"
+        elif latest_fcf < 0:
+            fmt = f"-${abs(latest_fcf) / 1e6:.0f}M"
+            factor_scores["Cash Flow"] = f"Neutral (FCF {fmt})"
+        else:
+            fmt = f"${latest_fcf / 1e6:.0f}M"
+            factor_scores["Cash Flow"] = f"Bullish (FCF {fmt})"
+    else:
+        factor_scores["Cash Flow"] = "N/A (no data)"
+
+    neg_count = sum(1 for v in factor_scores.values() if v.startswith("Negative"))
+    bull_count = sum(1 for v in factor_scores.values() if v.startswith("Bullish"))
+    mod_count = sum(1 for v in factor_scores.values() if v.startswith("Moderate"))
+
+    if neg_count >= 2:
+        conviction = "Negative"
+    elif neg_count == 1 and bull_count == 0 and mod_count == 0:
+        conviction = "Low"
+    elif bull_count >= 3 and neg_count == 0:
+        conviction = "Highest"
+    elif bull_count >= 2:
+        conviction = "High"
+    elif bull_count == 1 or mod_count >= 2:
+        conviction = "Moderate"
+    elif mod_count == 1:
+        conviction = "Low"
+    else:
+        conviction = "Low"
+
     return {
         "pe": pe,
         "roe": roe,
@@ -444,7 +538,31 @@ async def _conviction_data(finnhub_client, tradier_client, symbol: str) -> dict[
         "peg_valid": peg_valid,
         "peg_note": peg_note,
         "size": size,
+        "conviction": conviction,
+        "factor_scores": factor_scores,
     }
+
+
+def _format_conviction(d: dict[str, Any], data: dict[str, str]) -> None:
+    """Add conviction level and per-factor scores to an output dict."""
+    conviction = d.get("conviction", "Unknown")
+    factor_scores: dict[str, str] = d.get("factor_scores", {})
+    scores_str = " | ".join(f"{k}: {v}" for k, v in factor_scores.items())
+    if conviction == "Negative":
+        data["Conviction"] = f"**{conviction}** — route to bearish framework"
+    else:
+        data["Conviction"] = conviction
+    if scores_str:
+        data["Conviction Inputs"] = scores_str
+    if conviction == "Negative":
+        pe = d.get("pe")
+        rev_growth = d.get("rev_growth")
+        disconnects: list[str] = []
+        if pe is not None and pe > 50 and (rev_growth is None or rev_growth < 5):
+            growth_str = f"{rev_growth:+.0f}%" if rev_growth is not None else "N/A"
+            disconnects.append(f"P/E {pe:.0f}x with {growth_str} growth")
+        if disconnects:
+            data["Valuation Disconnect"] = " | ".join(disconnects)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -2866,6 +2984,8 @@ async def get_conviction_metrics(ctx: Context, symbol: str) -> str:
     elif d["peg_note"]:
         data["PEG"] = d["peg_note"]
 
+    _format_conviction(d, data)
+
     data["Position Size"] = d["size"]
 
     return kv_table(data)
@@ -3097,6 +3217,10 @@ async def get_entry_signals(ctx: Context, symbol: str) -> str:
     - Front-Run Catalyst: stock rallied >8% in prior 2 weeks (intent-aware)
     - Pre-Priced Selloff: stock dropped >8% in prior 2 weeks (intent-aware)
 
+    Scores four quantitative conviction factors (ROE, Growth, Margins, Cash Flow)
+    into Bullish/Moderate/Neutral/Negative tiers. When 2+ factors score Negative,
+    conviction is Negative and routes to the bearish framework.
+
     symbol: ticker symbol (e.g. 'ULTA').
 
     Requires [finnhub], [tradier], and [tastytrade] sections in ~/.tradingrc.
@@ -3254,6 +3378,9 @@ async def get_entry_signals(ctx: Context, symbol: str) -> str:
         data["Margin Trend"] = margin_trend
     if peg is not None and peg_valid:
         data["PEG"] = f"{peg:.2f}"
+
+    _format_conviction(d, data)
+
     data["Size Tier"] = size
 
     if iv_rank is not None:

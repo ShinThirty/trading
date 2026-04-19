@@ -209,6 +209,8 @@ The key difference from Accumulate/Enter at Discount: you have **timing convicti
 
 ## Intent: Bearish (negative conviction)
 
+See [bearish-framework.md](bearish-framework.md) for the full bearish analysis process: how to score bearish conviction (deterioration signals + valuation disconnect), entry timing, L2 strategy selection matrix, sizing limits, and management rules. This section covers strategy mechanics; the bearish framework covers when and why to use them.
+
 **Strategies:**
 
 | Strategy | Mechanics | When to prefer | Capital required |

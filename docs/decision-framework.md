@@ -26,20 +26,33 @@ After screening confirms (or rejects) a thesis, run through these steps in order
 
 Conviction drives intent. Intent drives strategy. Decide intent FIRST — everything else follows.
 
-**Quick start:** Run `get_entry_signals` for all quantitative conviction inputs (ROE, D/E, revenue growth, margin trend, PEG, sizing tier) plus IV and momentum signals in one call. Moat and AI ROI require qualitative judgment — use `get_company_news` and `get_income_statement` for supporting evidence.
+**Quick start:** Run `get_entry_signals` for all quantitative conviction inputs (ROE, Growth, Margins, Cash Flow — auto-scored into Bullish/Moderate/Neutral/Negative) plus IV and momentum signals in one call. Moat and AI ROI require qualitative judgment — use `get_company_news` and `get_income_statement` for supporting evidence.
 
-**Conviction inputs — what raises or lowers conviction:**
+**Conviction inputs — what raises, lowers, or inverts conviction:**
 
-| Factor | High conviction | Low conviction |
-|--------|----------------|----------------|
-| **ROE** | >25% — elite capital efficiency. If D/E >3x, ROE is inflated by leverage — discount it. | <15% — mediocre returns don't justify premium P/E |
-| **Moat** | Monopoly/deep switching costs | Commodity, crowded market, active disruption threat |
-| **Growth durability** | Recurring revenue, expanding TAM, secular tailwinds | Cyclical, geopolitical-dependent, or AI-threatened |
-| **AI ROI** (for software/adopter names) | AI features driving revenue growth *with stable or expanding margins* | AI spending growing revenue but compressing operating margins. Immediately drop to low conviction. |
+`get_entry_signals` auto-scores the quantitative factors (ROE, Growth, Margins, Cash Flow) into four tiers: Bullish, Moderate, Neutral, Negative. Moat and AI ROI require qualitative judgment — use `get_company_news` and `get_income_statement` for supporting evidence. When 2+ factors score Negative, the tool routes to the bearish framework.
+
+**Quantitative factors** (auto-scored by `get_entry_signals`):
+
+| Factor | Bullish | Moderate | Neutral | Negative |
+|--------|---------|----------|---------|----------|
+| **ROE** | >25% (no leverage inflation) | 15-25% | <15% | <5%; or D/E >3x with negative earnings |
+| **Growth** | Rev >10% YoY, margins not compressing | Rev 5-10% | Rev 0-5% | Rev declining YoY or margins compressing |
+| **Margins** | Op margin >20% | 10-20% | 0-10% | <0% (operating at a loss) |
+| **Cash Flow** | Positive FCF | — | Single negative FCF quarter | 2 consecutive negative FCF quarters (burning) |
+
+If D/E >3x, ROE is leverage-inflated — capped at Neutral even if the raw number is high.
+
+**Qualitative factors** (manual assessment):
+
+| Factor | Bullish | Neutral | Negative |
+|--------|---------|---------|----------|
+| **Moat** | Monopoly/deep switching costs | Commodity, crowded market, active disruption threat | Actively losing share, competitor products displacing, customer churn |
+| **AI ROI** (software/adopter names) | AI features driving revenue growth *with stable or expanding margins* | AI spending growing revenue but compressing operating margins. Immediately drop to low conviction. | Spending on unmonetized narrative (robotaxi, AI chips, etc.) with no revenue pathway — valuation rests entirely on story |
 
 The AI ROI filter distinguishes **Builders** (semis/infra — revenue booms now but carries cycle risk) from **Adopters** (software — must prove AI monetization without margin destruction).
 
-Drawdown alone is not conviction — the business quality determines whether the drawdown is an opportunity or a warning.
+Drawdown alone is not conviction — the business quality determines whether the drawdown is an opportunity or a warning. Similarly, bad fundamentals alone are not bearish conviction — the deterioration must be *mispriced* for it to be a trade.
 
 | Conviction | Intent | Goal | You're saying... |
 |-----------|--------|------|-----------------|
@@ -49,8 +62,10 @@ Drawdown alone is not conviction — the business quality determines whether the
 | **Moderate** | **Defined-risk exposure** | Bullish participation with capped downside | "I like this thesis but want to limit what I can lose" |
 | **Low / Neutral** | **Harvest premium** | Extract income from range-bound or elevated IV | "I don't want to own this, I want to sell its volatility" |
 | **Direction-agnostic** | **Bet on volatility** | Profit from large moves regardless of direction | "Something big is coming, I don't know which way" |
-| **Negative** | **Bearish** | Profit from decline | "This stock is going down" |
+| **Negative** | **Bearish** | Profit from decline or volatility on a deteriorating business | "This business is getting worse and the market hasn't priced it" |
 | **N/A (existing position)** | **Hedge** | Protect current holdings | "I own this and want downside protection" |
+
+When 2+ conviction inputs score "negative," route to the [Bearish Framework](bearish-framework.md) for detailed deterioration scoring, valuation disconnect assessment, and L2 strategy selection. A bad business at a fair price is a skip; a bad business at a delusional price is a trade.
 
 ## Step 2: Read the Signals
 
@@ -82,7 +97,7 @@ When signals conflict, **fundamentals override technicals, always.** Technicals 
 
 ## Step 3: Choose Strategy
 
-Once intent is set and signals are collected, match to the right strategy. See [strategy-catalog.md](strategy-catalog.md) for detailed mechanics, decision matrices, strike selection, roll rules, and management for each intent.
+Once intent is set and signals are collected, match to the right strategy. See [strategy-catalog.md](strategy-catalog.md) for detailed mechanics, decision matrices, strike selection, roll rules, and management for each intent. For bearish intent, see [bearish-framework.md](bearish-framework.md) for the full L2 decision matrix, sizing, and management rules.
 
 **Quick reference — intent to default strategy:**
 
@@ -94,7 +109,8 @@ Once intent is set and signals are collected, match to the right strategy. See [
 | **Defined-risk exposure** | Bull put spread | BPS (sell rich premium) | Bull call spread (buy cheap) |
 | **Harvest premium** | Iron condor | Iron condor (best window) | Skip or butterfly |
 | **Bet on volatility** | Long straddle/strangle | Sell vol instead | Buy vol (sweet spot) |
-| **Bearish** | Bear put spread | Bear call spread | Bear put spread |
+| **Bearish (L2)** | Long put (IV Rank <30%) | Wait (puts expensive) | Long put (sweet spot) |
+| **Bearish (L3)** | Bear put spread | Bear call spread | Bear put spread |
 | **Hedge** | Protective put / collar | Collar (sell rich calls) | Protective put |
 
 ## Step 4: Size the Position
@@ -112,57 +128,6 @@ Run `get_entry_signals` or `get_conviction_metrics` — both compute PEG (revenu
 
 **Size for the drawdown, not just the upside.** Before entering, ask: "If this drops 40% over 2 months, will the dollar loss force me to sell?" If yes, the position is too large. Size so that the worst-case drawdown is painful but survivable without triggering an emotional sell.
 
-## Step 5: Set Management Rules
+## Step 5: Manage the Position
 
-### Accumulate / Enter at discount:
-- **CSP:** Close at 50% profit. If assigned, evaluate covered call overlay (wheel).
-- **Direct shares:** No hard stop losses on high-conviction entries. Scale-in T2 triggers at 5-8% drop from T1.
-- **If approaching CSP expiry ITM:** Let assignment happen if thesis intact. Only roll if thesis deteriorated.
-- **Reassess thesis** if position drops >15% from entry — check fundamentals, not just price.
-
-### Directional leverage:
-- **Long call:** Set profit target at entry (50-100% return on premium). Take profits, don't diamond-hand.
-- **Call backspread:** Let ride if move is developing. Close if stock stalls — time decay on 2 long legs hurts.
-- **Both:** Exit immediately if catalyst disappoints. Cut losses inside 14 DTE — theta acceleration destroys value.
-
-### Defined-risk exposure:
-- **BPS:** Close at 50% of max profit or when short leg reaches 80% profit.
-- **Bull call spread:** Let ride toward expiry if directional thesis intact. Close if underlying breaks below support.
-- **PMCC:** Manage short call — roll up and out if challenged. LEAPS is the anchor.
-
-### Harvest premium:
-- **Iron condor/butterfly:** Close at 50% of max profit. Adjust or close tested side if underlying approaches short strike.
-- **Calendar:** Close when near-term option decays to target or IV differential narrows.
-
-### Bearish:
-- **Bear spreads:** Close at 50-75% of max profit. Don't hold to expiry hoping for max.
-- **Long puts:** Set profit target (e.g. 100% return on premium). Time decay is working against you.
-
-### All strategies:
-- **Exit signal:** Thesis broken (not price action). Revenue deceleration, margin collapse, competitive disruption, management change.
-- **Covered call overlay** once shares are held: see [covered-call-overlay.md](covered-call-overlay.md).
-
-### Thesis Checkpoint: When a Position Drops >15%
-
-Don't watch the ticker and feel pain. Run this checklist:
-
-1. **Is the end customer still spending?** Check the demand environment upstream of your company. If the buyers of your company's products are still deploying capital, the thesis is intact.
-2. **Is this company-specific or sector-wide?** Company-specific drawdowns need more scrutiny. Sector-wide drawdowns are *often* noise — but not always. A sector-wide drawdown can also be the beginning of a cycle turn. If the drawdown aligns with your exit thesis signals, it's not noise — it's the signal.
-3. **Has the competitive moat actually narrowed?** Check for concrete evidence: lost customers, cancelled contracts, actual product displacement. A narrative shift in financial media is not the same as lost revenue.
-4. **Is the thesis timeline still valid?** A 2-month drawdown inside an 18-month thesis is noise, not signal.
-5. **Would I buy this at today's price if I had no position?** Strip away anchoring to your entry.
-
-If all five pass → hold or add. If any fail → exit regardless of price.
-
-### Selling Into Strength vs Selling Into Recovery
-
-**The diagnostic test:** "Am I selling because I've won, or because I've survived?"
-
-| | Selling into strength | Selling into recovery |
-|---|---|---|
-| Position P&L | Green or solidly profitable | Still red or barely recovered |
-| Motivation | "I've hit my target" | "I can finally get out" |
-| Emotion | Confidence, maybe mild FOMO | Relief, exhaustion |
-| Usually right? | Yes — disciplined profit-taking | Usually wrong — you paid the emotional cost of the drawdown but captured none of the recovery |
-
-**The rule:** If you survived the worst of a drawdown, a partial bounce should confirm the thesis, not trigger an exit. The crash is the tax. The recovery is the refund. Don't walk away before the refund arrives.
+See [management-rules.md](management-rules.md) for per-intent profit targets, exit triggers, thesis checkpoints, and selling discipline. See [bearish-framework.md](bearish-framework.md) for bearish-specific management. See [covered-call-overlay.md](covered-call-overlay.md) for CC rolls and management.

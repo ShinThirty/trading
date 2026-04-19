@@ -410,6 +410,10 @@ class FinancialsReportedResponse:
         """Return raw income statement numbers for computation (revenue, operating income, etc)."""
         return self._extract_numeric("ic", _IC_ITEMS, limit)
 
+    def cf_numeric(self, limit: int = 4) -> list[dict[str, Any]]:
+        """Return raw cash flow numbers for computation (operating CF, capex, etc)."""
+        return self._extract_numeric("cf", _CF_ITEMS, limit)
+
     def income_markdown(self, limit: int = 4) -> str:
         return self._extract_section("ic", _IC_ITEMS, limit)
 
