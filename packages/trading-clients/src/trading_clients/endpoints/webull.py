@@ -621,3 +621,105 @@ CANCEL_ORDER = Endpoint(
     rate_key="order_write",
     response_model=OrderResultResponse,
 )
+
+# ═══════════════════════════════════════════════════════════════
+# Crypto Market Data
+# ═══════════════════════════════════════════════════════════════
+
+
+@dataclass
+class CryptoSnapshotRequest(ParamsRequest):
+    symbols: str
+    category: str = "US_CRYPTO"
+
+    def to_params(self) -> dict[str, str]:
+        return {"symbols": self.symbols, "category": self.category}
+
+
+@dataclass
+class CryptoBarsRequest(ParamsRequest):
+    symbols: str
+    timespan: str = "D"
+    count: int = 200
+    category: str = "US_CRYPTO"
+
+    def to_params(self) -> dict[str, str]:
+        return {
+            "symbols": self.symbols,
+            "category": self.category,
+            "timespan": self.timespan,
+            "count": str(self.count),
+        }
+
+
+@dataclass
+class CryptoSnapshotResponse:
+    snapshots: list[dict]
+
+    @classmethod
+    def from_response(cls, data: list[dict]) -> "CryptoSnapshotResponse":
+        return cls(snapshots=data or [])
+
+    def to_output(self) -> str:
+        if not self.snapshots:
+            return "(no data)"
+        rows: list[dict[str, str]] = []
+        for s in self.snapshots:
+            price = _safe_float(s.get("price"))
+            change = _safe_float(s.get("change"))
+            change_ratio = _safe_float(s.get("change_ratio")) * 100
+            rows.append(
+                {
+                    "Symbol": s.get("symbol", ""),
+                    "Price": fmt_number(price),
+                    "Change": fmt_number(change),
+                    "Change %": f"{change_ratio:+.2f}%",
+                    "Open": fmt_number(s.get("open")),
+                    "High": fmt_number(s.get("high")),
+                    "Low": fmt_number(s.get("low")),
+                    "Bid": fmt_number(s.get("bid")),
+                    "Ask": fmt_number(s.get("ask")),
+                }
+            )
+        return list_table(rows) if len(rows) > 1 else kv_table(rows[0])
+
+
+@dataclass
+class CryptoBarsResponse:
+    bars: list[dict]
+
+    @classmethod
+    def from_response(cls, data: list[dict]) -> "CryptoBarsResponse":
+        if data and isinstance(data, list) and data[0].get("result"):
+            return cls(bars=data[0]["result"])
+        return cls(bars=[])
+
+    def to_output(self) -> str:
+        if not self.bars:
+            return "(no data)"
+        rows = [
+            {
+                "Time": b.get("time", "")[:10],
+                "Open": fmt_number(b.get("open")),
+                "High": fmt_number(b.get("high")),
+                "Low": fmt_number(b.get("low")),
+                "Close": fmt_number(b.get("close")),
+            }
+            for b in self.bars
+        ]
+        return list_table(rows)
+
+
+CRYPTO_SNAPSHOT = Endpoint(
+    "/openapi/market-data/crypto/snapshot",
+    cache_ttl=30,
+    rate_key="default",
+    response_model=CryptoSnapshotResponse,
+)
+
+CRYPTO_BARS = Endpoint(
+    "/openapi/market-data/crypto/bars",
+    cache_ttl=300,
+    rate_key="default",
+    response_model=CryptoBarsResponse,
+)

@@ -8,6 +8,7 @@ from math import gcd
 from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
+from trading_clients import btc_regime as btc
 from trading_clients import indicators as ta
 from trading_clients import options as opts
 from trading_clients import regime
@@ -23,6 +24,8 @@ from trading_clients.endpoints.webull import (
     ACCOUNT_LIST,
     BALANCE,
     CANCEL_ORDER,
+    CRYPTO_BARS,
+    CRYPTO_SNAPSHOT,
     INSTRUMENTS,
     OPEN_ORDERS,
     ORDER_DETAIL,
@@ -33,6 +36,8 @@ from trading_clients.endpoints.webull import (
     REPLACE_ORDER,
     AccountRequest,
     CancelOrderRequest,
+    CryptoBarsRequest,
+    CryptoSnapshotRequest,
     EmptyRequest,
     GetInstrumentsRequest,
     GetOpenOrdersRequest,
@@ -2540,6 +2545,187 @@ async def get_market_regime(ctx: Context) -> str:
             data["IV Context"] = f"SPY {', '.join(parts)}"
 
     return f"## Market Regime\n\n{kv_table(data)}"
+
+
+# ═══════════════════════════════════════════════════════════════
+# BTC MACRO SIGNALS — Bitcoin Entry Signal Aggregation
+# ═══════════════════════════════════════════════════════════════
+
+
+@mcp.tool()
+async def get_crypto_quote(ctx: Context, symbols: str = "BTCUSD") -> str:
+    """Get real-time crypto price snapshot from Webull.
+
+    symbols: comma-separated crypto symbols (e.g. 'BTCUSD', 'BTCUSD,ETHUSD').
+      Default: BTCUSD.
+
+    Returns current price, change, bid/ask, and day range.
+    Requires [webull] section in ~/.tradingrc.
+    """
+    client = _webull(ctx)
+    resp = await client.get(CRYPTO_SNAPSHOT, CryptoSnapshotRequest(symbols))
+    return resp.to_output()
+
+
+@mcp.tool()
+async def get_btc_entry_signals(ctx: Context) -> str:
+    """Get Bitcoin entry signals combining macro indicators and BTC price
+    technicals into a single scorecard.
+
+    Macro signals (from FRED):
+    - Halving Cycle: position in Bitcoin's ~4-year supply cycle
+    - Monetary Policy: Fed funds rate direction (easing/tightening/holding)
+    - Liquidity: M2 money supply YoY growth + 3mo acceleration
+    - Dollar: DXY 20d/60d trend (weak dollar = bullish BTC)
+    - Real Rates: 10Y yield minus CPI (negative = bullish BTC)
+    - Risk Appetite: VIX level
+
+    Price technicals (from Webull crypto bars):
+    - BTC price, drawdown from ATH
+    - RSI(14), SMA(50), SMA(200)
+    - Composite: overall macro favorability score
+
+    Requires [fred] and [webull] sections in ~/.tradingrc.
+    """
+    fred_client = _fred(ctx)
+    webull = _webull(ctx)
+
+    tasks: list[Any] = [
+        fred_client.get(fred.OBSERVATIONS, fred.GetObservationsRequest("FEDFUNDS", 2)),
+        fred_client.get(fred.OBSERVATIONS, fred.GetObservationsRequest("WM2NS", 60)),
+        fred_client.get(fred.OBSERVATIONS, fred.GetObservationsRequest("DTWEXBGS", 80)),
+        fred_client.get(fred.OBSERVATIONS, fred.GetObservationsRequest("DGS10", 1)),
+        fred_client.get(fred.OBSERVATIONS, fred.GetObservationsRequest("CPIAUCSL", 13)),
+        fred_client.get(fred.OBSERVATIONS, fred.GetObservationsRequest("VIXCLS", 1)),
+        webull.get(CRYPTO_BARS, CryptoBarsRequest("BTCUSD", timespan="D", count=250)),
+        webull.get(CRYPTO_SNAPSHOT, CryptoSnapshotRequest("BTCUSD")),
+    ]
+
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    ff_resp = results[0] if not isinstance(results[0], BaseException) else None
+    m2_resp = results[1] if not isinstance(results[1], BaseException) else None
+    dxy_resp = results[2] if not isinstance(results[2], BaseException) else None
+    dgs10_resp = results[3] if not isinstance(results[3], BaseException) else None
+    cpi_resp = results[4] if not isinstance(results[4], BaseException) else None
+    vix_resp = results[5] if not isinstance(results[5], BaseException) else None
+    bars_resp = results[6] if not isinstance(results[6], BaseException) else None
+    snap_resp = results[7] if not isinstance(results[7], BaseException) else None
+
+    data: dict[str, str | None] = {}
+    labels: dict[str, str] = {}
+
+    # ── BTC Price & Technicals ──
+    btc_price = None
+    if snap_resp and snap_resp.snapshots:
+        s = snap_resp.snapshots[0]
+        btc_price = to_float(s.get("price"))
+        change_ratio = to_float(s.get("change_ratio"))
+        if btc_price:
+            price_str = f"${btc_price:,.0f}"
+            if change_ratio is not None:
+                price_str += f" ({change_ratio * 100:+.2f}%)"
+            data["BTC Price"] = price_str
+
+    bars = bars_resp.bars if bars_resp else []
+    closes = [float(b["close"]) for b in bars if b.get("close")] if bars else []
+
+    if closes:
+        ath = max(closes)
+        current = closes[-1]
+        if btc_price:
+            current = btc_price
+            ath = max(ath, btc_price)
+        drawdown = (current - ath) / ath * 100 if ath > 0 else 0
+        data["ATH Drawdown"] = f"{drawdown:+.1f}% (ATH ${ath:,.0f})"
+
+        rsi_vals = ta.rsi(closes)
+        rsi_val = rsi_vals[-1] if rsi_vals else None
+        if rsi_val is not None:
+            level = "oversold" if rsi_val < 30 else "overbought" if rsi_val > 70 else "neutral"
+            data["RSI(14)"] = f"{rsi_val:.1f} ({level})"
+
+        sma50_vals = ta.sma(closes, 50)
+        sma50 = sma50_vals[-1]
+        if sma50 is not None and current:
+            rel = "above" if current > sma50 else "below"
+            data["SMA(50)"] = f"${sma50:,.0f} (price {rel})"
+
+        sma200_vals = ta.sma(closes, 200)
+        sma200 = sma200_vals[-1]
+        if sma200 is not None and current:
+            rel = "above" if current > sma200 else "below"
+            data["SMA(200)"] = f"${sma200:,.0f} (price {rel})"
+
+    # ── Macro Signals ──
+
+    # Halving cycle (static calculation, no data needed)
+    label, detail = btc.classify_halving_cycle()
+    data["Halving Cycle"] = f"{label} — {detail}"
+    labels["Halving Cycle"] = label
+
+    # Monetary policy
+    ff_obs = ff_resp.observations if ff_resp else []
+    ff_val, _ = regime.parse_fred_value(ff_obs)
+    prev_ff_val, _ = regime.parse_fred_value(ff_obs[1:] if len(ff_obs) > 1 else [])
+    label, detail = btc.classify_monetary_policy(ff_val, prev_ff_val)
+    data["Monetary Policy"] = f"{label} — {detail}"
+    labels["Monetary Policy"] = label
+
+    # Liquidity (M2 money supply)
+    m2_obs = m2_resp.observations if m2_resp else []
+    m2_values: list[tuple[str, float]] = []
+    for obs in m2_obs:
+        v = obs.get("value", ".")
+        if v != ".":
+            try:
+                m2_values.append((obs.get("date", ""), float(v)))
+            except (ValueError, TypeError):
+                pass
+    label, detail = btc.classify_liquidity(m2_values)
+    data["Liquidity"] = f"{label} — {detail}"
+    labels["Liquidity"] = label
+
+    # Dollar strength
+    dxy_obs = dxy_resp.observations if dxy_resp else []
+    dxy_values: list[tuple[str, float]] = []
+    for obs in dxy_obs:
+        v = obs.get("value", ".")
+        if v != ".":
+            try:
+                dxy_values.append((obs.get("date", ""), float(v)))
+            except (ValueError, TypeError):
+                pass
+    label, detail = btc.classify_dollar(dxy_values)
+    data["Dollar"] = f"{label} — {detail}"
+    labels["Dollar"] = label
+
+    # Real rates (10Y yield minus CPI YoY)
+    dgs10_val, _ = regime.parse_fred_value(dgs10_resp.observations if dgs10_resp else [])
+    cpi_obs = cpi_resp.observations if cpi_resp else []
+    cpi_yoy = None
+    if len(cpi_obs) >= 13:
+        try:
+            current_cpi = float(cpi_obs[0].get("value", "."))
+            year_ago_cpi = float(cpi_obs[12].get("value", "."))
+            if year_ago_cpi > 0:
+                cpi_yoy = (current_cpi - year_ago_cpi) / year_ago_cpi * 100
+        except (ValueError, TypeError):
+            pass
+    label, detail = btc.classify_real_rates(dgs10_val, cpi_yoy)
+    data["Real Rates"] = f"{label} — {detail}"
+    labels["Real Rates"] = label
+
+    # Risk appetite
+    vix_val, _ = regime.parse_fred_value(vix_resp.observations if vix_resp else [])
+    label, detail = btc.classify_risk_appetite(vix_val)
+    data["Risk Appetite"] = f"{label} — {detail}"
+    labels["Risk Appetite"] = label
+
+    # Composite scorecard
+    data["Composite"] = btc.macro_scorecard(labels)
+
+    return f"## BTC Entry Signals\n\n{kv_table(data)}"
 
 
 @mcp.tool()
