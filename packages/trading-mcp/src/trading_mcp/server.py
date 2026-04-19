@@ -2585,6 +2585,28 @@ async def get_crypto_quote(ctx: Context, symbols: str = "BTCUSD") -> str:
 
 
 @mcp.tool()
+async def get_crypto_history(
+    ctx: Context,
+    symbol: str = "BTCUSD",
+    interval: str = "D",
+    count: int = 200,
+) -> str:
+    """Get historical OHLCV bars for a cryptocurrency from Webull.
+
+    symbol: crypto symbol (e.g. 'BTCUSD', 'ETHUSD'). Default: BTCUSD.
+    interval: bar interval — 'D' (daily), 'W' (weekly), 'M' (monthly),
+      '1' (1min), '5' (5min), '30' (30min), '60' (60min). Default: D.
+    count: number of bars to return (max 250). Default: 200.
+
+    Returns OHLCV table sorted oldest to newest.
+    Requires [webull] section in ~/.tradingrc.
+    """
+    client = _webull(ctx)
+    resp = await client.get(CRYPTO_BARS, CryptoBarsRequest(symbol, timespan=interval, count=count))
+    return resp.to_output()
+
+
+@mcp.tool()
 async def get_btc_entry_signals(ctx: Context) -> str:
     """Get Bitcoin entry signals combining macro indicators and BTC price
     technicals into a single scorecard.
@@ -2658,6 +2680,7 @@ async def get_btc_entry_signals(ctx: Context) -> str:
 
     bars = bars_resp.bars if bars_resp else []
     closes = [float(b["close"]) for b in bars if b.get("close")] if bars else []
+    ath: float | None = None
 
     if closes:
         ath = max(closes)
@@ -2780,6 +2803,10 @@ async def get_btc_entry_signals(ctx: Context) -> str:
 
     # Composite scorecard
     data["Composite"] = btc.macro_scorecard(labels)
+
+    # DCA sizing (drawdown-based)
+    if btc_price and ath:
+        data["DCA Sizing"] = btc.dca_sizing(btc_price, ath)
 
     return f"## BTC Entry Signals\n\n{kv_table(data)}"
 

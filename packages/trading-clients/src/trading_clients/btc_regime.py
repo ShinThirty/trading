@@ -333,3 +333,19 @@ def macro_scorecard(labels: dict[str, str]) -> str:
     if ratio >= 0.2:
         return f"Unfavorable ({bearish}/{total} bearish)"
     return f"Strongly Unfavorable ({bearish}/{total} bearish)"
+
+
+DCA_TIERS: list[tuple[float, int, str]] = [
+    (-50, 400, "2x baseline — capitulation zone"),
+    (-30, 200, "baseline — deep discount"),
+    (-15, 150, "recovering"),
+    (0, 100, "near highs — reduce urgency"),
+]
+
+
+def dca_sizing(price: float, ath: float) -> str:
+    drawdown = (price - ath) / ath * 100 if ath > 0 else 0
+    for threshold, amount, reason in DCA_TIERS:
+        if drawdown <= threshold:
+            return f"${amount}/week — {drawdown:+.0f}% from ATH ({reason})"
+    return f"${DCA_TIERS[-1][1]}/week — {drawdown:+.0f}% from ATH"
