@@ -187,6 +187,74 @@ def classify_halving_cycle(as_of: date | None = None) -> tuple[str, str]:
     return label, detail
 
 
+def daily_returns(prices: list[float]) -> list[float]:
+    """Compute daily percentage returns from a price series (oldest first)."""
+    return [
+        (prices[i] - prices[i - 1]) / prices[i - 1] for i in range(1, len(prices)) if prices[i - 1]
+    ]
+
+
+def pearson_correlation(x: list[float], y: list[float]) -> float | None:
+    """Compute Pearson correlation coefficient between two equal-length series."""
+    if len(x) != len(y) or len(x) < 10:
+        return None
+    n = len(x)
+    mean_x = sum(x) / n
+    mean_y = sum(y) / n
+    cov = sum((xi - mean_x) * (yi - mean_y) for xi, yi in zip(x, y))
+    std_x = sum((xi - mean_x) ** 2 for xi in x) ** 0.5
+    std_y = sum((yi - mean_y) ** 2 for yi in y) ** 0.5
+    if std_x == 0 or std_y == 0:
+        return None
+    return cov / (std_x * std_y)
+
+
+def classify_correlation(
+    btc_by_date: dict[str, float],
+    qqq_by_date: dict[str, float],
+    gld_by_date: dict[str, float],
+    window: int = 30,
+) -> tuple[str, str]:
+    """Classify BTC's correlation regime from date-aligned daily closes.
+
+    Determines whether BTC is trading as a risk-on asset (correlated with
+    Nasdaq/QQQ) or store-of-value (correlated with gold/GLD).
+
+    btc/qqq/gld_by_date: dict mapping date string to close price.
+    window: number of overlapping trading days to use.
+    """
+    common_dates = sorted(set(btc_by_date) & set(qqq_by_date) & set(gld_by_date))
+    if len(common_dates) < window + 1:
+        return "Unknown", f"insufficient overlapping data ({len(common_dates)} days)"
+
+    recent = common_dates[-(window + 1) :]
+    btc_closes = [btc_by_date[d] for d in recent]
+    qqq_closes = [qqq_by_date[d] for d in recent]
+    gld_closes = [gld_by_date[d] for d in recent]
+
+    btc_r = daily_returns(btc_closes)
+    qqq_r = daily_returns(qqq_closes)
+    gld_r = daily_returns(gld_closes)
+
+    corr_qqq = pearson_correlation(btc_r, qqq_r)
+    corr_gld = pearson_correlation(btc_r, gld_r)
+
+    if corr_qqq is None or corr_gld is None:
+        return "Unknown", "correlation calculation failed"
+
+    detail = f"BTC-QQQ {corr_qqq:+.2f}, BTC-Gold {corr_gld:+.2f} ({window}d)"
+
+    if corr_qqq > 0.5 and corr_gld < 0.3:
+        return "Risk-On", detail
+    if corr_gld > 0.5 and corr_qqq < 0.3:
+        return "Store-of-Value", detail
+    if corr_qqq > 0.5 and corr_gld > 0.5:
+        return "Macro Asset", detail
+    if abs(corr_qqq) < 0.3 and abs(corr_gld) < 0.3:
+        return "Independent", detail
+    return "Mixed", detail
+
+
 def classify_fear_greed(value: int | None) -> tuple[str, str]:
     """Classify Crypto Fear & Greed Index (0-100).
 

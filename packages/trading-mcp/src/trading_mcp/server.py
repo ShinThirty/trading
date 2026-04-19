@@ -2601,12 +2601,17 @@ async def get_btc_entry_signals(ctx: Context) -> str:
     Price technicals (from Webull crypto bars):
     - BTC price, drawdown from ATH
     - RSI(14), SMA(50), SMA(200)
+
+    Correlation regime (from Webull + Tradier):
+    - BTC vs QQQ (risk-on) and BTC vs GLD (store-of-value) 30-day correlation
     - Composite: overall macro favorability score
 
-    Requires [fred] and [webull] sections in ~/.tradingrc.
+    Requires [fred], [webull], and [tradier] sections in ~/.tradingrc.
     """
     fred_client = _fred(ctx)
     webull = _webull(ctx)
+    tradier = _tradier(ctx)
+    start_date = _year_ago(date.today()).isoformat()
 
     tasks: list[Any] = [
         fred_client.get(fred.OBSERVATIONS, fred.GetObservationsRequest("FEDFUNDS", 2)),
@@ -2618,6 +2623,8 @@ async def get_btc_entry_signals(ctx: Context) -> str:
         webull.get(CRYPTO_BARS, CryptoBarsRequest("BTCUSD", timespan="D", count=250)),
         webull.get(CRYPTO_SNAPSHOT, CryptoSnapshotRequest("BTCUSD")),
         _fetch_fear_greed(),
+        tradier.get(t.HISTORY, t.GetHistoryRequest("QQQ", "daily", start=start_date)),
+        tradier.get(t.HISTORY, t.GetHistoryRequest("GLD", "daily", start=start_date)),
     ]
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -2631,6 +2638,8 @@ async def get_btc_entry_signals(ctx: Context) -> str:
     bars_resp = results[6] if not isinstance(results[6], BaseException) else None
     snap_resp = results[7] if not isinstance(results[7], BaseException) else None
     fng_val = results[8] if not isinstance(results[8], BaseException) else None
+    qqq_resp = results[9] if not isinstance(results[9], BaseException) else None
+    gld_resp = results[10] if not isinstance(results[10], BaseException) else None
 
     data: dict[str, str | None] = {}
     labels: dict[str, str] = {}
@@ -2676,6 +2685,28 @@ async def get_btc_entry_signals(ctx: Context) -> str:
         if sma200 is not None and current:
             rel = "above" if current > sma200 else "below"
             data["SMA(200)"] = f"${sma200:,.0f} (price {rel})"
+
+    # ── Correlation Regime ──
+    btc_by_date: dict[str, float] = {}
+    for b in bars:
+        t_str = b.get("time", "")
+        close = to_float(b.get("close"))
+        if t_str and close:
+            btc_by_date[t_str[:10]] = close
+
+    qqq_by_date: dict[str, float] = {}
+    if qqq_resp and qqq_resp.days:
+        for d in qqq_resp.days:
+            qqq_by_date[d.get("date", "")] = float(d["close"])
+
+    gld_by_date: dict[str, float] = {}
+    if gld_resp and gld_resp.days:
+        for d in gld_resp.days:
+            gld_by_date[d.get("date", "")] = float(d["close"])
+
+    if btc_by_date and qqq_by_date and gld_by_date:
+        corr_label, corr_detail = btc.classify_correlation(btc_by_date, qqq_by_date, gld_by_date)
+        data["Correlation"] = f"{corr_label} — {corr_detail}"
 
     # ── Macro Signals ──
 
