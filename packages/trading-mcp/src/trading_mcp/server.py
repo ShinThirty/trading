@@ -2530,9 +2530,9 @@ async def get_market_regime(ctx: Context) -> str:
     """Get current market regime classification across volatility, trend,
     macro, and sector dimensions.
 
-    Aggregates FRED (VIX, yield curve, fed funds), Tradier (SPY technicals),
-    FMP (sector performance), and TastyTrade (IV enrichment) into simple
-    regime labels.
+    Aggregates Tradier (live VIX/VIX3M quotes, SPY technicals),
+    FRED (yield curve, fed funds), FMP (sector performance), and
+    TastyTrade (IV enrichment) into simple regime labels.
 
     Returns regime labels with supporting data:
     - Volatility: Low / Normal / Elevated / Crisis (VIX + term structure)
@@ -2550,8 +2550,7 @@ async def get_market_regime(ctx: Context) -> str:
 
     # Fetch all required data concurrently
     tasks = [
-        fred_client.get(fred.OBSERVATIONS, fred.GetObservationsRequest("VIXCLS", 1)),
-        fred_client.get(fred.OBSERVATIONS, fred.GetObservationsRequest("VXVCLS", 1)),
+        tradier.get(t.QUOTES, t.GetQuotesRequest("VIX,VIX3M")),
         fred_client.get(fred.OBSERVATIONS, fred.GetObservationsRequest("T10Y2Y", 130)),
         fred_client.get(fred.OBSERVATIONS, fred.GetObservationsRequest("FEDFUNDS", 2)),
         tradier.get(
@@ -2578,15 +2577,14 @@ async def get_market_regime(ctx: Context) -> str:
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     # Unpack required results
-    vix_resp = results[0] if not isinstance(results[0], BaseException) else None
-    vix3m_resp = results[1] if not isinstance(results[1], BaseException) else None
-    spread_resp = results[2] if not isinstance(results[2], BaseException) else None
-    ff_resp = results[3] if not isinstance(results[3], BaseException) else None
-    spy_resp = results[4] if not isinstance(results[4], BaseException) else None
-    smh_resp = results[5] if not isinstance(results[5], BaseException) else None
+    vix_quotes_resp = results[0] if not isinstance(results[0], BaseException) else None
+    spread_resp = results[1] if not isinstance(results[1], BaseException) else None
+    ff_resp = results[2] if not isinstance(results[2], BaseException) else None
+    spy_resp = results[3] if not isinstance(results[3], BaseException) else None
+    smh_resp = results[4] if not isinstance(results[4], BaseException) else None
 
     # Unpack optional results
-    idx = 6
+    idx = 5
     sector_resp = None
     if fmp_client:
         sector_resp = results[idx] if not isinstance(results[idx], BaseException) else None
@@ -2597,13 +2595,19 @@ async def get_market_regime(ctx: Context) -> str:
 
     data: dict[str, str | None] = {}
 
-    # Volatility regime
-    vix_val, vix_date = regime.parse_fred_value(vix_resp.observations if vix_resp else [])
-    vix3m_val, _ = regime.parse_fred_value(vix3m_resp.observations if vix3m_resp else [])
+    # Volatility regime (live quotes from Tradier)
+    vix_val: float | None = None
+    vix3m_val: float | None = None
+    if vix_quotes_resp and vix_quotes_resp.quotes:
+        for q in vix_quotes_resp.quotes:
+            sym = q.get("symbol", "")
+            if sym == "VIX":
+                vix_val = q.get("last")
+            elif sym == "VIX3M":
+                vix3m_val = q.get("last")
     if vix_val is not None:
         label, detail = regime.classify_volatility(vix_val, vix3m_val)
-        date_suffix = f", {vix_date[5:]}" if vix_date else ""
-        data["Volatility"] = f"{label} ({detail}{date_suffix})"
+        data["Volatility"] = f"{label} ({detail})"
 
     # Trend regime
     if spy_resp and spy_resp.days:
@@ -2760,7 +2764,7 @@ async def get_btc_entry_signals(ctx: Context) -> str:
         fred_client.get(fred.OBSERVATIONS, fred.GetObservationsRequest("DTWEXBGS", 80)),
         fred_client.get(fred.OBSERVATIONS, fred.GetObservationsRequest("DGS10", 1)),
         fred_client.get(fred.OBSERVATIONS, fred.GetObservationsRequest("CPIAUCSL", 13)),
-        fred_client.get(fred.OBSERVATIONS, fred.GetObservationsRequest("VIXCLS", 1)),
+        tradier.get(t.QUOTES, t.GetQuotesRequest("VIX")),
         webull.get(CRYPTO_BARS, CryptoBarsRequest("BTCUSD", timespan="D", count=250)),
         webull.get(CRYPTO_SNAPSHOT, CryptoSnapshotRequest("BTCUSD")),
         _fetch_fear_greed(),
@@ -2775,7 +2779,7 @@ async def get_btc_entry_signals(ctx: Context) -> str:
     dxy_resp = results[2] if not isinstance(results[2], BaseException) else None
     dgs10_resp = results[3] if not isinstance(results[3], BaseException) else None
     cpi_resp = results[4] if not isinstance(results[4], BaseException) else None
-    vix_resp = results[5] if not isinstance(results[5], BaseException) else None
+    vix_quotes_resp = results[5] if not isinstance(results[5], BaseException) else None
     bars_resp = results[6] if not isinstance(results[6], BaseException) else None
     snap_resp = results[7] if not isinstance(results[7], BaseException) else None
     fng_val = results[8] if not isinstance(results[8], BaseException) else None
@@ -2909,8 +2913,10 @@ async def get_btc_entry_signals(ctx: Context) -> str:
     data["Real Rates"] = f"{label} — {detail}"
     labels["Real Rates"] = label
 
-    # Risk appetite
-    vix_val, _ = regime.parse_fred_value(vix_resp.observations if vix_resp else [])
+    # Risk appetite (live VIX from Tradier)
+    vix_val = None
+    if vix_quotes_resp and vix_quotes_resp.quotes:
+        vix_val = vix_quotes_resp.quotes[0].get("last")
     label, detail = btc.classify_risk_appetite(vix_val)
     data["Risk Appetite"] = f"{label} — {detail}"
     labels["Risk Appetite"] = label
