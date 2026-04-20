@@ -58,10 +58,25 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │           ├── alphavantage.py      # 2 endpoints (sentiment, movers)
 │   │           ├── tastytrade.py        # 5 endpoints (IV metrics, backtesting, watchlists, dividends)
 │   │           └── yahoo.py             # Response models for Yahoo Finance (via yfinance)
-│   ├── trading-mcp/                     # MCP server (thin shell)
-│   │   ├── pyproject.toml               # depends on: trading-clients + mcp[cli] + yfinance
+│   ├── trading-mcp/                     # MCP server (composed via fastmcp mount)
+│   │   ├── pyproject.toml               # depends on: trading-clients + fastmcp + yfinance
 │   │   └── src/trading_mcp/
-│   │       └── server.py                # FastMCP server, tool registration, lifespan
+│   │       ├── server.py                # Lifespan, parent FastMCP, mount() calls
+│   │       ├── helpers.py               # Client extractors, shared helpers (_retry, etc.)
+│   │       └── tools/                   # Domain-specific tool modules
+│   │           ├── webull.py            # Account, orders, portfolio
+│   │           ├── tradier.py           # Options, quotes, technicals
+│   │           ├── finnhub.py           # News, earnings, peers
+│   │           ├── fmp.py              # Fundamentals, profiles
+│   │           ├── fred.py             # Macro data
+│   │           ├── market_regime.py    # Cross-provider regime
+│   │           ├── btc.py             # Crypto quotes, BTC signals
+│   │           ├── signals.py         # Conviction, sizing, hedge, entry
+│   │           ├── pipeline.py        # Credit/debit comparison
+│   │           ├── alphavantage.py    # Sentiment, movers
+│   │           ├── tastytrade.py      # IV metrics, backtesting
+│   │           ├── yahoo.py           # Screener, ownership, short interest
+│   │           └── youtube.py         # Transcript
 │   └── option-monitor/                  # Lambda monitoring service
 │       ├── pyproject.toml               # depends on: trading-clients + boto3 + pynacl
 │       ├── Makefile                     # deploy/destroy/credentials/test automation
@@ -90,14 +105,14 @@ trading-mcp/                             # monorepo root (uv workspace)
 
 ```
 trading-clients (httpx[http2])
-  ├── trading-mcp (+ mcp[cli] + yfinance)
+  ├── trading-mcp (+ fastmcp + yfinance)
   └── option-monitor (+ boto3)
 ```
 
 ### Data Flow — MCP Server
 
 ```
-MCP tool call (server.py)
+MCP tool call (tools/*.py)
   → creates typed Request (e.g. PlaceOrderRequest)
   → calls client.get/post/put/delete(ENDPOINT, request)
     → BaseClient resolves path templates (PathRequest)
@@ -131,7 +146,7 @@ EventBridge (cron, Mon-Fri 13:30-20:00 UTC)
 1. **Request mixins** (`endpoint.py`): `PathRequest`, `ParamsRequest`, `BodyRequest` — the three ways data is sent in HTTP. Request models compose these to express their contract.
 2. **Endpoint definitions** (`endpoints/*.py`): Each endpoint bundles its path, cache TTL, rate key, response model, optional extract function, and optional `base_url` override. Response models have `from_response()` + `to_output()`.
 3. **Client transport** (`*_client.py`): Thin HTTP wrappers. Each extends `BaseClient` and implements `_request()` with provider-specific auth.
-4. **Server tools** (`server.py`): MCP tool functions create typed requests and call `client.get/post(ENDPOINT, request)`.
+4. **Server tools** (`tools/*.py`): MCP tool functions create typed requests and call `client.get/post(ENDPOINT, request)`.
 
 ### Provider Roles
 
@@ -204,9 +219,9 @@ All Webull endpoints use the v2 API (`x-version: v2` header). Stock and option o
 
 ## Conventions
 
-- All MCP tools are defined in `server.py` and delegate to `client.get/post(ENDPOINT, request)`
+- MCP tools are split by domain in `tools/*.py` and mounted to the parent server via `fastmcp.mount()`
 - Each provider has its own client file (thin transport) and endpoint file (typed models) in trading-clients
-- Client helper functions in server.py (`_webull()`, `_tradier()`, etc.) extract the client from lifespan context and raise a clear error if the provider isn't configured
+- Client helper functions in `helpers.py` (`_webull()`, `_tradier()`, etc.) extract the client from `ctx.lifespan_context` and raise a clear error if the provider isn't configured
 - MCP server calls `.to_output()` on response models; option-monitor accesses typed fields directly
 - Ruff rules: E, F, I (isort), UP (pyupgrade). Line length: 100.
 - **Never do manual math.** Always delegate calculations (P&L, PEG, returns, Greeks, position sizing, etc.) to MCP tools. If no suitable MCP tool exists, flag it to the user instead of computing by hand — manual math is error-prone and unverifiable.
@@ -234,9 +249,14 @@ Rule of thumb: if it has 3+ columns that benefit from side-by-side comparison, u
    - `__init__` taking the config, creating `httpx.Client`, `TTLCache`, `RateLimiter`
    - `_request()` method handling auth (API key in params/headers), caching, rate limiting
 
-4. **Server** (`trading-mcp/server.py`):
-   - Import endpoints and add `_newprovider(ctx)` helper
-   - In `lifespan()`, create the client if config section exists
+4. **Helpers** (`trading-mcp/helpers.py`): Add `_newprovider(ctx)` extractor function.
+
+5. **Tools** (`trading-mcp/tools/newprovider.py`):
+   - Create a `FastMCP` subserver instance
    - Add `@mcp.tool()` functions that create typed requests and call `client.get(ENDPOINT, request)`
 
-5. **Docs** (`CLAUDE.md`): Add the provider to the Architecture file tree and Provider Roles table.
+6. **Server** (`trading-mcp/server.py`):
+   - In `lifespan()`, create the client if config section exists
+   - Mount the new subserver: `mcp.mount(newprovider_mcp)`
+
+7. **Docs** (`CLAUDE.md`): Add the provider to the Architecture file tree and Provider Roles table.
