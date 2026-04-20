@@ -113,6 +113,11 @@ Once intent is set and signals are collected, match to the right strategy. See [
 | **Bearish (L3)** | Bear put spread | Bear call spread | Bear put spread |
 | **Hedge** | Protective put / collar | Collar (sell rich calls) | Protective put |
 
+**Cross-stock tiebreaker:** When multiple pipeline names share the same intent and conviction tier, compare premium efficiency at a standardized delta to decide who goes first when capital is limited.
+
+- **Credit strategies** (CSPs, CCs): Run `compare_credit_efficiency`. Ranks by annualized yield (premium / capital at risk, annualized), cushion/yield (OTM distance per unit of yield), and liquidity cost (spread friction). Higher yield = richer; higher C/Y = more safety per return.
+- **Debit strategies** (long calls, long puts): Run `compare_debit_efficiency`. Ranks by cost of exposure (premium / delta-adjusted notional, as %). Lower = cheaper leverage per dollar of directional bet.
+
 ## Step 4: Size the Position
 
 Base sizing on **growth-adjusted valuation** (PEG) and **portfolio concentration**.
