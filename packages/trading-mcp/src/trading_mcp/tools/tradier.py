@@ -650,6 +650,7 @@ async def get_timesales(
     interval: str = "5min",
     start: str | None = None,
     end: str | None = None,
+    session_filter: str = "open",
 ) -> str:
     """Get intraday time-and-sales tick data for a stock or option contract.
     Higher granularity than historical bars — useful for intraday analysis and charting.
@@ -660,11 +661,15 @@ async def get_timesales(
     interval: tick interval — '1min', '5min', '15min'. Default '5min'.
     start: start datetime (YYYY-MM-DD HH:MM). Defaults to market open today.
     end: end datetime (YYYY-MM-DD HH:MM). Defaults to now.
+    session_filter: 'open' for regular hours only (default), 'all' for pre/post-market included.
 
     Requires [tradier] section in ~/.tradingrc.
     """
     return (
-        await _tradier(ctx).get(t.TIMESALES, t.GetTimesalesRequest(symbol, interval, start, end))
+        await _tradier(ctx).get(
+            t.TIMESALES,
+            t.GetTimesalesRequest(symbol, interval, start, end, session_filter),
+        )
     ).to_output()
 
 
@@ -673,6 +678,7 @@ async def get_vwap(
     ctx: Context,
     symbol: str,
     interval: str = "5min",
+    session_filter: str = "open",
 ) -> str:
     """Compute intraday VWAP (Volume-Weighted Average Price) for a stock.
 
@@ -684,14 +690,16 @@ async def get_vwap(
 
     symbol: ticker symbol (e.g. 'SPY').
     interval: bar interval — '1min', '5min', '15min'. Default '5min'.
+    session_filter: 'open' for regular hours only (default), 'all' for pre/post-market included.
 
     Requires [tradier] section in ~/.tradingrc.
     """
     tradier = _tradier(ctx)
 
+    ts_req = t.GetTimesalesRequest(symbol, interval, session_filter=session_filter)
     quote_resp, ts_resp = await asyncio.gather(
         tradier.get(t.QUOTES, t.GetQuotesRequest(symbol, greeks=False)),
-        tradier.get(t.TIMESALES, t.GetTimesalesRequest(symbol, interval)),
+        tradier.get(t.TIMESALES, ts_req),
     )
 
     if not ts_resp.ticks:

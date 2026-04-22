@@ -113,9 +113,14 @@ class GetTimesalesRequest(ParamsRequest):
     interval: str = "5min"
     start: str | None = None
     end: str | None = None
+    session_filter: str = "open"
 
     def to_params(self) -> dict[str, str]:
-        params: dict[str, str] = {"symbol": self.symbol, "interval": self.interval}
+        params: dict[str, str] = {
+            "symbol": self.symbol,
+            "interval": self.interval,
+            "session_filter": self.session_filter,
+        }
         if self.start:
             params["start"] = self.start
         if self.end:
