@@ -669,6 +669,130 @@ async def get_timesales(
 
 
 @mcp.tool()
+async def get_vwap(
+    ctx: Context,
+    symbol: str,
+    interval: str = "5min",
+) -> str:
+    """Compute intraday VWAP (Volume-Weighted Average Price) for a stock.
+
+    VWAP shows where the majority of money changed hands. Institutional algorithms
+    use it as a benchmark — they buy below VWAP and sell above it.
+
+    Returns: current VWAP, price vs VWAP, time spent above/below, VWAP slope,
+    and an intraday progression table.
+
+    symbol: ticker symbol (e.g. 'SPY').
+    interval: bar interval — '1min', '5min', '15min'. Default '5min'.
+
+    Requires [tradier] section in ~/.tradingrc.
+    """
+    tradier = _tradier(ctx)
+
+    quote_resp, ts_resp = await asyncio.gather(
+        tradier.get(t.QUOTES, t.GetQuotesRequest(symbol, greeks=False)),
+        tradier.get(t.TIMESALES, t.GetTimesalesRequest(symbol, interval)),
+    )
+
+    if not ts_resp.ticks:
+        return f"(no intraday data for {symbol})"
+
+    last_price = 0.0
+    if quote_resp.quotes:
+        last_price = float(quote_resp.quotes[0].get("last") or 0)
+
+    cum_vol = 0.0
+    cum_tp_vol = 0.0
+    above_count = 0
+    below_count = 0
+    vwap_values: list[float] = []
+    rows: list[dict[str, str]] = []
+
+    for tick in ts_resp.ticks:
+        high = float(tick.get("high", 0))
+        low = float(tick.get("low", 0))
+        close = float(tick.get("close", 0))
+        volume = float(tick.get("volume", 0))
+
+        if volume == 0:
+            vwap_values.append(vwap_values[-1] if vwap_values else close)
+            continue
+
+        typical_price = (high + low + close) / 3
+        cum_tp_vol += typical_price * volume
+        cum_vol += volume
+        vwap = cum_tp_vol / cum_vol
+        vwap_values.append(vwap)
+
+        if close > vwap:
+            above_count += 1
+        elif close < vwap:
+            below_count += 1
+
+        rows.append({
+            "Time": tick.get("time", "")[-8:],
+            "Close": fmt_number(close),
+            "Volume": fmt_number(volume, 0),
+            "VWAP": fmt_number(vwap),
+            "Diff": f"{((close - vwap) / vwap) * 100:+.2f}%",
+        })
+
+    if not vwap_values:
+        return f"(no volume data for {symbol})"
+
+    current_vwap = vwap_values[-1]
+    total_bars = above_count + below_count
+
+    # VWAP slope: compare last quarter vs first quarter
+    quarter = max(1, len(vwap_values) // 4)
+    early_vwap = sum(vwap_values[:quarter]) / quarter
+    late_vwap = sum(vwap_values[-quarter:]) / quarter
+    slope_pct = ((late_vwap - early_vwap) / early_vwap) * 100
+    if slope_pct > 0.05:
+        slope_label = "rising"
+    elif slope_pct < -0.05:
+        slope_label = "declining"
+    else:
+        slope_label = "flat"
+
+    fallback_price = float(ts_resp.ticks[-1].get("close", 0))
+    price_for_diff = last_price or fallback_price
+
+    data: dict[str, str] = {
+        "Price": fmt_number(price_for_diff),
+        "VWAP": fmt_number(current_vwap),
+    }
+    diff_pct = ((price_for_diff - current_vwap) / current_vwap) * 100
+    position = "above" if diff_pct > 0 else "below"
+    data["Price vs VWAP"] = f"{position} by {abs(diff_pct):.2f}%"
+
+    if total_bars > 0:
+        above_pct = above_count / total_bars * 100
+        data["Time Above VWAP"] = f"{above_pct:.0f}% ({above_count}/{total_bars} bars)"
+
+    data["VWAP Slope"] = f"{slope_label} ({slope_pct:+.2f}%)"
+    data["Cumulative Volume"] = fmt_number(cum_vol, 0)
+
+    # Sample ~12 rows for the table to keep output concise
+    if len(rows) > 12:
+        step = len(rows) // 11
+        sampled = [rows[i] for i in range(0, len(rows) - 1, step)]
+        sampled.append(rows[-1])
+    else:
+        sampled = rows
+
+    sections = [
+        f"## {symbol} VWAP ({ts_resp.ticks[0].get('time', '')[:10]})",
+        "",
+        kv_table(data),
+        "",
+        "### Intraday Progression",
+        list_table(sampled),
+    ]
+    return "\n".join(sections)
+
+
+@mcp.tool()
 async def get_market_clock(ctx: Context) -> str:
     """Get current market status: whether the market is open, in pre-market, post-market,
     or closed, plus the time of the next state change.
