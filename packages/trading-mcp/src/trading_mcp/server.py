@@ -12,6 +12,8 @@ from trading_clients.tastytrade_client import TastyTradeClient
 from trading_clients.tradier_client import TradierClient
 from trading_clients.webull_client import WebullClient
 
+from trading_mcp.db import open_db
+from trading_mcp.pipeline_store import init_schema
 from trading_mcp.tools.alphavantage import mcp as alphavantage_mcp
 from trading_mcp.tools.btc import mcp as btc_mcp
 from trading_mcp.tools.finnhub import mcp as finnhub_mcp
@@ -43,11 +45,16 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
         ctx["alphavantage"] = AlphaVantageClient(config.alphavantage)
     if config.tastytrade:
         ctx["tastytrade"] = TastyTradeClient(config.tastytrade)
+    db = open_db()
+    init_schema(db)
+    ctx["db"] = db
     try:
         yield ctx
     finally:
-        for client in ctx.values():
-            await client.aclose()
+        db.close()
+        for v in ctx.values():
+            if hasattr(v, "aclose"):
+                await v.aclose()
 
 
 mcp = FastMCP("trading-mcp", lifespan=lifespan)

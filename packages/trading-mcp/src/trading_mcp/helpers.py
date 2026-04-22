@@ -1,4 +1,5 @@
 import asyncio
+import sqlite3
 import tempfile
 from datetime import date
 from typing import Any
@@ -30,6 +31,10 @@ def _year_ago(d: date) -> date:
         return d.replace(year=d.year - 1)
     except ValueError:
         return d.replace(year=d.year - 1, day=28)
+
+
+def _db(ctx: Context) -> sqlite3.Connection:
+    return ctx.lifespan_context["db"]
 
 
 def _webull(ctx: Context) -> WebullClient:

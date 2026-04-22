@@ -63,6 +63,8 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │   └── src/trading_mcp/
 │   │       ├── server.py                # Lifespan, parent FastMCP, mount() calls
 │   │       ├── helpers.py               # Client extractors, shared helpers (_retry, etc.)
+│   │       ├── db.py                    # SQLite connection utility (~/.trading/trading.db)
+│   │       ├── pipeline_store.py        # Pipeline table schema, enums, async CRUD
 │   │       └── tools/                   # Domain-specific tool modules
 │   │           ├── webull.py            # Account, orders, portfolio
 │   │           ├── tradier.py           # Options, quotes, technicals
@@ -72,7 +74,7 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │           ├── market_regime.py    # Cross-provider regime
 │   │           ├── btc.py             # Crypto quotes, BTC signals
 │   │           ├── signals.py         # Conviction, sizing, hedge, entry
-│   │           ├── pipeline.py        # Credit/debit comparison
+│   │           ├── pipeline.py        # Credit/debit comparison + pipeline tracking CRUD
 │   │           ├── alphavantage.py    # Sentiment, movers
 │   │           ├── tastytrade.py      # IV metrics, backtesting
 │   │           ├── yahoo.py           # Screener, ownership, short interest
