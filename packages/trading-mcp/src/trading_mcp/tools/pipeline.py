@@ -7,8 +7,7 @@ from trading_clients.endpoints import tradier as t
 from trading_clients.table_helpers import fmt_number, kv_table, list_table, to_float
 from trading_clients.tradier_client import TradierClient
 
-from trading_mcp.helpers import _db, _tradier
-from trading_mcp.pipeline_store import (
+from trading_mcp.db.pipeline import (
     add_entry,
     add_note,
     close_entry,
@@ -17,6 +16,7 @@ from trading_mcp.pipeline_store import (
     list_entries,
     update_entry,
 )
+from trading_mcp.helpers import _db, _tradier
 
 mcp = FastMCP("pipeline-tools")
 

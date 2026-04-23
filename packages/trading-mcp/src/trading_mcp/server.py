@@ -13,7 +13,8 @@ from trading_clients.tradier_client import TradierClient
 from trading_clients.webull_client import WebullClient
 
 from trading_mcp.db import open_db
-from trading_mcp.pipeline_store import init_schema
+from trading_mcp.db.pipeline import init_schema as init_pipeline_schema
+from trading_mcp.db.rolls import init_schema as init_roll_schema
 from trading_mcp.tools.alphavantage import mcp as alphavantage_mcp
 from trading_mcp.tools.btc import mcp as btc_mcp
 from trading_mcp.tools.finnhub import mcp as finnhub_mcp
@@ -21,6 +22,7 @@ from trading_mcp.tools.fmp import mcp as fmp_mcp
 from trading_mcp.tools.fred import mcp as fred_mcp
 from trading_mcp.tools.market_regime import mcp as regime_mcp
 from trading_mcp.tools.pipeline import mcp as pipeline_mcp
+from trading_mcp.tools.rolls import mcp as rolls_mcp
 from trading_mcp.tools.signals import mcp as signals_mcp
 from trading_mcp.tools.tastytrade import mcp as tastytrade_mcp
 from trading_mcp.tools.tradier import mcp as tradier_mcp
@@ -46,7 +48,8 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
     if config.tastytrade:
         ctx["tastytrade"] = TastyTradeClient(config.tastytrade)
     db = open_db()
-    init_schema(db)
+    init_pipeline_schema(db)
+    init_roll_schema(db)
     ctx["db"] = db
     try:
         yield ctx
@@ -68,6 +71,7 @@ mcp.mount(regime_mcp)
 mcp.mount(btc_mcp)
 mcp.mount(signals_mcp)
 mcp.mount(pipeline_mcp)
+mcp.mount(rolls_mcp)
 mcp.mount(alphavantage_mcp)
 mcp.mount(tastytrade_mcp)
 mcp.mount(yahoo_mcp)

@@ -1,7 +1,8 @@
 import asyncio
 import sqlite3
-from datetime import UTC, datetime
 from enum import StrEnum
+
+from trading_mcp.db import normalize_enums, now
 
 
 class Intent(StrEnum):
@@ -131,37 +132,21 @@ CREATE INDEX IF NOT EXISTS idx_notes_entry ON pipeline_notes(entry_id);
 """
 
 
-def _now() -> str:
-    return datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
-
-
 def init_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(_SCHEMA)
-
-
-def _normalize_enums(data: dict) -> None:
-    for field, (enum_cls, normalize) in _ENUM_FIELDS.items():
-        value = data.get(field)
-        if value is None:
-            continue
-        try:
-            data[field] = enum_cls(normalize(value)).value
-        except ValueError:
-            allowed = ", ".join(m.value for m in enum_cls)
-            raise ValueError(f"Invalid {field}: '{value}'. Allowed: {allowed}") from None
 
 
 # -- Sync internals --
 
 
 def _add_entry(conn: sqlite3.Connection, data: dict) -> dict:
-    _normalize_enums(data)
+    normalize_enums(data, _ENUM_FIELDS)
 
     data["ticker"] = data["ticker"].upper()
     data.setdefault("status", Status.PIPELINE.value)
-    now = _now()
-    data["created_at"] = now
-    data["updated_at"] = now
+    ts = now()
+    data["created_at"] = ts
+    data["updated_at"] = ts
 
     fields = [k for k in ENTRY_COLUMNS if k != "id" and k in data]
     placeholders = ", ".join(["?"] * len(fields))
@@ -228,17 +213,18 @@ def _update_entry(conn: sqlite3.Connection, ticker: str, updates: dict) -> dict:
     if entry is None:
         raise ValueError(f"No active pipeline entry for {ticker.upper()}")
 
-    _normalize_enums(updates)
+    normalize_enums(updates, _ENUM_FIELDS)
 
     fields = {k: v for k, v in updates.items() if k in UPDATABLE_FIELDS and v is not None}
     if not fields:
         raise ValueError("No valid fields to update")
 
-    fields["updated_at"] = _now()
+    ts = now()
+    fields["updated_at"] = ts
 
     new_status = fields.get("status", "")
     if new_status in TERMINAL_STATUSES:
-        fields["closed_at"] = _now()
+        fields["closed_at"] = ts
 
     set_clause = ", ".join(f"{k} = ?" for k in fields)
     values = list(fields.values()) + [entry["id"]]
@@ -257,10 +243,10 @@ def _close_entry(conn: sqlite3.Connection, ticker: str, status: str = "CLOSED") 
     if entry is None:
         raise ValueError(f"No active pipeline entry for {ticker.upper()}")
 
-    now = _now()
+    ts = now()
     conn.execute(
         "UPDATE pipeline_entries SET status = ?, closed_at = ?, updated_at = ? WHERE id = ?",
-        (resolved.value, now, now, entry["id"]),
+        (resolved.value, ts, ts, entry["id"]),
     )
     conn.commit()
     return _get_entry_by_id(conn, entry["id"])
