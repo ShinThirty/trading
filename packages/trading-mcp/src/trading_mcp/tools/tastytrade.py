@@ -10,11 +10,13 @@ mcp = FastMCP("tastytrade-tools")
 
 @mcp.tool()
 async def get_iv_metrics(ctx: Context, symbols: str) -> str:
-    """Get implied volatility metrics: IV rank, IV percentile, IV index, 30-day IV,
-    5-day IV change, next earnings date, and liquidity rating.
+    """Get implied volatility metrics: IV rank, IV percentile, IV index, 5-day IV change,
+    30-day IV/HV, 60-day HV, 90-day HV, next earnings date, and liquidity rating.
 
     IV Rank shows where current IV sits relative to its 52-week high/low (0-100).
     IV Percentile shows what % of days in the past year had lower IV (0-100%).
+    IV 5d Chg shows how IV index moved over the last 5 days (expanding/contracting).
+    HV 60d/90d provide longer historical vol windows to compare against IV.
     Use these to time premium-selling strategies: high IV Rank = rich premiums.
 
     symbols: comma-separated ticker symbols (e.g. 'AAPL,QCOM,ADBE').
