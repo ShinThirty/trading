@@ -29,6 +29,29 @@ Call `get_market_regime`. Present the 5 regime labels (volatility, trend, breadt
 
 Skip positions with no alerts. Only surface what needs action.
 
+## Step 2b: Hedge Monitor
+
+Check portfolio-level hedge health. Call `get_portfolio_greeks` (with `fidelity_folder` if provided in Step 2).
+
+Present a hedge snapshot table:
+
+| Metric | Value |
+|--------|-------|
+| Net Delta | (total across all positions) |
+| Hedge Delta | (delta from long puts only) |
+| Hedge Ratio | hedge delta / net delta (before hedge) |
+| Net Vega | (exposure to IV changes) |
+| Hedge DTE | days to expiration on protective puts |
+| Hedge P&L | current mark vs cost |
+
+Flag if any of these conditions are true:
+- **Hedge DTE <14**: roll or replace decision needed soon
+- **Hedge ratio <10%**: underhedged relative to portfolio delta
+- **Net vega < -$2,000**: significant short vol exposure — an IV spike would hurt
+- **No hedge positions found**: flag as unhedged
+
+One-liner on whether hedge is adequate given current regime (from Step 1). For example, "Elevated vol + downtrend = hedge is critical" vs "Low vol + uptrend = hedge is optional, consider letting it expire."
+
 ## Step 3: Pipeline Catalysts
 
 1. Call `pipeline_list` (active entries only).
