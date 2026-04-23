@@ -22,6 +22,7 @@ from trading_mcp.tools.fmp import mcp as fmp_mcp
 from trading_mcp.tools.fred import mcp as fred_mcp
 from trading_mcp.tools.market_regime import mcp as regime_mcp
 from trading_mcp.tools.pipeline import mcp as pipeline_mcp
+from trading_mcp.tools.reddit import mcp as reddit_mcp
 from trading_mcp.tools.rolls import mcp as rolls_mcp
 from trading_mcp.tools.signals import mcp as signals_mcp
 from trading_mcp.tools.tastytrade import mcp as tastytrade_mcp
@@ -47,6 +48,14 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
         ctx["alphavantage"] = AlphaVantageClient(config.alphavantage)
     if config.tastytrade:
         ctx["tastytrade"] = TastyTradeClient(config.tastytrade)
+    if config.reddit:
+        import asyncpraw
+
+        ctx["reddit"] = asyncpraw.Reddit(
+            client_id=config.reddit.client_id,
+            client_secret=config.reddit.client_secret,
+            user_agent="trading-mcp/0.1",
+        )
     db = open_db()
     init_pipeline_schema(db)
     init_roll_schema(db)
@@ -56,8 +65,8 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
     finally:
         db.close()
         for v in ctx.values():
-            if hasattr(v, "aclose"):
-                await v.aclose()
+            if hasattr(v, "close") and callable(v.close) and v is not db:
+                await v.close()
 
 
 mcp = FastMCP("trading-mcp", lifespan=lifespan)
@@ -76,6 +85,7 @@ mcp.mount(alphavantage_mcp)
 mcp.mount(tastytrade_mcp)
 mcp.mount(yahoo_mcp)
 mcp.mount(youtube_mcp)
+mcp.mount(reddit_mcp)
 
 
 def main():

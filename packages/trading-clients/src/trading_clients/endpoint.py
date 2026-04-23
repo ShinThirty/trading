@@ -106,8 +106,7 @@ class BaseClient(ABC):
     _http: Any  # httpx.AsyncClient
     _semaphore: asyncio.Semaphore
 
-    async def aclose(self) -> None:
-        """Close the underlying async HTTP client."""
+    async def close(self) -> None:
         await self._http.aclose()
 
     async def get(self, endpoint: Endpoint, request: ParamsRequest) -> Any:

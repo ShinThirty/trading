@@ -49,6 +49,12 @@ class TastyTradeConfig:
 
 
 @dataclass(frozen=True)
+class RedditConfig:
+    client_id: str
+    client_secret: str
+
+
+@dataclass(frozen=True)
 class AppConfig:
     webull: WebullConfig
     tradier: TradierConfig | None = None
@@ -57,6 +63,7 @@ class AppConfig:
     fred: FredConfig | None = None
     alphavantage: AlphaVantageConfig | None = None
     tastytrade: TastyTradeConfig | None = None
+    reddit: RedditConfig | None = None
 
 
 def load_config(path: Path = RC_PATH) -> AppConfig:
@@ -122,6 +129,14 @@ def load_config(path: Path = RC_PATH) -> AppConfig:
             refresh_token=parser.get("tastytrade", "refresh_token"),
         )
 
+    # Reddit (optional)
+    reddit = None
+    if parser.has_section("reddit"):
+        reddit = RedditConfig(
+            client_id=parser.get("reddit", "client_id"),
+            client_secret=parser.get("reddit", "client_secret"),
+        )
+
     return AppConfig(
         webull=webull,
         tradier=tradier,
@@ -130,6 +145,7 @@ def load_config(path: Path = RC_PATH) -> AppConfig:
         fred=fred,
         alphavantage=alphavantage,
         tastytrade=tastytrade,
+        reddit=reddit,
     )
 
 

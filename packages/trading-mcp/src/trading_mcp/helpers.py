@@ -88,6 +88,13 @@ def _tastytrade(ctx: Context) -> TastyTradeClient:
     return client
 
 
+def _reddit(ctx: Context) -> Any:
+    client = ctx.lifespan_context.get("reddit")
+    if client is None:
+        raise RuntimeError("Reddit not configured. Add [reddit] section to ~/.tradingrc")
+    return client
+
+
 async def _check_market(ctx: Context, order_type: str, extended_hours: bool) -> None:
     tradier = ctx.lifespan_context.get("tradier")
     if tradier is None:
