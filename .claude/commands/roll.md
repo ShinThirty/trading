@@ -87,3 +87,5 @@ If rolling is appropriate:
 - **Best roll**: [new strike, new expiry, net credit] (if rolling)
 - **Chain status**: [net credit/debit across all rolls]
 - **Next step**: [specific action — e.g., "preview the roll order" or "let this expire worthless"]
+
+Offer to record the decision via `decision_add` with source "roll" and the appropriate action (ROLL, ASSIGN, or CLOSE). If ROLL, also offer to create a `roll_add` entry and link it via `roll_id`.

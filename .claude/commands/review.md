@@ -6,7 +6,7 @@ Execute the structured biweekly trading review. Work through each section in ord
 
 ## 1. PORTFOLIO HEALTH CHECK (positions across all accounts)
 
-1. Call `get_portfolio_summary` to get a cross-account view of all positions.
+1. Ask the user if they have fresh Fidelity CSVs to include (exported from Fidelity Positions page to ~/Downloads/fidelity). Call `get_portfolio_summary` with `fidelity_folder` if provided, otherwise Webull-only. Note: Fidelity holds ~$311K across 3 accounts (401k BrokerageLink, blue-chip CSPs, tech CSPs) — without CSVs, the portfolio view is incomplete.
 
 2. For each position, check:
    - **Down >15%**: Run the thesis checkpoint (5 questions from docs/management-rules.md). State pass/fail for each. If any fail → recommend exit.
@@ -18,15 +18,20 @@ Execute the structured biweekly trading review. Work through each section in ord
 
 ## 2. OPTION POSITIONS REVIEW
 
-1. Call `get_account_positions` for each account to identify open option positions.
+1. Call `decision_list` to review all PENDING decisions from prior briefings/reviews. For each:
+   - Is it still relevant? (position may have been closed or assigned)
+   - Past deadline? Flag as overdue.
+   - Completed but not recorded? Close via `decision_close` with outcome.
 
-2. For each option position:
+2. Call `get_account_positions` for each account to identify open option positions.
+
+3. For each option position:
    - **CCs approaching strike**: Recommend roll up/out or let assign based on CC intent.
    - **CCs/CSPs at >50% profit**: Recommend buy-back.
    - **Expiring within 14 DTE**: Flag for immediate action (close, roll, or let expire).
    - **CSPs**: Check distance to strike vs current price. Is assignment still desirable?
 
-3. Call `get_iv_metrics` on covered positions to check if IV Rank favors writing new CCs.
+4. Call `get_iv_metrics` on covered positions to check if IV Rank favors writing new CCs.
 
 ## 3. PIPELINE REVIEW
 

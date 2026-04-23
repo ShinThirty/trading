@@ -13,11 +13,13 @@ from trading_clients.tradier_client import TradierClient
 from trading_clients.webull_client import WebullClient
 
 from trading_mcp.db import open_db
+from trading_mcp.db.decisions import init_schema as init_decision_schema
 from trading_mcp.db.pipeline import init_schema as init_pipeline_schema
 from trading_mcp.db.rolls import init_schema as init_roll_schema
 from trading_mcp.tools.akshare import mcp as akshare_mcp
 from trading_mcp.tools.alphavantage import mcp as alphavantage_mcp
 from trading_mcp.tools.btc import mcp as btc_mcp
+from trading_mcp.tools.decisions import mcp as decisions_mcp
 from trading_mcp.tools.finnhub import mcp as finnhub_mcp
 from trading_mcp.tools.fmp import mcp as fmp_mcp
 from trading_mcp.tools.fred import mcp as fred_mcp
@@ -60,6 +62,7 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
     db = open_db()
     init_pipeline_schema(db)
     init_roll_schema(db)
+    init_decision_schema(db)
     ctx["db"] = db
     try:
         yield ctx
@@ -82,6 +85,7 @@ mcp.mount(btc_mcp)
 mcp.mount(signals_mcp)
 mcp.mount(pipeline_mcp)
 mcp.mount(rolls_mcp)
+mcp.mount(decisions_mcp)
 mcp.mount(akshare_mcp)
 mcp.mount(alphavantage_mcp)
 mcp.mount(tastytrade_mcp)

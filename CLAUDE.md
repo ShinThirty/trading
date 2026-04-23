@@ -64,9 +64,10 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │       ├── server.py                # Lifespan, parent FastMCP, mount() calls
 │   │       ├── helpers.py               # Client extractors, shared helpers (_retry, etc.)
 │   │       ├── db/                      # SQLite database layer (~/.trading/trading.db)
-│   │       │   ├── __init__.py          # Connection, shared utilities (now, normalize_enums)
+│   │       │   ├── __init__.py          # Connection, shared utilities (now, normalize_enums, OptionType)
 │   │       │   ├── pipeline.py          # Pipeline table schema, enums, async CRUD
-│   │       │   └── rolls.py             # Rolls table schema, enums, async CRUD
+│   │       │   ├── rolls.py             # Rolls table schema, enums, async CRUD
+│   │       │   └── decisions.py         # Option decisions table schema, enums, async CRUD
 │   │       └── tools/                   # Domain-specific tool modules
 │   │           ├── webull.py            # Account, orders, portfolio
 │   │           ├── tradier.py           # Options, quotes, technicals
@@ -78,6 +79,7 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │           ├── signals.py         # Conviction, sizing, hedge, entry
 │   │           ├── pipeline.py        # Credit/debit comparison + pipeline tracking CRUD
 │   │           ├── rolls.py           # Option roll tracking CRUD
+│   │           ├── decisions.py      # Option decision tracking CRUD
 │   │           ├── alphavantage.py    # Sentiment, movers
 │   │           ├── tastytrade.py      # IV metrics, backtesting
 │   │           ├── yahoo.py           # Screener, ownership, short interest

@@ -2,12 +2,7 @@ import asyncio
 import sqlite3
 from enum import StrEnum
 
-from trading_mcp.db import normalize_enums, now
-
-
-class OptionType(StrEnum):
-    CALL = "call"
-    PUT = "put"
+from trading_mcp.db import OptionType, normalize_enums, now
 
 
 class RollStatus(StrEnum):

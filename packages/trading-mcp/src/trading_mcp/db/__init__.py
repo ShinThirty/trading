@@ -6,6 +6,11 @@ from pathlib import Path
 DEFAULT_DB_PATH = Path.home() / ".trading" / "trading.db"
 
 
+class OptionType(StrEnum):
+    CALL = "call"
+    PUT = "put"
+
+
 def open_db(path: Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path), check_same_thread=False)
