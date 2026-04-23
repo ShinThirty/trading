@@ -15,6 +15,7 @@ from trading_clients.webull_client import WebullClient
 from trading_mcp.db import open_db
 from trading_mcp.db.pipeline import init_schema as init_pipeline_schema
 from trading_mcp.db.rolls import init_schema as init_roll_schema
+from trading_mcp.tools.akshare import mcp as akshare_mcp
 from trading_mcp.tools.alphavantage import mcp as alphavantage_mcp
 from trading_mcp.tools.btc import mcp as btc_mcp
 from trading_mcp.tools.finnhub import mcp as finnhub_mcp
@@ -81,6 +82,7 @@ mcp.mount(btc_mcp)
 mcp.mount(signals_mcp)
 mcp.mount(pipeline_mcp)
 mcp.mount(rolls_mcp)
+mcp.mount(akshare_mcp)
 mcp.mount(alphavantage_mcp)
 mcp.mount(tastytrade_mcp)
 mcp.mount(yahoo_mcp)

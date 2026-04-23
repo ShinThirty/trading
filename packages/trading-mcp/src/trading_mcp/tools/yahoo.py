@@ -1,6 +1,3 @@
-import asyncio
-from typing import Any
-
 import yfinance as yf
 from fastmcp import Context, FastMCP
 from trading_clients.cache import TTLCache
@@ -8,6 +5,8 @@ from trading_clients.endpoints.yahoo import ScreenerResponse
 from trading_clients.table_helpers import fmt_large, fmt_number, kv_table, list_table
 from yfinance import EquityQuery
 from yfinance import screen as _screen
+
+from trading_mcp.helpers import _cached
 
 mcp = FastMCP("yahoo-tools")
 
@@ -17,25 +16,13 @@ _TTL_FUNDAMENTALS = 3600
 _TTL_SCREENER = 300
 
 
-# ── Internal helpers (merged from top-level yahoo.py) ──────
-
-
-async def _cached(key: str, ttl: int, fn: Any, *args: Any, **kwargs: Any) -> Any:
-    hit = _cache.get(key, ttl)
-    if hit is not None:
-        return hit
-    result = await asyncio.to_thread(fn, *args, **kwargs)
-    _cache.put(key, result)
-    return result
-
-
 class _yfc:
     """Namespace for Yahoo Finance async helpers used by other tool modules."""
 
     @staticmethod
     async def predefined_screen(screen_id: str, count: int = 25) -> dict:
         return await _cached(
-            f"screen:{screen_id}:{count}", _TTL_SCREENER, _screen, screen_id, count=count
+            _cache, f"screen:{screen_id}:{count}", _TTL_SCREENER, _screen, screen_id, count=count
         )
 
     @staticmethod
@@ -60,7 +47,8 @@ class _yfc:
 
         key = f"custom_screen:{sort_field}:{sort_asc}:{size}:" + str(criteria)
         return await _cached(
-            key, _TTL_SCREENER, _screen, query, sortField=sort_field, sortAsc=sort_asc, size=size
+            _cache, key, _TTL_SCREENER, _screen, query,
+            sortField=sort_field, sortAsc=sort_asc, size=size,
         )
 
     @staticmethod
@@ -71,7 +59,7 @@ class _yfc:
                 return []
             return [row.to_dict() for _, row in df.iterrows()]
 
-        return await _cached(f"holders:{symbol}", _TTL_SCREENER, _uncached, symbol)
+        return await _cached(_cache, f"holders:{symbol}", _TTL_SCREENER, _uncached, symbol)
 
     @staticmethod
     async def short_interest(symbol: str) -> dict:
@@ -84,7 +72,7 @@ class _yfc:
                 "shortPercentOfFloat": info.get("shortPercentOfFloat"),
             }
 
-        return await _cached(f"short:{symbol}", _TTL_SCREENER, _uncached, symbol)
+        return await _cached(_cache, f"short:{symbol}", _TTL_SCREENER, _uncached, symbol)
 
     @staticmethod
     async def earnings_estimate(symbol: str) -> list[dict]:
@@ -99,7 +87,7 @@ class _yfc:
                 rows.append(r)
             return rows
 
-        return await _cached(f"eps_est:{symbol}", _TTL_FUNDAMENTALS, _uncached, symbol)
+        return await _cached(_cache, f"eps_est:{symbol}", _TTL_FUNDAMENTALS, _uncached, symbol)
 
     @staticmethod
     async def income_statement(
@@ -130,6 +118,7 @@ class _yfc:
             return rows
 
         return await _cached(
+            _cache,
             f"income:{symbol}:{period}:{limit}",
             _TTL_FUNDAMENTALS,
             _uncached,
@@ -143,7 +132,7 @@ class _yfc:
         def _uncached(s: str) -> dict:
             return yf.Ticker(s).get_analyst_price_targets() or {}
 
-        return await _cached(f"targets:{symbol}", _TTL_FUNDAMENTALS, _uncached, symbol)
+        return await _cached(_cache, f"targets:{symbol}", _TTL_FUNDAMENTALS, _uncached, symbol)
 
 
 # ── MCP Tools ──────────────────────────────────────────────

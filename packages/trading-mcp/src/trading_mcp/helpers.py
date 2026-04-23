@@ -108,6 +108,17 @@ async def _check_market(ctx: Context, order_type: str, extended_hours: bool) -> 
         )
 
 
+async def _cached(
+    cache: Any, key: str, ttl: int, fn: Any, *args: Any, **kwargs: Any
+) -> Any:
+    hit = cache.get(key, ttl)
+    if hit is not None:
+        return hit
+    result = await asyncio.to_thread(fn, *args, **kwargs)
+    cache.put(key, result)
+    return result
+
+
 async def _retry(fn: Any, *args: Any, retries: int = 2, delay: float = 2, **kwargs: Any) -> Any:
     for attempt in range(retries + 1):
         try:
