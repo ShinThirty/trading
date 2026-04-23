@@ -295,6 +295,97 @@ def detect_semi_divergence(
     return None
 
 
+def classify_breadth(
+    spy_closes: list[float],
+    iwm_closes: list[float],
+    spy_volumes: list[float],
+    xlu_closes: list[float],
+    xly_closes: list[float],
+    lookback: int = 20,
+) -> tuple[str, str]:
+    """Classify market breadth from internals.
+
+    Three sub-signals:
+    1. SPY vs IWM relative performance (large-cap vs small-cap divergence)
+    2. XLU vs XLY relative performance (defensive vs cyclical rotation)
+    3. SPY volume trend (participation quality)
+
+    All close lists are oldest-first, at least lookback+1 bars.
+    spy_volumes: daily volume for the same period as spy_closes.
+
+    Returns (label, detail_string) where label is one of:
+    - Broadening: small caps leading, cyclicals leading, heavy volume (recovery has legs)
+    - Healthy: broad participation, no divergences
+    - Mixed: conflicting signals
+    - Narrowing: divergences emerging, defensive rotation, or thin volume
+    """
+    if (
+        len(spy_closes) < lookback + 1
+        or len(iwm_closes) < lookback + 1
+        or len(xlu_closes) < lookback + 1
+        or len(xly_closes) < lookback + 1
+    ):
+        return "Unknown", "insufficient data"
+
+    spy_ret = (spy_closes[-1] - spy_closes[-1 - lookback]) / spy_closes[-1 - lookback] * 100
+    iwm_ret = (iwm_closes[-1] - iwm_closes[-1 - lookback]) / iwm_closes[-1 - lookback] * 100
+    xlu_ret = (xlu_closes[-1] - xlu_closes[-1 - lookback]) / xlu_closes[-1 - lookback] * 100
+    xly_ret = (xly_closes[-1] - xly_closes[-1 - lookback]) / xly_closes[-1 - lookback] * 100
+
+    spy_iwm_div = iwm_ret - spy_ret
+    xly_xlu_div = xly_ret - xlu_ret
+
+    parts: list[str] = []
+    warnings = 0
+    strengths = 0
+
+    # Signal 1: SPY vs IWM divergence
+    if spy_iwm_div < -3.0:
+        parts.append(f"IWM lagging SPY by {abs(spy_iwm_div):.1f}pp ({lookback}d)")
+        warnings += 1
+    elif spy_iwm_div > 3.0:
+        parts.append(f"IWM leading SPY by {spy_iwm_div:.1f}pp ({lookback}d)")
+        strengths += 1
+    else:
+        parts.append(f"SPY/IWM aligned ({spy_iwm_div:+.1f}pp)")
+
+    # Signal 2: XLY vs XLU rotation
+    if xly_xlu_div < -2.0:
+        parts.append(f"defensive rotation XLU beating XLY by {abs(xly_xlu_div):.1f}pp")
+        warnings += 1
+    elif xly_xlu_div > 2.0:
+        parts.append(f"cyclicals leading XLY over XLU by {xly_xlu_div:.1f}pp")
+        strengths += 1
+    else:
+        parts.append(f"XLY/XLU neutral ({xly_xlu_div:+.1f}pp)")
+
+    # Signal 3: Volume trend — compare recent 5-day avg to 20-day avg
+    if len(spy_volumes) >= lookback:
+        recent_vol = spy_volumes[-lookback:]
+        avg_20d = sum(recent_vol) / len(recent_vol)
+        avg_5d = sum(spy_volumes[-5:]) / 5
+        vol_ratio = avg_5d / avg_20d if avg_20d > 0 else 1.0
+        if vol_ratio < 0.75:
+            parts.append(f"thin volume (5d avg {vol_ratio:.0%} of 20d)")
+            warnings += 1
+        elif vol_ratio > 1.25:
+            parts.append(f"heavy volume (5d avg {vol_ratio:.0%} of 20d)")
+            strengths += 1
+        else:
+            parts.append(f"normal volume ({vol_ratio:.0%} of 20d avg)")
+
+    if warnings >= 2:
+        label = "Narrowing"
+    elif strengths >= 2:
+        label = "Broadening"
+    elif warnings == 0 and strengths == 0:
+        label = "Healthy"
+    else:
+        label = "Mixed"
+
+    return label, "; ".join(parts)
+
+
 def _short_sector(name: str) -> str:
     """Shorten sector names for compact display."""
     abbreviations = {
