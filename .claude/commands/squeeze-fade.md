@@ -13,8 +13,9 @@ Do NOT skip steps or summarize — run every tool call and present every result.
 ## Step 1: Squeeze State Assessment
 
 1. Call `get_short_interest` for $ARGUMENTS.symbol.
-2. Call `get_entry_signals` for $ARGUMENTS.symbol.
-3. Call `get_company_news` for $ARGUMENTS.symbol (last 7 days).
+2. Call `get_short_volume` for $ARGUMENTS.symbol (default 20 days) — daily short sale volume from FINRA.
+3. Call `get_entry_signals` for $ARGUMENTS.symbol.
+4. Call `get_company_news` for $ARGUMENTS.symbol (last 7 days).
 
 From these results, classify the squeeze into one of three states:
 
@@ -31,7 +32,7 @@ ALL of these present:
 TWO or more of these present:
 - RSI declining from a recent peak above 70 (currently 50-70 range)
 - 2-week price change flattening or turning negative
-- Volume declining from squeeze peak (check news for "cooling" / "easing" language)
+- Volume declining from squeeze peak (use `get_short_volume` daily data — compare recent 5-day avg to peak)
 - Price failing to make new highs despite short interest remaining elevated
 - News shifting from "squeeze" to "what's next" / "post-squeeze" framing
 
@@ -44,6 +45,7 @@ THREE or more of these present:
 - 2-week price change is negative
 - IV Rank <70% (normalizing from squeeze peak)
 - Short interest has dropped >10 percentage points from peak (covering completed)
+- Daily short volume ratio has normalized below 40% for 5+ consecutive days (from `get_short_volume`)
 - News coverage has faded or shifted to fundamentals
 
 **Verdict: READY. Re-entry conditions met. Proceed to Step 2.**
@@ -53,6 +55,7 @@ Present the assessment as:
 | Condition | Status | Value |
 |-----------|--------|-------|
 | Short % of float | [High/Moderate/Low] | [X%] |
+| Short vol ratio | [Spiking/Elevated/Normal/Declining] | [X% avg, peak X%] |
 | RSI(14) | [Rising/Flat/Declining] | [X] |
 | 2-week price change | [Rallying/Flat/Declining] | [X%] |
 | Price vs SMA(50) | [Above/Below] | [$X vs $Y] |

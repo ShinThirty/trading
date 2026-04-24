@@ -21,6 +21,7 @@ from trading_mcp.tools.alphavantage import mcp as alphavantage_mcp
 from trading_mcp.tools.btc import mcp as btc_mcp
 from trading_mcp.tools.decisions import mcp as decisions_mcp
 from trading_mcp.tools.finnhub import mcp as finnhub_mcp
+from trading_mcp.tools.finra import mcp as finra_mcp
 from trading_mcp.tools.fmp import mcp as fmp_mcp
 from trading_mcp.tools.fred import mcp as fred_mcp
 from trading_mcp.tools.market_regime import mcp as regime_mcp
@@ -78,6 +79,7 @@ mcp = FastMCP("trading-mcp", lifespan=lifespan)
 mcp.mount(webull_mcp)
 mcp.mount(tradier_mcp)
 mcp.mount(finnhub_mcp)
+mcp.mount(finra_mcp)
 mcp.mount(fmp_mcp)
 mcp.mount(fred_mcp)
 mcp.mount(regime_mcp)
