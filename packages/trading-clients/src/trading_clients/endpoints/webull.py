@@ -176,7 +176,6 @@ class AccountListResponse:
         rows = [
             {
                 "Account ID": a.get("account_id", ""),
-                "Account Number": a.get("account_number", ""),
                 "Type": a.get("account_type", ""),
                 "Label": a.get("account_label", ""),
             }
