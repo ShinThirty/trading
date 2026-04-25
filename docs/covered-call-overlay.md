@@ -43,6 +43,8 @@ How many shares to cover determines how much upside you retain. This is the most
 
 **Rule of thumb:** If you'd be upset getting called away at the strike, you're covering too many shares.
 
+**Reassess coverage at every roll.** The coverage ratio is not locked in from the initial write. At each roll decision, re-evaluate forward conviction at *today's price* — a stock that doubled since the original write may have shifted from "high conviction accumulate" to "still bullish but fully valued," which drops coverage from 75% to 25-50%. For multi-contract positions, this means you can **roll some and let others assign** — you don't have to make the same decision for every contract.
+
 **Partial coverage is a feature, not indecision.** Keeping 15-30% of shares uncovered on growth names gives you:
 - Upside participation if the stock rips
 - Psychological comfort to hold the covered portion without second-guessing
