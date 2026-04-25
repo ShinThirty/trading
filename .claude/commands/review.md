@@ -33,6 +33,13 @@ Execute the structured biweekly trading review. Work through each section in ord
 
 4. Call `get_iv_metrics` on covered positions to check if IV Rank favors writing new CCs.
 
+5. **Wheel accounts** (Webull Roth + Fidelity HSA — CCL and any future wheel names):
+   - Open CSPs: distance to strike, % profit, buy back at 50%?
+   - Held shares (if assigned): write CC? At what strike?
+   - Open CCs: approaching strike? Let assign or roll?
+   - Chain P&L: running total across all wheel cycles per name.
+   - Thesis check: still range-bound? Any catalysts changing the picture?
+
 ## 3. PIPELINE REVIEW
 
 1. Call `pipeline_list` with status "active" to get all active pipeline names.
