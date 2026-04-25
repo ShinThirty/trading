@@ -43,13 +43,21 @@ Fed funds direction (rising / stable / falling) adds context: a falling rate in 
 
 ### Sectors: Risk-On / Rotation / Risk-Off
 
-Compares average daily performance of high-beta sectors (Tech, Consumer Cyclical, Comm Services) vs defensive sectors (Utilities, Consumer Defensive, Real Estate).
+Multi-timeframe analysis of the 11 SPDR sector ETFs (XLK, XLF, XLE, XLV, XLC, XLI, XLB, XLRE, XLP, XLY, XLU). Computes 30d, 60d, and 90d returns for each sector, ranks them, and detects leadership shifts.
+
+**Risk appetite label:** Based on 30d returns of high-beta ETFs (XLK, XLY, XLC) vs defensive ETFs (XLU, XLP, XLRE).
 
 | Label | Condition | Strategy implications |
 |-------|-----------|----------------------|
 | **Risk-On** | High-beta outperforming, positive | Growth and tech names favored, momentum strategies |
 | **Rotation** | Mixed or all negative | Be selective, don't chase sector momentum |
 | **Risk-Off** | Defensives outperforming, positive | Reduce tech exposure, favor hedges and income strategies |
+
+**Leadership ranking:** Top 3 and bottom 3 sectors by 30d return. Use this to identify which sectors have near-term momentum and which are lagging — if your pipeline stock's sector is in the bottom 3, that's a "delay entry" signal; if it's in the top 3, momentum supports entering now.
+
+**Momentum shifts:** Compares 90d rank vs 30d rank for each sector. A sector that moved 4+ positions is flagged:
+- **Emerging** (rank improved): leadership is rotating *into* this sector — favorable for new entries
+- **Fading** (rank declined): leadership is rotating *away* — delay entries or tighten stops on existing positions
 
 **Semi divergence check:** The high-beta sector basket includes broad Tech (AAPL, MSFT) which often acts as a safe haven in late-cycle environments due to massive cash piles. This can produce a false Risk-On signal while semiconductors are already rolling over. If your portfolio is semi-concentrated, cross-check SMH vs SPY relative strength. If semis are underperforming broad Tech, the cycle may be turning even if the sector label reads Risk-On.
 

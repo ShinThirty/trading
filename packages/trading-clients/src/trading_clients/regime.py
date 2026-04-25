@@ -5,8 +5,22 @@ from pre-fetched data. No I/O — all data fetching happens in the
 MCP server layer.
 """
 
-RISK_ON_SECTORS = {"Technology", "Consumer Cyclical", "Communication Services"}
-RISK_OFF_SECTORS = {"Utilities", "Consumer Defensive", "Real Estate"}
+SECTOR_ETFS: dict[str, str] = {
+    "XLK": "Tech",
+    "XLF": "Fins",
+    "XLE": "Energy",
+    "XLV": "Health",
+    "XLC": "Comm",
+    "XLI": "Indust",
+    "XLB": "Matls",
+    "XLRE": "RE",
+    "XLP": "Staples",
+    "XLY": "Discret",
+    "XLU": "Utils",
+}
+
+RISK_ON_ETFS = {"XLK", "XLY", "XLC"}
+RISK_OFF_ETFS = {"XLU", "XLP", "XLRE"}
 
 
 def parse_fred_value(observations: list[dict]) -> tuple[float | None, str]:
@@ -209,57 +223,87 @@ def detect_uninversion_trap(
     return None
 
 
-def classify_sectors(sectors: list[dict]) -> tuple[str, str]:
-    """Classify sector performance into risk-on/off.
+def _pct_return(closes: list[float], lookback: int) -> float | None:
+    """Compute percentage return over a lookback period (trading days)."""
+    if len(closes) < lookback + 1:
+        return None
+    return (closes[-1] - closes[-1 - lookback]) / closes[-1 - lookback] * 100
 
-    Compares average performance of high-beta sectors (Tech, Consumer
-    Cyclical, Comm Services) vs defensive sectors (Utilities, Consumer
-    Defensive, Real Estate).
 
-    Returns (label, detail_string).
+def classify_sector_rotation(
+    sector_closes: dict[str, list[float]],
+    windows: tuple[int, ...] = (30, 60, 90),
+) -> tuple[str, str]:
+    """Classify sector rotation from multi-timeframe ETF performance.
+
+    Computes returns at multiple lookback windows for each SPDR sector ETF,
+    ranks sectors, detects leadership shifts, and classifies risk appetite.
+
+    sector_closes: {ETF_symbol: daily_closes_oldest_first} for sector ETFs.
+    windows: lookback periods in trading days (default 30, 60, 90).
+
+    Returns (label, detail_string) where label is Risk-On / Rotation / Risk-Off.
     """
-    if not sectors:
-        return "Unknown", "no sector data"
+    short_window = windows[0]
+    long_window = windows[-1]
 
-    risk_on_vals: list[float] = []
-    risk_off_vals: list[float] = []
+    returns: dict[int, dict[str, float]] = {}
+    for w in windows:
+        w_rets: dict[str, float] = {}
+        for sym, closes in sector_closes.items():
+            ret = _pct_return(closes, w)
+            if ret is not None:
+                w_rets[sym] = ret
+        returns[w] = w_rets
 
-    for s in sectors:
-        name = s.get("sector", "")
-        change = s.get("averageChange")
-        if change is None:
-            continue
-        change = float(change)
-        if name in RISK_ON_SECTORS:
-            risk_on_vals.append(change)
-        elif name in RISK_OFF_SECTORS:
-            risk_off_vals.append(change)
-
-    if not risk_on_vals or not risk_off_vals:
+    short_rets = returns.get(short_window, {})
+    if len(short_rets) < 6:
         return "Unknown", "insufficient sector data"
 
-    risk_on_avg = sum(risk_on_vals) / len(risk_on_vals)
-    risk_off_avg = sum(risk_off_vals) / len(risk_off_vals)
-
-    # Build detail: top 2 and bottom 2 sectors
-    ranked = sorted(sectors, key=lambda s: float(s.get("averageChange", 0)), reverse=True)
-    top = ranked[:2]
-    bottom = ranked[-2:]
-    top_str = ", ".join(
-        f"{_short_sector(s.get('sector', ''))} {float(s.get('averageChange', 0)):+.1f}%"
-        for s in top
-    )
-    bottom_str = ", ".join(
-        f"{_short_sector(s.get('sector', ''))} {float(s.get('averageChange', 0)):+.1f}%"
-        for s in bottom
-    )
-    detail = f"{top_str}; {bottom_str}"
+    risk_on_vals = [short_rets[s] for s in RISK_ON_ETFS if s in short_rets]
+    risk_off_vals = [short_rets[s] for s in RISK_OFF_ETFS if s in short_rets]
+    risk_on_avg = sum(risk_on_vals) / len(risk_on_vals) if risk_on_vals else 0
+    risk_off_avg = sum(risk_off_vals) / len(risk_off_vals) if risk_off_vals else 0
 
     if risk_on_avg > risk_off_avg and risk_on_avg > 0:
-        return "Risk-On", detail
-    if risk_off_avg > risk_on_avg and risk_off_avg > 0:
-        return "Risk-Off", detail
-    return "Rotation", detail
+        label = "Risk-On"
+    elif risk_off_avg > risk_on_avg and risk_off_avg > 0:
+        label = "Risk-Off"
+    else:
+        label = "Rotation"
+
+    ranked = sorted(short_rets.items(), key=lambda x: x[1], reverse=True)
+    top3 = ranked[:3]
+    bottom3 = ranked[-3:]
+
+    name = SECTOR_ETFS.get
+    top_str = ", ".join(f"{name(s, s)} {r:+.1f}%" for s, r in top3)
+    bot_str = ", ".join(f"{name(s, s)} {r:+.1f}%" for s, r in bottom3)
+    detail = f"{short_window}d leaders: {top_str}; laggards: {bot_str}"
+
+    long_rets = returns.get(long_window, {})
+    if len(long_rets) >= 6:
+        ranked_long = sorted(long_rets.items(), key=lambda x: x[1], reverse=True)
+        long_ranks = {sym: i + 1 for i, (sym, _) in enumerate(ranked_long)}
+        short_ranks = {sym: i + 1 for i, (sym, _) in enumerate(ranked)}
+
+        shifts = []
+        for sym in sector_closes:
+            if sym in long_ranks and sym in short_ranks:
+                delta = long_ranks[sym] - short_ranks[sym]
+                if delta >= 4:
+                    shifts.append(
+                        f"{name(sym, sym)} emerging (#{long_ranks[sym]}→#{short_ranks[sym]})"
+                    )
+                elif delta <= -4:
+                    shifts.append(
+                        f"{name(sym, sym)} fading (#{long_ranks[sym]}→#{short_ranks[sym]})"
+                    )
+
+        if shifts:
+            detail += f"; shifts ({long_window}d→{short_window}d): {', '.join(shifts)}"
+
+    return label, detail
 
 
 def detect_semi_divergence(
@@ -386,19 +430,3 @@ def classify_breadth(
     return label, "; ".join(parts)
 
 
-def _short_sector(name: str) -> str:
-    """Shorten sector names for compact display."""
-    abbreviations = {
-        "Technology": "Tech",
-        "Consumer Cyclical": "Cons Cycl",
-        "Communication Services": "Comm Svcs",
-        "Consumer Defensive": "Cons Def",
-        "Financial Services": "Financials",
-        "Real Estate": "Real Est",
-        "Basic Materials": "Materials",
-        "Industrials": "Industrials",
-        "Healthcare": "Healthcare",
-        "Utilities": "Utilities",
-        "Energy": "Energy",
-    }
-    return abbreviations.get(name, name)

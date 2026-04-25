@@ -4,7 +4,7 @@ from datetime import date
 from fastmcp import Context, FastMCP
 from trading_clients import indicators as ta
 from trading_clients import regime
-from trading_clients.endpoints import fmp, fred
+from trading_clients.endpoints import fred
 from trading_clients.endpoints import tastytrade as tt
 from trading_clients.endpoints import tradier as t
 from trading_clients.table_helpers import kv_table
@@ -13,14 +13,16 @@ from trading_mcp.helpers import _fred, _tradier, _year_ago
 
 mcp = FastMCP("market-regime-tools")
 
+HISTORY_SYMBOLS = ["SPY", "SMH", "IWM", *regime.SECTOR_ETFS]
+
 
 @mcp.tool()
 async def get_market_regime(ctx: Context) -> str:
     """Get current market regime classification across volatility, trend,
     breadth, macro, and sector dimensions.
 
-    Aggregates Tradier (live VIX/VIX3M quotes, SPY/IWM/XLU/XLY technicals),
-    FRED (yield curve, fed funds), FMP (sector performance), and
+    Aggregates Tradier (live VIX/VIX3M quotes, SPY/IWM technicals,
+    11 SPDR sector ETF histories), FRED (yield curve, fed funds), and
     TastyTrade (IV enrichment) into simple regime labels.
 
     Returns regime labels with supporting data:
@@ -28,36 +30,29 @@ async def get_market_regime(ctx: Context) -> str:
     - Trend: Uptrend / Sideways / Downtrend (SPY RSI + SMA 50/200)
     - Breadth: Broadening / Healthy / Mixed / Narrowing (SPY/IWM, XLU/XLY, volume)
     - Macro: Steep / Flat / Inverted yield curve (10Y-2Y + Fed funds)
-    - Sectors: Risk-On / Rotation / Risk-Off (high-beta vs defensive)
+    - Sectors: Risk-On / Rotation / Risk-Off (multi-timeframe ETF rotation
+      with 30/60/90d returns, leadership ranking, and momentum shifts)
 
     Requires [fred] and [tradier] sections in ~/.tradingrc.
-    FMP and TastyTrade are optional enrichments.
+    TastyTrade is optional enrichment.
     """
     fred_client = _fred(ctx)
     tradier = _tradier(ctx)
-    fmp_client = ctx.lifespan_context.get("fmp")
     tt_client = ctx.lifespan_context.get("tastytrade")
 
     start = _year_ago(date.today()).isoformat()
-    tasks = [
+    tasks: list = [
         tradier.get(t.QUOTES, t.GetQuotesRequest("VIX,VIX3M")),
         fred_client.get(fred.OBSERVATIONS, fred.GetObservationsRequest("T10Y2Y", 130)),
         fred_client.get(fred.OBSERVATIONS, fred.GetObservationsRequest("FEDFUNDS", 2)),
-        tradier.get(t.HISTORY, t.GetHistoryRequest("SPY", "daily", start=start)),
-        tradier.get(t.HISTORY, t.GetHistoryRequest("SMH", "daily", start=start)),
-        tradier.get(t.HISTORY, t.GetHistoryRequest("IWM", "daily", start=start)),
-        tradier.get(t.HISTORY, t.GetHistoryRequest("XLU", "daily", start=start)),
-        tradier.get(t.HISTORY, t.GetHistoryRequest("XLY", "daily", start=start)),
     ]
 
-    if fmp_client:
-        tasks.append(
-            fmp_client.get(
-                fmp.SECTOR_PERFORMANCE,
-                fmp.SectorPerformanceRequest(date.today().isoformat()),
-            )
-        )
+    for sym in HISTORY_SYMBOLS:
+        tasks.append(tradier.get(t.HISTORY, t.GetHistoryRequest(sym, "daily", start=start)))
+
+    tt_idx = None
     if tt_client:
+        tt_idx = len(tasks)
         tasks.append(tt_client.get(tt.MARKET_METRICS, tt.MarketMetricsRequest("SPY")))
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -68,20 +63,14 @@ async def get_market_regime(ctx: Context) -> str:
     vix_quotes_resp = _ok(0)
     spread_resp = _ok(1)
     ff_resp = _ok(2)
-    spy_resp = _ok(3)
-    smh_resp = _ok(4)
-    iwm_resp = _ok(5)
-    xlu_resp = _ok(6)
-    xly_resp = _ok(7)
 
-    idx = 8
-    sector_resp = None
-    if fmp_client:
-        sector_resp = _ok(idx)
-        idx += 1
-    tt_resp = None
-    if tt_client:
-        tt_resp = _ok(idx)
+    closes: dict[str, list[float]] = {}
+    volumes: dict[str, list[float]] = {}
+    for i, sym in enumerate(HISTORY_SYMBOLS):
+        resp = _ok(3 + i)
+        if resp and resp.days:
+            closes[sym] = [float(b["close"]) for b in resp.days]
+            volumes[sym] = [float(b["volume"]) for b in resp.days]
 
     data: dict[str, str | None] = {}
 
@@ -98,11 +87,9 @@ async def get_market_regime(ctx: Context) -> str:
         label, detail = regime.classify_volatility(vix_val, vix3m_val)
         data["Volatility"] = f"{label} ({detail})"
 
-    spy_closes: list[float] = []
-    spy_volumes: list[float] = []
-    if spy_resp and spy_resp.days:
-        spy_closes = [float(b["close"]) for b in spy_resp.days]
-        spy_volumes = [float(b["volume"]) for b in spy_resp.days]
+    spy_closes = closes.get("SPY", [])
+    spy_volumes = volumes.get("SPY", [])
+    if spy_closes:
         price = spy_closes[-1]
         rsi_vals = ta.rsi(spy_closes)
         sma50_vals = ta.sma(spy_closes, 50)
@@ -110,10 +97,9 @@ async def get_market_regime(ctx: Context) -> str:
         label, detail = regime.classify_trend(price, rsi_vals[-1], sma50_vals[-1], sma200_vals[-1])
         data["Trend"] = f"{label} ({detail})"
 
-    iwm_closes = [float(b["close"]) for b in iwm_resp.days] if iwm_resp and iwm_resp.days else []
-    xlu_closes = [float(b["close"]) for b in xlu_resp.days] if xlu_resp and xlu_resp.days else []
-    xly_closes = [float(b["close"]) for b in xly_resp.days] if xly_resp and xly_resp.days else []
-
+    iwm_closes = closes.get("IWM", [])
+    xlu_closes = closes.get("XLU", [])
+    xly_closes = closes.get("XLY", [])
     if spy_closes and iwm_closes and xlu_closes and xly_closes:
         label, detail = regime.classify_breadth(
             spy_closes, iwm_closes, spy_volumes, xlu_closes, xly_closes
@@ -139,18 +125,20 @@ async def get_market_regime(ctx: Context) -> str:
                 pass
     trap_warning = regime.detect_uninversion_trap(spread_history, spread_val, ff_val, prev_ff_val)
     if trap_warning:
-        data["\u26a0 Macro"] = trap_warning
+        data["⚠ Macro"] = trap_warning
 
-    if sector_resp and sector_resp.sectors:
-        label, detail = regime.classify_sectors(sector_resp.sectors)
+    sector_closes = {sym: closes[sym] for sym in regime.SECTOR_ETFS if sym in closes}
+    if len(sector_closes) >= 6:
+        label, detail = regime.classify_sector_rotation(sector_closes)
         data["Sectors"] = f"{label} ({detail})"
 
-    if smh_resp and smh_resp.days and spy_closes:
-        smh_closes = [float(b["close"]) for b in smh_resp.days]
+    smh_closes = closes.get("SMH", [])
+    if smh_closes and spy_closes:
         semi_warning = regime.detect_semi_divergence(smh_closes, spy_closes)
         if semi_warning:
-            data["\u26a0 Sectors"] = semi_warning
+            data["⚠ Sectors"] = semi_warning
 
+    tt_resp = _ok(tt_idx) if tt_idx is not None else None
     if tt_resp and tt_resp.items:
         item = tt_resp.items[0]
         iv_rank = item.get("tw-implied-volatility-index-rank")
