@@ -17,6 +17,7 @@ async def get_iv_metrics(ctx: Context, symbols: str) -> str:
     IV Percentile shows what % of days in the past year had lower IV (0-100%).
     IV 5d Chg shows how IV index moved over the last 5 days (expanding/contracting).
     HV 60d/90d provide longer historical vol windows to compare against IV.
+    Liquidity rating is 1-4 stars: 3-4 = tight spreads (most liquid), 1-2 = wider spreads.
     Use these to time premium-selling strategies: high IV Rank = rich premiums.
 
     symbols: comma-separated ticker symbols (e.g. 'AAPL,QCOM,ADBE').

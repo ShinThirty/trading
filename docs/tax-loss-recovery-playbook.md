@@ -152,7 +152,7 @@ Standard [management-rules.md](management-rules.md) applies. The tax-loss entry 
 | **January selloff** — broad market drops in January, overwhelming the bounce effect | Sizing cap (20%). The tax-loss bounce is a tailwind, not a guarantee. |
 | **Fundamental deterioration masked as tax selling** — the stock is down for real reasons | Gate 3 screening. Re-run `get_entry_signals` in December, not just once in November. |
 | **Crowded trade** — everyone knows about January effect, front-running erodes the edge | Enter in December during active selling, not in late December when bargain hunters arrive. The pain of buying during selling is the edge. |
-| **Low-liquidity names** — small/mid caps may have wide spreads in December (low volume) | Check liquidity rating via `get_iv_metrics`. Liq 3-4 → direct buy only, skip options. |
+| **Low-liquidity names** — small/mid caps may have wide spreads in December (low volume) | Check liquidity rating via `get_iv_metrics`. Liq 1-2 → direct buy only, skip options. |
 | **Tax law changes** — wash sale rules, holding period changes, or capital gains rate changes could alter behavior | Monitor in November. If tax policy shifts are pending, the pattern may weaken or invert. |
 
 ---
