@@ -136,6 +136,7 @@ If the stock is far below the strike, both the old and new CC are cheap OTM opti
 | **CC delta reaches ~75-80** | Start evaluating rolls now | Beyond 80 delta, intrinsic grows faster than extrinsic — the roll economics deteriorate rapidly. At 90+ delta you're mostly buying back intrinsic. |
 | **IV Rank elevated** (>30%) | Roll now — the new leg is richer | Elevated IV inflates the new CC's premium, which offsets or reduces the debit. After the spike collapses, that cushion disappears. |
 | **Stock just gapped up** (>3% single day) | Wait 1-2 days | Bid/ask spreads on the current leg are inflated by short-term vol. Let the spread normalize before paying the close cost. |
+| **Sustained rally** (>15% in 2 weeks, CC >10% ITM) | Roll on the next flat or red day | Don't wait for a multi-day pullback that may never come. In a momentum regime, spreads normalize intraday on any pause. Perpetually waiting means the CC goes deeper ITM and the debit grows. |
 | **Gradual grind higher** (no gap) | Roll when ready | No spread distortion — execute at your discretion. |
 
 **Roll rules:**
