@@ -130,10 +130,24 @@ The best roll credits happen when the stock is **near the current strike**. ATM 
 If the stock is far below the strike, both the old and new CC are cheap OTM options — rolling from one cheap option to another produces a small credit. Don't wait for the stock to fall away from the strike before rolling; the economics get worse.
 
 **Roll rules:**
-- **Always roll for a credit** on CCs. If the roll requires a debit, the stock has moved too far past the strike — either let assign or accept the cap.
+- **Roll for a credit when possible.** If the roll requires a debit, run the debit budget analysis before proceeding — see below.
 - **Roll before earnings** if the CC goes through an earnings date and you expect a beat. After a gap up, the cost to close spikes and the roll credit shrinks or becomes a debit.
 - **Roll to a thesis-aligned expiry.** A roll that extends past your thesis end date is not a roll — it's a new position. Apply the practical test.
-- **Use `analyze_roll` to compare scenarios.** Check 2-3 strike targets and pick the one that balances credit received vs upside room.
+- **Use `analyze_roll` to compare scenarios.** Check 2-3 strike targets and pick the one that balances credit received vs upside room. Pass `chain_credits` (from `get_cc_chain_pnl`) to get automatic debit budget verdicts.
+
+**Debit roll rules (applies to both CCs and CSPs):**
+
+A debit roll pays to avoid assignment. The question is whether the cost is justified. Three gates, all must pass:
+
+| Gate | Check | Tool |
+|------|-------|------|
+| **1. Chain budget** | Debit ≤ 50% of accumulated chain credits. You're spending earned premium, not new capital. | `get_cc_chain_pnl` → pass as `chain_credits` to `analyze_roll` |
+| **2. vs Assignment** | Debit < intrinsic value lost at assignment (stock price − CC strike for calls, put strike − stock price for CSPs). If the debit costs more than assignment, let assign. | Computed automatically by `analyze_roll` |
+| **3. Thesis check** | "Would I buy this stock at today's price with the same size?" If not, the roll preserves a position you no longer want. | Manual judgment — the practical test |
+
+If all three pass, the debit roll is a rational use of earned premium to preserve a wanted position. If any gate fails, let assign or accept the cap.
+
+**Why 50% and not 100%?** Spending the entire chain budget on a single debit roll leaves nothing for future rolls or adverse moves. The 50% cap ensures you always retain a reserve.
 
 ## Chain P&L: The Hidden Cost of Rolling
 

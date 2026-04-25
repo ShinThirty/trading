@@ -94,10 +94,10 @@ Rolling CSPs follows the same principle as CCs — the decision comes before the
 The best CSP roll credits happen when the stock is **near the put strike**. ATM puts have maximum extrinsic value — the old put is expensive to buy back, but the new put at a lower strike and later expiry collects enough premium from the extra time to produce a net credit. If the stock has already blown through the strike and is deep ITM, the roll becomes expensive or requires a debit.
 
 **CSP roll rules:**
-- **Always roll for a credit.** If the roll requires a debit, the stock moved too far — either take assignment or buy back and reassess.
+- **Roll for a credit when possible.** If the roll requires a debit, run the debit budget analysis (see [covered-call-overlay.md](covered-call-overlay.md#debit-roll-rules)) — same three gates apply: chain budget ≤ 50%, debit < assignment cost, thesis intact.
 - **Roll before earnings** if the CSP goes through an earnings date and you want to avoid assignment on a gap down without knowing fundamentals.
 - **Don't roll a broken thesis.** Rolling down from $110P to $100P on a name you no longer want to own just moves the problem. Buy back and redeploy elsewhere.
-- **Use `analyze_roll` to compare scenarios** — check 2-3 strike/expiry combinations.
+- **Use `analyze_roll` to compare scenarios** — check 2-3 strike/expiry combinations. Pass `chain_credits` for automatic debit budget verdicts.
 
 ---
 

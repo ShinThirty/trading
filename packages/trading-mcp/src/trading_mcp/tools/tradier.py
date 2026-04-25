@@ -430,11 +430,16 @@ async def analyze_roll(
     target_expiration: str,
     target_strike: float | None = None,
     quantity: int = 1,
+    chain_credits: float | None = None,
 ) -> str:
     """Analyze rolling an option position to a new expiration and/or strike.
 
     Computes cost to close, premium for new position, net credit/debit, DTE change,
     and greek comparison. Designed for covered calls and CSPs that need regular rolling.
+
+    When the roll is a net debit, runs a debit budget analysis with two gates:
+    Gate 1 (chain budget): debit must not exceed 50% of accumulated chain credits.
+    Gate 2 (vs assignment): debit must be less than the intrinsic value lost at assignment.
 
     current_symbol: OCC option symbol of current position
       (e.g. 'SMH260501C00410000'). Use get_account_positions to find it,
@@ -444,6 +449,8 @@ async def analyze_roll(
     target_strike: strike price for new position. Omit to keep same strike
       (horizontal roll). Change for diagonal rolls (roll up/down).
     quantity: number of contracts being rolled (default 1).
+    chain_credits: total accumulated chain credits in dollars (from get_cc_chain_pnl).
+      Required for Gate 1 debit budget check on net-debit rolls.
 
     Requires [tradier] section in ~/.tradingrc.
     """
@@ -488,6 +495,7 @@ async def analyze_roll(
     new_opt = matches[0]
     actual_strike = new_opt["strike"]
 
+    per_contract_chain = chain_credits / (quantity * CONTRACT_MULTIPLIER) if chain_credits else None
     r = opts.roll_analysis(
         cur_resp.quotes[0],
         new_opt,
@@ -496,6 +504,8 @@ async def analyze_roll(
         target_expiration,
         current_strike,
         actual_strike,
+        option_type=option_type,
+        chain_credits=per_contract_chain,
     )
 
     type_label = option_type.upper()
@@ -577,6 +587,57 @@ async def analyze_roll(
         "### Roll Summary",
         kv_table(roll_data),
     ]
+
+    if net < 0:
+        debit = abs(net)
+        debit_total = debit * quantity * CONTRACT_MULTIPLIER
+        assignment_cost = r["assignment_cost"]
+        assignment_total = assignment_cost * quantity * CONTRACT_MULTIPLIER
+        budget_data: dict[str, str] = {}
+
+        if chain_credits is not None:
+            budget = chain_credits * 0.5
+            budget_data["Chain Credits"] = f"${fmt_number(chain_credits)}"
+            budget_data["Debit Budget (50%)"] = f"${fmt_number(budget)}"
+            budget_data["Roll Debit"] = f"${fmt_number(debit_total)}"
+            gate1 = r.get("gate1_pass", False)
+            budget_data["Gate 1: Chain Budget"] = (
+                "PASS — debit within budget" if gate1 else "FAIL — debit exceeds 50% of chain"
+            )
+        else:
+            budget_data["Chain Credits"] = "(not provided — run get_cc_chain_pnl)"
+            budget_data["Gate 1: Chain Budget"] = "SKIP — no chain data"
+
+        type_label_lower = "called away" if option_type == "call" else "assigned"
+        budget_data["Assignment Cost"] = (
+            f"${fmt_number(assignment_total)} "
+            f"(${fmt_number(assignment_cost)}/sh if {type_label_lower})"
+        )
+        budget_data["Roll Debit"] = f"${fmt_number(debit_total)}"
+        gate2 = r.get("gate2_pass", False)
+        if assignment_cost <= 0:
+            budget_data["Gate 2: vs Assignment"] = "N/A — option is OTM, no assignment risk"
+        else:
+            budget_data["Gate 2: vs Assignment"] = (
+                "PASS — debit < assignment cost"
+                if gate2
+                else f"FAIL — cheaper to let {type_label_lower}"
+            )
+
+        g1 = r.get("gate1_pass")
+        g2 = r.get("gate2_pass", False)
+        if g1 is None:
+            verdict = "PARTIAL — provide chain_credits to complete analysis" if g2 else "FAIL"
+        elif g1 and g2:
+            verdict = "PASS — debit roll justified"
+        else:
+            verdict = "FAIL — let assign or accept the cap"
+        budget_data["Verdict"] = verdict
+
+        sections.append("")
+        sections.append("### Debit Roll Analysis")
+        sections.append(kv_table(budget_data))
+
     return "\n".join(sections)
 
 

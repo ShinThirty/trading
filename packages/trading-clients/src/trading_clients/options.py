@@ -136,12 +136,16 @@ def roll_analysis(
     target_exp: str,
     current_strike: float,
     actual_strike: float,
+    option_type: str = "call",
+    chain_credits: float | None = None,
 ) -> dict:
     """Compute roll metrics for a short option position.
 
     current/new: option quote dicts with bid, ask, and optional greeks.
+    option_type: 'call' or 'put' — needed for debit budget analysis.
+    chain_credits: total accumulated chain credits (from get_cc_chain_pnl).
     Returns dict with: close_cost, open_premium, net, net_total,
-    cur_dte, new_dte, roll_type, and greek changes.
+    cur_dte, new_dte, roll_type, greek changes, and debit budget fields.
     """
     from datetime import date
 
@@ -167,6 +171,11 @@ def roll_analysis(
     else:
         roll_type = "Diagonal (roll down)"
 
+    if option_type == "call":
+        assignment_cost = max(stock_price - current_strike, 0.0)
+    else:
+        assignment_cost = max(current_strike - stock_price, 0.0)
+
     result: dict = {
         "stock_price": stock_price,
         "roll_type": roll_type,
@@ -179,7 +188,19 @@ def roll_analysis(
         "new_ask": new_ask,
         "cur_dte": cur_dte,
         "new_dte": new_dte,
+        "assignment_cost": assignment_cost,
     }
+
+    if net < 0:
+        debit = abs(net)
+        debit_budget = chain_credits * 0.5 if chain_credits is not None else None
+        result["debit"] = debit
+        result["debit_budget"] = debit_budget
+        result["chain_credits"] = chain_credits
+        result["gate1_pass"] = (
+            chain_credits is not None and chain_credits > 0 and debit <= debit_budget
+        )
+        result["gate2_pass"] = assignment_cost > 0 and debit < assignment_cost
 
     for key in ("delta", "theta", "mid_iv"):
         cur_val = cur_greeks.get(key)
