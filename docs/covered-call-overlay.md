@@ -129,6 +129,15 @@ The best roll credits happen when the stock is **near the current strike**. ATM 
 
 If the stock is far below the strike, both the old and new CC are cheap OTM options — rolling from one cheap option to another produces a small credit. Don't wait for the stock to fall away from the strike before rolling; the economics get worse.
 
+**Roll timing — when during a rally:**
+
+| Signal | Action | Why |
+|--------|--------|-----|
+| **CC delta reaches ~75-80** | Start evaluating rolls now | Beyond 80 delta, intrinsic grows faster than extrinsic — the roll economics deteriorate rapidly. At 90+ delta you're mostly buying back intrinsic. |
+| **IV Rank elevated** (>30%) | Roll now — the new leg is richer | Elevated IV inflates the new CC's premium, which offsets or reduces the debit. After the spike collapses, that cushion disappears. |
+| **Stock just gapped up** (>3% single day) | Wait 1-2 days | Bid/ask spreads on the current leg are inflated by short-term vol. Let the spread normalize before paying the close cost. |
+| **Gradual grind higher** (no gap) | Roll when ready | No spread distortion — execute at your discretion. |
+
 **Roll rules:**
 - **Roll for a credit when possible.** If the roll requires a debit, run the debit budget analysis before proceeding — see below.
 - **Roll before earnings** if the CC goes through an earnings date and you expect a beat. After a gap up, the cost to close spikes and the roll credit shrinks or becomes a debit.
