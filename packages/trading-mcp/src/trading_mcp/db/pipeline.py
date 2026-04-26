@@ -47,6 +47,24 @@ class Conviction(StrEnum):
     NEGATIVE = "negative"
 
 
+class CatalystType(StrEnum):
+    EARNINGS = "earnings"
+    PRODUCT_LAUNCH = "product-launch"
+    FDA = "fda"
+    LEGAL = "legal"
+    MACRO = "macro"
+    GUIDANCE = "guidance"
+    ANALYST = "analyst"
+    OTHER = "other"
+
+
+class CatalystStatus(StrEnum):
+    UPCOMING = "upcoming"
+    HIT = "hit"
+    MISSED = "missed"
+    PASSED = "passed"
+
+
 # Maps field name to (enum class, normalizer applied before enum lookup)
 _ENUM_FIELDS: dict[str, tuple[type[StrEnum], callable]] = {
     "intent": (Intent, str.lower),
@@ -54,6 +72,12 @@ _ENUM_FIELDS: dict[str, tuple[type[StrEnum], callable]] = {
     "pipeline": (Pipeline, str.lower),
     "tier": (Tier, str.lower),
     "conviction": (Conviction, str.lower),
+}
+
+_CATALYST_ENUM_FIELDS: dict[str, tuple[type[StrEnum], callable]] = {
+    "type": (CatalystType, str.lower),
+    "status": (CatalystStatus, str.lower),
+    "magnitude": (Tier, str.lower),
 }
 
 ENTRY_COLUMNS = [
@@ -129,6 +153,23 @@ CREATE TABLE IF NOT EXISTS pipeline_notes (
 );
 
 CREATE INDEX IF NOT EXISTS idx_notes_entry ON pipeline_notes(entry_id);
+
+CREATE TABLE IF NOT EXISTS pipeline_catalysts (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    entry_id    INTEGER NOT NULL REFERENCES pipeline_entries(id) ON DELETE CASCADE,
+    type        TEXT    NOT NULL,
+    date        TEXT,
+    magnitude   TEXT,
+    description TEXT,
+    status      TEXT    NOT NULL DEFAULT 'upcoming',
+    outcome     TEXT,
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+    updated_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_catalysts_entry ON pipeline_catalysts(entry_id);
+CREATE INDEX IF NOT EXISTS idx_catalysts_date ON pipeline_catalysts(date);
+CREATE INDEX IF NOT EXISTS idx_catalysts_status ON pipeline_catalysts(status);
 """
 
 
@@ -274,6 +315,120 @@ def _get_notes(conn: sqlite3.Connection, entry_id: int) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+# -- Catalyst sync internals --
+
+CATALYST_COLUMNS = [
+    "id", "entry_id", "type", "date", "magnitude",
+    "description", "status", "outcome", "created_at", "updated_at",
+]
+
+CATALYST_UPDATABLE = frozenset(CATALYST_COLUMNS) - {"id", "entry_id", "created_at", "updated_at"}
+
+
+def _add_catalyst(conn: sqlite3.Connection, entry_id: int, data: dict) -> dict:
+    normalize_enums(data, _CATALYST_ENUM_FIELDS)
+    data["entry_id"] = entry_id
+    data.setdefault("status", CatalystStatus.UPCOMING.value)
+    ts = now()
+    data["created_at"] = ts
+    data["updated_at"] = ts
+
+    fields = [k for k in CATALYST_COLUMNS if k != "id" and k in data]
+    placeholders = ", ".join(["?"] * len(fields))
+    cols = ", ".join(fields)
+    values = [data[k] for k in fields]
+
+    cur = conn.execute(
+        f"INSERT INTO pipeline_catalysts ({cols}) VALUES ({placeholders})", values
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM pipeline_catalysts WHERE id = ?", (cur.lastrowid,)).fetchone()
+    return dict(row)
+
+
+def _list_catalysts(
+    conn: sqlite3.Connection,
+    *,
+    entry_id: int | None = None,
+    status: str | None = None,
+    days_ahead: int | None = None,
+) -> list[dict]:
+    query = (
+        "SELECT c.*, e.ticker FROM pipeline_catalysts c "
+        "JOIN pipeline_entries e ON c.entry_id = e.id"
+    )
+    clauses: list[str] = []
+    params: list = []
+
+    if entry_id is not None:
+        clauses.append("c.entry_id = ?")
+        params.append(entry_id)
+    else:
+        clauses.append(
+            "e.status NOT IN ('CLOSED', 'REMOVED', 'SHELVED', 'SKIP')"
+        )
+
+    if status:
+        clauses.append("c.status = ?")
+        params.append(CatalystStatus(status.lower()).value)
+
+    if days_ahead is not None:
+        clauses.append("c.date IS NOT NULL")
+        clauses.append("c.date <= date('now', '+' || ? || ' days')")
+        clauses.append("c.date >= date('now')")
+        params.append(days_ahead)
+
+    where = " AND ".join(clauses) if clauses else "1=1"
+    rows = conn.execute(
+        f"{query} WHERE {where} ORDER BY c.date, e.ticker", params
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def _update_catalyst(conn: sqlite3.Connection, catalyst_id: int, updates: dict) -> dict:
+    row = conn.execute(
+        "SELECT * FROM pipeline_catalysts WHERE id = ?", (catalyst_id,)
+    ).fetchone()
+    if row is None:
+        raise ValueError(f"No catalyst with id {catalyst_id}")
+
+    normalize_enums(updates, _CATALYST_ENUM_FIELDS)
+    fields = {k: v for k, v in updates.items() if k in CATALYST_UPDATABLE and v is not None}
+    if not fields:
+        raise ValueError("No valid fields to update")
+
+    fields["updated_at"] = now()
+    set_clause = ", ".join(f"{k} = ?" for k in fields)
+    values = list(fields.values()) + [catalyst_id]
+    conn.execute(f"UPDATE pipeline_catalysts SET {set_clause} WHERE id = ?", values)
+    conn.commit()
+    row = conn.execute("SELECT * FROM pipeline_catalysts WHERE id = ?", (catalyst_id,)).fetchone()
+    return dict(row)
+
+
+def _close_catalyst(
+    conn: sqlite3.Connection, catalyst_id: int, status: str, outcome: str | None
+) -> dict:
+    resolved = CatalystStatus(status.lower())
+    if resolved == CatalystStatus.UPCOMING:
+        raise ValueError("Cannot close a catalyst as 'upcoming' — use hit, missed, or passed")
+
+    row = conn.execute(
+        "SELECT * FROM pipeline_catalysts WHERE id = ?", (catalyst_id,)
+    ).fetchone()
+    if row is None:
+        raise ValueError(f"No catalyst with id {catalyst_id}")
+
+    ts = now()
+    conn.execute(
+        "UPDATE pipeline_catalysts SET status = ?, outcome = ?, updated_at = ? WHERE id = ?",
+        (resolved.value, outcome, ts, catalyst_id),
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM pipeline_catalysts WHERE id = ?", (catalyst_id,)).fetchone()
+    return dict(row)
+
+
 # -- Async public API --
 
 
@@ -321,3 +476,29 @@ async def add_note(conn: sqlite3.Connection, ticker: str, note: str) -> dict:
 
 async def get_notes(conn: sqlite3.Connection, entry_id: int) -> list[dict]:
     return await asyncio.to_thread(_get_notes, conn, entry_id)
+
+
+async def add_catalyst(conn: sqlite3.Connection, entry_id: int, data: dict) -> dict:
+    return await asyncio.to_thread(_add_catalyst, conn, entry_id, data)
+
+
+async def list_catalysts(
+    conn: sqlite3.Connection,
+    *,
+    entry_id: int | None = None,
+    status: str | None = None,
+    days_ahead: int | None = None,
+) -> list[dict]:
+    return await asyncio.to_thread(
+        _list_catalysts, conn, entry_id=entry_id, status=status, days_ahead=days_ahead
+    )
+
+
+async def update_catalyst(conn: sqlite3.Connection, catalyst_id: int, updates: dict) -> dict:
+    return await asyncio.to_thread(_update_catalyst, conn, catalyst_id, updates)
+
+
+async def close_catalyst(
+    conn: sqlite3.Connection, catalyst_id: int, status: str, outcome: str | None
+) -> dict:
+    return await asyncio.to_thread(_close_catalyst, conn, catalyst_id, status, outcome)
