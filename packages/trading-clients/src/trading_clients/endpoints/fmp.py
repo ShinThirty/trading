@@ -46,6 +46,18 @@ class EarningsRequest(ParamsRequest):
         return {"symbol": self.symbol, "limit": str(self.limit)}
 
 
+@dataclass
+class InsiderRssFeedRequest(ParamsRequest):
+    limit: int = 100
+    transaction_type: str = "P"
+
+    def to_params(self) -> dict[str, str]:
+        params: dict[str, str] = {"limit": str(self.limit)}
+        if self.transaction_type:
+            params["transactionType"] = self.transaction_type
+        return params
+
+
 # ═══════════════════════════════════════════════════════════════
 # Response Models
 # ═══════════════════════════════════════════════════════════════
@@ -280,4 +292,37 @@ DIVIDEND_HISTORY = Endpoint("/dividends", cache_ttl=3600, response_model=Dividen
 
 SECTOR_PERFORMANCE = Endpoint(
     "/sector-performance-snapshot", cache_ttl=300, response_model=SectorPerformanceResponse
+)
+
+
+@dataclass
+class InsiderRssFeedResponse:
+    transactions: list[dict]
+
+    @classmethod
+    def from_response(cls, data: list[dict]) -> "InsiderRssFeedResponse":
+        return cls(transactions=data or [])
+
+    def to_output(self) -> str:
+        if not self.transactions:
+            return "(no insider transactions)"
+        rows = [
+            {
+                "Date": t.get("transactionDate", ""),
+                "Symbol": t.get("symbol", ""),
+                "Name": t.get("reportingName", ""),
+                "Type": t.get("transactionType", ""),
+                "Shares": fmt_number(t.get("securitiesTransacted"), 0),
+                "Price": fmt_number(t.get("price")),
+                "Owner": t.get("typeOfOwner", ""),
+            }
+            for t in self.transactions
+        ]
+        return list_table(rows)
+
+
+INSIDER_RSS_FEED = Endpoint(
+    "/insider-trading-rss-feed",
+    cache_ttl=300,
+    response_model=InsiderRssFeedResponse,
 )
