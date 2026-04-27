@@ -12,6 +12,7 @@ Detailed strategy mechanics for each intent. Referenced from [decision-framework
 |----------|-----------|---------------|-----------------|
 | **Direct buy** (scale-in tranches) | Buy shares in 2 tranches | Default for accumulation | Full notional |
 | **LEAPS calls** (deep ITM, 80+ delta) | Buy 9-15 month calls | Capital-constrained, want leverage | ~20-30% of notional |
+| **Poor man's covered call** (diagonal) | Buy LEAPS call + sell near-term OTM call | Capital-efficient accumulation with income overlay | LEAPS cost |
 | **Synthetic long** (long call + short put, same strike) | Replicate ownership with options | Want share-equivalent exposure via options | Margin/collateral for short put |
 
 **Decision matrix (Drawdown x IV-HV) — applies to direct buy and hybrid:**
@@ -54,9 +55,12 @@ At highest conviction, both outcomes serve you — a beat accelerates the thesis
 | Strategy | Mechanics | When to prefer | Capital required |
 |----------|-----------|---------------|-----------------|
 | **CSP** | Sell OTM put, collect premium | Default entry-at-discount method | Full strike notional (cash account) |
+| **Wide BPS as entry** | Sell put + buy lower put ($30-40 wide) | CSP with a floor — want assignment but cap worst-case | Spread width |
 | **Put ratio spread** (sell 2 puts, buy 1 lower put) | Extra premium, partially defined risk | Aggressive discount, willing to own 200 shares | ~1.5x collateral |
 
 **CSP-as-entry intent check:** The CSP here is a limit order that pays you to wait — you *want* assignment. If you find yourself picking far-OTM strikes to maximize probability of expiring worthless, you've drifted into income mode. Reclassify to Harvest Premium and use the Wheel or iron condor instead. The diagnostic question: **do you want to own the shares at this strike?** If yes, this is the right section. If no, you're selling volatility, not entering a position.
+
+**Wide BPS as entry:** If the stock finishes between strikes, the short put assigns and the long put expires worthless — identical to a CSP. The long put only matters if the stock blows through both strikes, capping your max loss. Use $30-40 wide spreads for CSP-like behavior with a floor. Narrower spreads shift toward defined-risk (see Defined-Risk section).
 
 **CSP strike selection by drawdown:**
 
@@ -115,6 +119,7 @@ The key difference from Accumulate/Enter at Discount: you have **timing convicti
 | Strategy | Mechanics | When to prefer | Capital required |
 |----------|-----------|---------------|-----------------|
 | **Long call** | Buy OTM or ATM call | Clean directional bet, defined cost | Premium paid |
+| **Bull call spread** (debit) | Buy call + sell higher call | Reduce cost and vega exposure on a catalyst bet | Net debit |
 | **Call backspread** (buy 2 calls, sell 1 lower call) | Convex upside — small debit/credit, profits from explosive move up | Expect outsized move, want asymmetric payoff | Small net debit or credit |
 
 **When to use:**
@@ -125,7 +130,7 @@ The key difference from Accumulate/Enter at Discount: you have **timing convicti
 
 **Key decision factors:**
 - **IV-HV < 5%**: Options are fairly priced or cheap — long calls offer good value. This is the sweet spot.
-- **IV-HV > 10%**: Options are expensive — you're overpaying for the call. Prefer CSP/BPS instead (sell the rich premium, don't buy it).
+- **IV-HV > 10%**: Options are expensive — use bull call spread to reduce vega exposure, or reconsider whether this is really a directional leverage trade (CSP/BPS under a different intent may fit better).
 - **IV Rank < 30%**: Cheap vol environment — buying options is favorable.
 - **IV Rank > 50%**: Expensive vol — selling strategies are better unless you have very high catalyst conviction.
 - Long call: choose 40-60 delta for balanced leverage/probability. ATM for highest delta exposure, OTM for max leverage.
@@ -156,12 +161,8 @@ Earnings is the most common catalyst here. The trap is IV crush — you can be r
 |----------|-----------|---------------|-----------------|
 | **Bull put spread** (credit) | Sell put + buy lower put | Bullish thesis, cap downside | Spread width |
 | **Bull call spread** (debit) | Buy call + sell higher call | Bullish directional bet, defined cost | Net debit |
-| **Poor man's covered call** (diagonal) | Buy LEAPS call + sell near-term OTM call | CC economics without owning shares | LEAPS cost |
-| **Collar** (on existing shares) | Own shares + buy put + sell call | Lock in gains / protect existing position, cap both sides | Shares + net debit/credit |
 
-**When BPS works as entry:** If stock finishes between strikes, short put assigns and long put expires worthless — same as CSP. Only diverges if stock blows through both strikes (max loss, no shares). Wide spreads ($30-40 wide) behave like CSP-with-a-floor for most scenarios.
-
-**When to prefer bull call spread over BPS:** When you want defined cost upfront rather than assignment risk. Better for names you'd rather not own 100 shares of but want upside exposure.
+**When to prefer bull call spread over BPS:** When you want defined cost upfront rather than assignment risk. Better for names you'd rather not own 100 shares of but want upside exposure. For BPS used as an entry mechanism (wide spreads, want assignment), see Wide BPS under Enter at Discount.
 
 **Credit-to-width ratio (all credit spreads):** Collect at least **30% of the strike width** in net credit, or reject the trade. On a $10-wide BPS, the minimum acceptable credit is $3.00 — anything less means poor risk-to-reward (risking $7 to make $3). If the ratio is below 30%, either widen the spread, move closer to ATM, or wait for higher IV.
 
@@ -285,6 +286,7 @@ Earnings is a confirmation event for bearish trades, not the trade itself. The t
 | Strategy | Mechanics | When to prefer | Capital required |
 |----------|-----------|---------------|-----------------|
 | **Protective put** | Buy put on existing shares | Direct insurance | Premium paid |
+| **Put spread** (as hedge) | Buy put + sell lower put | Cheaper insurance, capped protection | Net debit |
 | **Collar** | Own shares + buy put + sell call | Funded hedge — CC premium pays for put | Net credit/debit |
 | **Index puts** (SPY/QQQ) | Buy OTM puts on broad index | Portfolio-wide protection | Premium paid |
 

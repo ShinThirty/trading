@@ -105,7 +105,7 @@ Once intent is set and signals are collected, match to the right strategy. See [
 |--------|-----------------|-------------------|-------------------|
 | **Accumulate** | Direct buy (tranches) or hybrid | More CSP in the mix | More direct buy |
 | **Enter at discount** | CSP (30-45 DTE) | CSP (richer premium) | CSP (still works) |
-| **Directional leverage** | Long call (40-60 delta) | Prefer CSP/BPS instead | Long call (sweet spot) |
+| **Directional leverage** | Long call (40-60 delta) | Bull call spread (reduce vega) | Long call (sweet spot) |
 | **Defined-risk exposure** | Bull call spread | BPS (sell rich premium) | Bull call spread (sweet spot) |
 | **Harvest premium** | Iron condor / wheel | Iron condor (best window) | Skip, butterfly, or wheel |
 | **Bet on volatility** | Long straddle/strangle | Sell vol instead | Buy vol (sweet spot) |
