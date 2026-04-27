@@ -51,10 +51,9 @@ should not need to ask for this — surface it automatically.
 | Strategy | Mechanics | When to prefer | Capital required |
 |----------|-----------|---------------|-----------------|
 | **CSP** | Sell OTM put, collect premium | Default entry-at-discount method | Full strike notional (cash account) |
-| **Wheel** (CSP -> CC -> repeat) | CSP -> assigned -> covered call -> called away -> CSP again | Ongoing income + entry/exit cycle on a name you'll keep trading | Full strike notional |
 | **Put ratio spread** (sell 2 puts, buy 1 lower put) | Extra premium, partially defined risk | Aggressive discount, willing to own 200 shares | ~1.5x collateral |
 
-**Wheel caveat:** The mechanical Wheel (CSP → CC → called away → repeat) caps your upside by design — the CC leg removes shares right before big moves. If your intent is truly *Enter at Discount* on a name you expect to appreciate significantly, prefer CSP → hold with selective CC overlay (see [covered-call-overlay.md](covered-call-overlay.md)) rather than mechanical wheeling. The Wheel works best for range-bound names where you're comfortable repeatedly entering and exiting around a price band.
+**CSP-as-entry intent check:** The CSP here is a limit order that pays you to wait — you *want* assignment. If you find yourself picking far-OTM strikes to maximize probability of expiring worthless, you've drifted into income mode. Reclassify to Harvest Premium and use the Wheel or iron condor instead. The diagnostic question: **do you want to own the shares at this strike?** If yes, this is the right section. If no, you're selling volatility, not entering a position.
 
 **CSP strike selection by drawdown:**
 
@@ -172,6 +171,7 @@ The key difference from Accumulate/Enter at Discount: you have **timing convicti
 | **Butterfly** (all calls or all puts) | Buy 1 lower + sell 2 middle + buy 1 upper | Target price bet — max profit if stock pins at middle strike | Small net debit |
 | **Calendar spread** | Sell near-term option + buy same-strike later-term | IV term structure play — front month IV > back month | Net debit |
 | **Double diagonal** | Calendar with different strikes on each side | Wider profit zone than calendar | Net debit |
+| **Wheel** (CSP → CC → repeat) | CSP → assigned → covered call → called away → CSP again | Ongoing income cycle on a range-bound name | Full strike notional |
 
 **When to use:**
 - IV Rank > 50% (premiums worth selling)
@@ -184,7 +184,8 @@ The key difference from Accumulate/Enter at Discount: you have **timing convicti
 - Iron butterfly: max profit if stock pins at center strike — rare but lucrative
 - Butterfly: cheapest of all neutral strategies. Very high reward-to-risk if stock pins, but narrow profit zone. Best for pinning-at-a-price thesis.
 - Calendar: profits from time decay differential + IV mean reversion
-- Avoid these on stocks you'd be happy to own — use CSP/direct instead
+- Wheel: the only directional-looking strategy in this section, but the intent is income, not ownership. You're comfortable repeatedly entering and exiting around a price band. Assignment is part of the cycle, not the goal. The CC leg caps upside by design — if you expect significant appreciation, use CSP → hold with selective CC overlay (see [covered-call-overlay.md](covered-call-overlay.md)) under Enter at Discount instead.
+- Avoid iron condors/butterflies/calendars on stocks you'd be happy to own — use CSP/direct instead
 
 ---
 
