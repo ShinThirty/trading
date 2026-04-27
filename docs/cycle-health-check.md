@@ -64,6 +64,38 @@ The $690B+ in AI infra capex must eventually be justified by software revenue. I
 - **Hyperscaler operating margins (depreciation cliff)**: The $600B+ in 2024-2025 GPU/infra capex goes on the balance sheet as an asset, then depreciates through income statements over 3-4 years. By late 2026, this depreciation wave hits MSFT/META/GOOG operating margins hard. If AI software revenue (Copilot, Agentforce) hasn't scaled to offset the depreciation expense, margins compress. When Wall Street sees margin compression with capex still growing, CFOs get forced into cuts. Track hyperscaler operating margins quarter-over-quarter — expanding margins = AI monetization working, compressing margins = depreciation outrunning revenue. *(Tool: `get_income_statement` for MSFT, META, GOOG — compare operating margin trends.)*
 - **The test**: If multiple quarters pass and enterprises refuse to pay for AI tools because productivity gains aren't materializing, the infrastructure investment thesis collapses from the demand side.
 
+## Signal 6: Sector Breadth Concentration (late-cycle fingerprint)
+
+Parabolic semi rallies don't end all at once — they unwind from the edges inward. Track how capital distributes across the cap spectrum within semis. When the rally narrows to 1-3 names at ATH while everything else rolls over, the cycle is in its terminal phase.
+
+**The four-phase unwind pattern:**
+
+1. **Phase 1 — Everything rips.** Broad-based rally, small caps outperform, SOX runs 18+ consecutive days. This is the easy money phase.
+2. **Phase 2 — Weakest hands punished.** Names that miss even slightly get crushed (-10-20%). The "show me the numbers" filter activates. Fundamentals must justify the multiple — 18% YoY growth isn't enough if the market expected 25%.
+3. **Phase 3 — Capital concentrates.** Money flows into 1-3 "safest" mega-cap names (NVDA, MU) while mid/small caps bleed. The last safe havens hit ATH as everything else rolls over. This phase can last weeks.
+4. **Phase 4 — Last man standing stumbles.** The final holdout reports "good but not great" earnings. With no breadth underneath to cushion, the entire sector gaps down.
+
+**What to track:**
+
+- **ATH concentration ratio**: How many of the top 20 semi names by market cap are within 2% of 52W high? If the answer narrows from 10+ to 2-3, you're in Phase 3.
+- **Dispersion**: Calculate the spread between the best and worst performers in the sector over 1 month. Rising dispersion (leaders up 10%, laggards down 15%) = late cycle.
+- **Asymmetry at ATH**: When the mega-cap leaders are at ATH, earnings must be *exceedingly* good to sustain the rally. "Good" is already priced in. The market doesn't sell when fundamentals deteriorate — it sells when **the rate of improvement slows** (second derivative turns negative). A quarter of 25% growth at a stock priced for 40% growth is a selloff.
+
+**April 27, 2026 snapshot (Phase 3 active):**
+
+| Tier | Names | From 52W High | Today |
+|------|-------|---------------|-------|
+| At ATH | NVDA, MU, INTC | 0% to +3.5% | +3% to +6% |
+| Near ATH | TSM, AVGO, KLAC, ON, AMAT, ADI | -1% to -4% | -0.4% to -2.9% |
+| Rolling over | AMD, LRCX, MCHP, TXN, ASML, MRVL | -5% to -8% | -1.7% to -3.8% |
+| Correcting | ARM, SMTC, RMBS, WOLF, QCOM, SWKS | -9% to -33% | -2.4% to -10.8% |
+
+Three names at ATH. Everything else red. Classic Phase 3.
+
+**Notable contrarian signal:** Michael Burry (Scion Asset Management) disclosed SOXX $330P Jan 2027 puts in April 2026 — betting on a 27%+ correction from the parabolic high. His thesis: the rally is technically driven, not fundamentals-supported. Burry is historically excellent at identifying overvaluation but poor at timing — worth noting when he's bearish, but not actionable by itself.
+
+**Key verdict dates:** NVDA earnings May 20, MU earnings June 23. These two prints determine whether Phase 3 extends or Phase 4 begins.
+
 ## Defensive Playbook (when 2+ signals flash yellow)
 
 | Action | Detail |
