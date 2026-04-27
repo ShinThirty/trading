@@ -106,11 +106,11 @@ Once intent is set and signals are collected, match to the right strategy. See [
 | **Accumulate** | Direct buy (tranches) or hybrid | More CSP in the mix | More direct buy |
 | **Enter at discount** | CSP (30-45 DTE) | CSP (richer premium) | CSP (still works) |
 | **Directional leverage** | Long call (40-60 delta) | Prefer CSP/BPS instead | Long call (sweet spot) |
-| **Defined-risk exposure** | Bull put spread | BPS (sell rich premium) | Bull call spread (buy cheap) |
+| **Defined-risk exposure** | Bull call spread | BPS (sell rich premium) | Bull call spread (sweet spot) |
 | **Harvest premium** | Iron condor / wheel | Iron condor (best window) | Skip, butterfly, or wheel |
 | **Bet on volatility** | Long straddle/strangle | Sell vol instead | Buy vol (sweet spot) |
 | **Bearish (L2)** | Long put (IV Rank <30%) | Wait (puts expensive) | Long put (sweet spot) |
-| **Bearish (L3)** | Bear put spread | Bear call spread | Bear put spread |
+| **Bearish (L3)** | Bear spread (credit or debit per IV) | Bear call spread | Bear put spread |
 | **Hedge** | Protective put / collar | Collar (sell rich calls) | Protective put |
 
 **Cross-stock tiebreaker:** When multiple pipeline names share the same intent and conviction tier, compare premium efficiency at a standardized delta to decide who goes first when capital is limited.
