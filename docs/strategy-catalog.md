@@ -42,6 +42,9 @@ presenting the entry recommendation. Compare: capital required, delta exposure (
 dollar invested), break-even at expiry, theta cost per month, and max loss. The user
 should not need to ask for this — surface it automatically.
 
+**Binary events (earnings is a feature, not a threat):**
+At highest conviction, both outcomes serve you — a beat accelerates the thesis, a miss gives a cheaper entry. The modifiers above already handle timing (shift toward direct entry or wait pre-earnings, shift toward CSP post-earnings). One addition: **LEAPS through earnings** carry vega risk. Deep ITM LEAPS (80+ delta) have lower vega than ATM, but a 10-point IV crush still hits. If holding LEAPS through earnings, verify that your break-even can absorb the expected move's worth of IV crush — don't assume high delta insulates you completely.
+
 ---
 
 ## Intent: Enter at Discount (high conviction)
@@ -98,6 +101,9 @@ The best CSP roll credits happen when the stock is **near the put strike**. ATM 
 - **Don't roll a broken thesis.** Rolling down from $110P to $100P on a name you no longer want to own just moves the problem. Buy back and redeploy elsewhere.
 - **Use `analyze_roll` to compare scenarios** — check 2-3 strike/expiry combinations. Pass `chain_credits` for automatic debit budget verdicts.
 
+**Binary events (earnings is a feature, not a threat):**
+The "sell through earnings" expiry rule already captures this — earnings IV is premium you get paid for. Both outcomes serve the entry intent: stock holds up and you keep inflated premium, or stock gaps down and you get assigned at a deeper discount. The only risk is a thesis-breaking report. After every earnings report that your CSP spans, re-check the thesis (margins, guidance, revenue trajectory). If the thesis survived, the CSP is working as designed. If the thesis broke, buy back immediately — don't let a broken CSP assign you on a name you no longer want to own.
+
 ---
 
 ## Intent: Directional Leverage (high conviction, time-specific)
@@ -127,6 +133,13 @@ The key difference from Accumulate/Enter at Discount: you have **timing convicti
 - **Expiry:** 2-4 weeks past the expected catalyst. Gives time for the move to play out without excessive theta decay.
 
 **Critical distinction from LEAPS:** LEAPS (9-15 month, 80+ delta) replicate ownership. Near-term long calls (2-8 week, 40-60 delta) are directional bets. Don't confuse the two — LEAPS belong under Accumulate, long calls belong here.
+
+**Binary events (the event IS your catalyst):**
+Earnings is the most common catalyst here. The trap is IV crush — you can be right on direction and still lose money if the stock moves less than the expected move implies.
+
+- **Entry timing:** Enter 5-10 trading days before the event, not the day before. IV is still building but hasn't peaked — you get a better price. Day-of entry means you're buying at peak IV.
+- **IV crush math:** Run `get_expected_move` before entry. Your thesis must imply a move LARGER than the expected move for a long call to profit through earnings. If you think the move equals or is smaller than expected, this is a Vol Bet (sell vol) or skip.
+- **Post-event alternative:** If you want to trade the *reaction* rather than the event itself, wait until the morning after. IV has crushed, options are cheaper, and you have the information. This converts from a binary bet to a momentum trade.
 
 **Management:**
 - Set profit target at entry (e.g. 50-100% return on premium). Take profits — don't hold hoping for more.
@@ -158,6 +171,13 @@ The key difference from Accumulate/Enter at Discount: you have **timing convicti
 - Capital constrained: BPS/bull call spread over CSP (fraction of collateral)
 - Multiple pipeline names: Spreads let you run 5-10 positions vs 2-3 CSPs
 
+**Binary events (event is a threat — close before or open after):**
+Moderate conviction + binary event risk + capped upside = inconsistent. You chose defined-risk because you're not fully convinced — don't then gamble that conviction on a coin-flip event.
+
+- **BPS through earnings:** A gap down can blow through both strikes for max loss. On a $10-wide BPS, that's $1,000 per contract lost on a name you had only moderate conviction on. Close before earnings or choose strikes that expire before the event.
+- **Bull call spread through earnings:** Same IV crush risk as long calls (debit strategy), but the short call offsets some vega. Still, a muted earnings reaction kills both legs. Not worth holding through unless the spread is already profitable and you're playing with house money.
+- **Post-earnings is the sweet spot:** Open spreads AFTER earnings. IV has crushed, event risk is removed, and the post-earnings price action gives you a cleaner directional read. This is where defined-risk strategies shine — you have information, not hope.
+
 ---
 
 ## Intent: Harvest Premium (low conviction / neutral)
@@ -187,6 +207,14 @@ The key difference from Accumulate/Enter at Discount: you have **timing convicti
 - Wheel: the only directional-looking strategy in this section, but the intent is income, not ownership. You're comfortable repeatedly entering and exiting around a price band. Assignment is part of the cycle, not the goal. The CC leg caps upside by design — if you expect significant appreciation, use CSP → hold with selective CC overlay (see [covered-call-overlay.md](covered-call-overlay.md)) under Enter at Discount instead.
 - Avoid iron condors/butterflies/calendars on stocks you'd be happy to own — use CSP/direct instead
 
+**Binary events (event is a threat — never hold through):**
+Every strategy in this section is short gamma. Earnings is a gamma event. Short gamma through a gamma event is how max losses happen.
+
+- **Iron condor / iron butterfly:** The expected move often exceeds the short strike width. A 5% earnings move on a name where your short strikes are 3% OTM = max loss on one side. Close iron condors 1-2 days before earnings, no exceptions.
+- **Calendar / double diagonal:** Earnings IV crush collapses the back-month option you own faster than you expect — the term structure inverts. Close before earnings.
+- **Wheel:** If you have a CSP open going into earnings, a gap down assigns you shares you're only holding for income — now you're an involuntary owner of a name you have low conviction on. If you have shares + CC, a gap up calls shares away (fine, part of the cycle), but a gap down gives you an unrealized loss on income-intent shares. Close or roll the CSP before earnings; accept CC assignment risk since it's part of the wheel.
+- **Post-earnings is the prime window:** Open premium-selling trades AFTER earnings. IV has crushed but residual IV remains elevated, event risk is gone, and you're selling into a clean runway. This is the best setup for every strategy in this section.
+
 ---
 
 ## Intent: Bet on Volatility (direction-agnostic)
@@ -205,6 +233,13 @@ The key difference from Accumulate/Enter at Discount: you have **timing convicti
 - Major catalyst imminent (FDA approval, legal ruling, M&A decision)
 
 **Key decision factor:** Compare expected move (`get_expected_move`) to your estimate. If you think the stock will move MORE than the straddle price implies, buy vol. If less, sell vol (harvest premium).
+
+**Binary events (the event IS the trade):**
+This is the canonical earnings play. Tactical timing matters more here than in any other intent.
+
+- **Entry:** 5-10 trading days before the event. IV is building but hasn't peaked — you're buying vol on the way up, not at the top. Day-before entry means paying peak IV and needing an even bigger move to profit.
+- **Exit:** The morning after the event. The overnight gap IS your move — don't hold hoping for follow-through. IV crushes immediately after the event, and theta resumes destroying your position. Take what the gap gives you.
+- **Reverse calendar exception:** Enter closer to the event (3-5 days). The structure profits from near-term IV spiking relative to back-month — the closer to the event, the steeper the term structure distortion you're exploiting.
 
 ---
 
@@ -234,6 +269,13 @@ See [bearish-framework.md](bearish-framework.md) for the full bearish analysis p
 - Crash conviction: Put backspread — pay little or nothing, profit big on blowup
 - **Credit-to-width ratio applies** to bear call spreads — same 30% minimum as BPS (see Defined-Risk section)
 
+**Binary events (event confirms or denies the thesis):**
+Earnings is a confirmation event for bearish trades, not the trade itself. The thesis is that the business is deteriorating — earnings either confirms that (enter or add) or contradicts it (reassess).
+
+- **Debit strategies (long put, bear put spread):** Don't buy before earnings — you're paying peak IV, and IV crush eats your gains even if the stock drops. The one-liner already in this section is right: buy puts AFTER the gap. The gap confirms the thesis, IV crushes to a fair level, and you're positioned for the continued decline, not the initial move.
+- **Credit strategies (bear call spread):** Opposite — holding through earnings is favorable. If the stock gaps down or stays flat, the short call decays and you keep the credit. If it gaps up, your long call limits the loss. Bear call spreads are the best bearish structure to hold through earnings.
+- **Put backspread:** Pre-earnings is actually a good entry — you're buying more options than you're selling, so you want IV to expand, and the gamma event can produce the violent move the structure needs. But only if your thesis predicts a blowup, not a slow bleed.
+
 ---
 
 ## Intent: Hedge (existing positions)
@@ -250,3 +292,10 @@ See [bearish-framework.md](bearish-framework.md) for the full bearish analysis p
 - Approaching profit target but don't want to sell yet (tax reasons, thesis intact)
 - Macro uncertainty — protect gains without exiting
 - Collar: when you're willing to cap upside to fund the hedge
+
+**Binary events (event is the risk — hedge costs the most when you need it most):**
+Earnings on a large position is precisely when you feel the urge to hedge. But pre-earnings IV makes protective puts expensive — you're paying peak premium for insurance.
+
+- **Collar > protective put pre-earnings.** The sold call offsets the inflated put cost. Pre-earnings IV inflates both sides equally, so the collar's net cost stays reasonable while a naked protective put is overpriced.
+- **Index puts for earnings season.** If multiple holdings report in the same week, individual hedges are capital-inefficient. SPY/QQQ puts hedge the portfolio, not the name — cheaper and simpler when the risk is broad.
+- **Sizing is the cheapest hedge.** Before spending premium on protection, check: is the position within sizing limits? If a 15% earnings gap would produce a dollar loss within your drawdown tolerance, the position size IS the hedge. Don't pay for insurance you don't need.
