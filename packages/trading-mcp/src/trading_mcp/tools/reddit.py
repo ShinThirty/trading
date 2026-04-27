@@ -1,14 +1,18 @@
+import re
+
 from fastmcp import Context, FastMCP
+from trading_clients.endpoints import reddit as r
 
 from trading_mcp.helpers import _reddit
 
 mcp = FastMCP("reddit-tools")
 
 
-def _truncate(text: str, max_len: int = 500) -> str:
-    if len(text) <= max_len:
-        return text
-    return text[:max_len] + "…"
+def _post_id_from_url(url: str) -> str:
+    m = re.search(r"/comments/([a-z0-9]+)", url)
+    if m:
+        return m.group(1)
+    return url.strip()
 
 
 @mcp.tool()
@@ -31,27 +35,14 @@ async def search_reddit(
     time_filter: Time window — 'hour', 'day', 'week', 'month', 'year', 'all'.
     limit: Max posts to return (1-25, default 10).
     """
-    reddit = _reddit(ctx)
-    limit = min(max(limit, 1), 25)
-    sub = await reddit.subreddit(subreddit)
-    results: list[str] = []
-    async for post in sub.search(query, sort=sort, time_filter=time_filter, limit=limit):
-        score = post.score
-        comments = post.num_comments
-        selftext = _truncate(post.selftext) if post.selftext else ""
-        entry = (
-            f"### {post.title}\n"
-            f"r/{post.subreddit} · {score} pts · {comments} comments · u/{post.author}\n"
-            f"https://reddit.com{post.permalink}\n"
-        )
-        if selftext:
-            entry += f"\n{selftext}\n"
-        results.append(entry)
-
-    if not results:
+    client = _reddit(ctx)
+    req = r.SearchRequest(query=query, subreddit=subreddit, sort=sort,
+                          time_filter=time_filter, limit=limit)
+    resp = await client.get(r.SEARCH, req)
+    if not resp.posts:
         return f"No results for '{query}' in r/{subreddit}"
     header = f"**Search: '{query}' in r/{subreddit}** (sort={sort}, time={time_filter})\n\n"
-    return header + "\n---\n".join(results)
+    return header + resp.to_output()
 
 
 @mcp.tool()
@@ -69,37 +60,14 @@ async def get_subreddit_posts(
     time_filter: Time window for 'top' sort — 'hour', 'day', 'week', 'month', 'year', 'all'.
     limit: Max posts to return (1-25, default 10).
     """
-    reddit = _reddit(ctx)
-    limit = min(max(limit, 1), 25)
-    sub = await reddit.subreddit(subreddit)
-
-    if sort == "new":
-        listing = sub.new(limit=limit)
-    elif sort == "top":
-        listing = sub.top(time_filter=time_filter, limit=limit)
-    elif sort == "rising":
-        listing = sub.rising(limit=limit)
-    else:
-        listing = sub.hot(limit=limit)
-
-    results: list[str] = []
-    async for post in listing:
-        score = post.score
-        comments = post.num_comments
-        selftext = _truncate(post.selftext) if post.selftext else ""
-        entry = (
-            f"### {post.title}\n"
-            f"{score} pts · {comments} comments · u/{post.author}\n"
-            f"https://reddit.com{post.permalink}\n"
-        )
-        if selftext:
-            entry += f"\n{selftext}\n"
-        results.append(entry)
-
-    if not results:
+    client = _reddit(ctx)
+    req = r.SubredditRequest(subreddit=subreddit, sort=sort,
+                             time_filter=time_filter, limit=limit)
+    resp = await client.get(r.SUBREDDIT, req)
+    if not resp.posts:
         return f"No posts found in r/{subreddit}"
     header = f"**r/{subreddit}** ({sort})\n\n"
-    return header + "\n---\n".join(results)
+    return header + resp.to_output(include_subreddit=False)
 
 
 @mcp.tool()
@@ -115,35 +83,9 @@ async def get_reddit_post(
     comment_limit: Max top-level comments to return (1-30, default 15).
     comment_sort: Comment sort — 'best', 'top', 'new', 'controversial', 'old', 'qa'.
     """
-    from asyncpraw.models import MoreComments
-
-    reddit = _reddit(ctx)
-    comment_limit = min(max(comment_limit, 1), 30)
-
-    submission = await reddit.submission(url=url)
-    submission.comment_sort = comment_sort
-    await submission.load()
-
-    header = (
-        f"## {submission.title}\n"
-        f"r/{submission.subreddit} · {submission.score} pts · "
-        f"{submission.num_comments} comments · u/{submission.author}\n\n"
-    )
-    body = ""
-    if submission.selftext:
-        body = _truncate(submission.selftext, 2000) + "\n\n"
-
-    comments_text = "### Comments\n\n"
-    count = 0
-    for comment in submission.comments:
-        if isinstance(comment, MoreComments):
-            continue
-        if count >= comment_limit:
-            break
-        score = comment.score
-        author = comment.author or "[deleted]"
-        text = _truncate(comment.body, 400)
-        comments_text += f"**u/{author}** ({score} pts)\n{text}\n\n"
-        count += 1
-
-    return header + body + comments_text
+    client = _reddit(ctx)
+    post_id = _post_id_from_url(url)
+    req = r.PostRequest(post_id=post_id, comment_limit=comment_limit,
+                        comment_sort=comment_sort)
+    resp = await client.get(r.POST, req)
+    return resp.to_output()

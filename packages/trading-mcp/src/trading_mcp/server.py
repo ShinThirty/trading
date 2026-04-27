@@ -8,6 +8,7 @@ from trading_clients.config import load_config
 from trading_clients.finnhub_client import FinnhubClient
 from trading_clients.fmp_client import FmpClient
 from trading_clients.fred_client import FredClient
+from trading_clients.reddit_client import RedditClient
 from trading_clients.tastytrade_client import TastyTradeClient
 from trading_clients.tradier_client import TradierClient
 from trading_clients.webull_client import WebullClient
@@ -52,14 +53,7 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
         ctx["alphavantage"] = AlphaVantageClient(config.alphavantage)
     if config.tastytrade:
         ctx["tastytrade"] = TastyTradeClient(config.tastytrade)
-    if config.reddit:
-        import asyncpraw
-
-        ctx["reddit"] = asyncpraw.Reddit(
-            client_id=config.reddit.client_id,
-            client_secret=config.reddit.client_secret,
-            user_agent="trading-mcp/0.1",
-        )
+    ctx["reddit"] = RedditClient()
     db = open_db()
     init_pipeline_schema(db)
     init_roll_schema(db)

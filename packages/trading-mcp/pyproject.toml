@@ -8,7 +8,6 @@ dependencies = [
     "trading-clients",
     "yfinance>=1.2",
     "youtube-transcript-api>=1.2.4",
-    "asyncpraw>=7.8",
     "akshare>=1.18.56",
 ]
 

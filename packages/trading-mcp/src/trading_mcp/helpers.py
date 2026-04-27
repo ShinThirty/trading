@@ -20,6 +20,7 @@ from trading_clients.finnhub_client import FinnhubClient
 from trading_clients.fmp_client import FmpClient
 from trading_clients.fred_client import FredClient
 from trading_clients.portfolio import AccountSummary, parse_fidelity_folder
+from trading_clients.reddit_client import RedditClient
 from trading_clients.table_helpers import to_float, to_float_zero
 from trading_clients.tastytrade_client import TastyTradeClient
 from trading_clients.tradier_client import TradierClient
@@ -88,11 +89,8 @@ def _tastytrade(ctx: Context) -> TastyTradeClient:
     return client
 
 
-def _reddit(ctx: Context) -> Any:
-    client = ctx.lifespan_context.get("reddit")
-    if client is None:
-        raise RuntimeError("Reddit not configured. Add [reddit] section to ~/.tradingrc")
-    return client
+def _reddit(ctx: Context) -> RedditClient:
+    return ctx.lifespan_context["reddit"]
 
 
 async def _check_market(ctx: Context, order_type: str, extended_hours: bool) -> None:
