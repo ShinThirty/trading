@@ -318,9 +318,8 @@ async def refresh_webull_token(ctx: Context) -> str:
 async def get_app_subscriptions(ctx: Context) -> str:
     """Get all Webull accounts linked to this API key.
 
-    Returns Account ID, Account Number, Type, and Label for each account.
-    IMPORTANT: Use the 'Account ID' column (not 'Account Number') as the account_id
-    parameter for all other Webull tools.
+    Returns Account ID, Type, and Label for each account.
+    Use the 'Account ID' value as the account_id parameter for all other Webull tools.
     """
     return (await _webull(ctx).get(ACCOUNT_LIST, EmptyRequest())).to_output()
 
