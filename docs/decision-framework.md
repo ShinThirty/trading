@@ -73,6 +73,17 @@ When 2+ conviction inputs score "negative," route to the [Bearish Framework](bea
 
 Before any spread or roll, check liquidity via `get_iv_metrics` (Liq 3-4 = tight, Liq 1-2 = caution) and `get_option_chain` bid/ask spreads. Cross-check earnings dates from `get_iv_metrics` and `get_earnings_calendar`; if they disagree, use the later date.
 
+### Active Macro Overhangs
+
+`get_market_regime` captures regime labels (volatility, trend, breadth, sectors) but not narrative overhangs that aren't yet in price — commodity divergences, geopolitical tail risks, framing flips, capex commitment cycles. **Always check memory for active macro themes before finalizing any recommendation.** Relevant files:
+
+- `project_spy_reversal_playbook.md` — reversal checklist + commodity divergence (USO/VIX) + Iran/Hormuz baseline
+- `project_semi_cycle_thesis.md` — AI capex phases + hyperscaler capex commitment tracker
+- `project_uninversion_watch.md` — yield curve + Fed cuts
+- `project_ai_commoditization.md` — LLM ceiling / model commoditization thesis
+
+These overhangs shift **entry timing**, not thesis viability. A bullish stock-level setup against a market ignoring oil at $150 calls for staying CSP-heavy with strikes pushed deeper OTM — the thesis is right but a systemic derisk takes everything down regardless of fundamentals. Memory entries decay; verify timestamps before relying on specific data points (a capex print or VIX reading >2 weeks old has lost most of its predictive value — re-pull current data).
+
 ### Signal Conflict Resolution
 
 When signals conflict, **fundamentals override technicals, always.** Technicals tell you how much a stock moved; fundamentals tell you why. The "why" determines conviction; technicals only refine timing within an already-approved trade.
