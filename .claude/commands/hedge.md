@@ -8,8 +8,9 @@ Evaluate whether the portfolio needs a hedge, or whether an existing hedge shoul
 
 Call these in parallel:
 - `get_market_regime` — volatility, trend, breadth, macro, sectors, IV context
-- `get_quote` for `SPY,IWM,QQQ,XLU,XLY,VIX,VIX3M` — price, volume, intraday ranges
+- `get_quote` for `SPY,IWM,QQQ,XLU,XLY,VIX,VIX3M,USO` — price, volume, intraday ranges
 - `get_tradier_history` for SPY, last 10 trading days — volume trend
+- `get_tradier_history` for USO, last 10 trading days — commodity divergence check
 
 ## Step 2: Reversal Signal Checklist
 
@@ -21,13 +22,14 @@ Score each signal as CLEAR / WATCHING / ACTIVE / FIRING based on the data from S
 | **VIX term structure** | Early warning | Backwardation (VIX > VIX3M) = market pricing near-term stress above long-term. One of the strongest "hedge now" signals. Contango is normal. | |
 | **Intraday IWM fade** | Early warning | IWM closing red or significantly lagging SPY/QQQ | |
 | **Defensive rotation** | Early warning | XLU outperforming XLY on multi-day basis (>2pp spread) | |
+| **Commodity divergence** | Early warning | USO/WTI grinding higher (>5% over 5+ sessions) while SPY makes new highs and VIX stays sub-20. Inflationary supply shock not being priced in equity vol = late-cycle complacency. The grind (steady up) is more dangerous than a single-day spike — the grind means the market is choosing to ignore it. Historical analogs: 2008 May-Jun (oil $120→$147 then SPY -50%); 2022 Feb (Russia/Ukraine, SPY -13% in 6 weeks after 3-week shrug). Only relevant in cycles with active supply shocks. | |
 | **High-volume down day** | Trigger | SPY drops >1.5% on 100M+ volume (vs ~83M avg) | |
 | **VIX can't reset** | Trigger | After a bounce, VIX stays elevated (doesn't return to pre-spike level) | |
 | **IWM divergence** | Confirmation | IWM peaks and declines while SPY makes new highs | |
 | **Volume returns with selling** | Confirmation | Multiple consecutive above-avg volume days with negative closes | |
 
 Count signals by category:
-- **Early warnings active:** X/4
+- **Early warnings active:** X/5
 - **Triggers fired:** X/2
 - **Confirmations:** X/2
 
@@ -131,8 +133,8 @@ Present a single clear recommendation:
 
 | Field | Value |
 |-------|-------|
-| Signal score | X/8 active |
-| Early warnings | X/4 |
+| Signal score | X/9 active |
+| Early warnings | X/5 |
 | Triggers | X/2 |
 | Confirmations | X/2 |
 | VIX term structure | Contango / Flat / Backwardation |

@@ -12,6 +12,27 @@ Call `decision_list` to check for any PENDING decisions from prior briefings or 
 
 Call `get_market_regime`. Present the 5 regime labels (volatility, trend, breadth, macro, sectors) in a single row table. Below the table, note any regime shifts that affect strategy preferences (e.g., "Elevated vol = widen CSP strikes" or "Risk-Off = hedge window").
 
+### Commodity Divergence Check
+
+Also call `get_quote USO,USL,BNO,VIX` and `get_tradier_history USO` (last 10 days). Check:
+
+1. **Equity vol divergence**: USO 5-day % change vs VIX 5-day point change
+   - If USO up >5% over 5+ sessions while VIX stays sub-20 and SPY holds within 1% of ATH → flag as **🔴 Commodity divergence firing**
+   - Inflationary supply shock not being priced in equity vol. Refer to `/hedge` for full reversal signal scoring.
+
+2. **Backwardation monitor (USO/USL ratio)**: Front-month vs 12-month strip ratio
+   - Compute `USO_price / USL_price` — this measures futures curve shape
+   - **Rising ratio** = deepening backwardation = physical supply tightness intensifying (front-month rallying faster than back-month)
+   - **Falling ratio** = curve normalizing = supply stress easing
+   - Track day-over-day: a >5% expansion in one day suggests supply math is breaking faster than political timeline
+   - Reference: ratio of ~2.80 on 2026-04-29 with USO at $150.63, USL at $53.84 (active Iran blockade backdrop)
+
+3. **Brent confirmation (BNO)**: Cross-check that this isn't WTI-only
+   - If USO rallies but BNO doesn't → US-specific (less concerning)
+   - If both rally together → global supply story (more concerning)
+
+If all three flat/easing, note "✅ no divergence, curve normalizing" and skip. If any firing, surface the table briefly. Don't expand unless active.
+
 ## Step 2: Position Alerts
 
 1. Ask the user if they have fresh Fidelity CSVs to include (exported from Fidelity Positions page to ~/Downloads/fidelity). Call `get_portfolio_summary` with `fidelity_folder` if provided, otherwise Webull-only.
