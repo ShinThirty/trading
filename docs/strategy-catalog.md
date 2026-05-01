@@ -74,6 +74,8 @@ Conservative OTM strikes (>12%) on deeply drawdown stocks defeat the entry purpo
 
 **Expiry rule:** Always sell THROUGH the nearest earnings date. Earnings IV is a feature — you either keep inflated premium or get assigned at an even better price. Never pick a pre-earnings expiry that wastes the IV.
 
+**For event-specific CSP setups** (depressed quality name into a known catalyst, harvesting IV crush as the primary alpha source rather than entry-at-discount), see [csp-earnings-playbook.md](csp-earnings-playbook.md). It covers the optimal 30-50 DTE sweet spot, the 2W tape disqualifier (Front-Run Catalyst applied to event CSPs), entry timing in the vol-expansion window, and the management rule of holding through the event rather than closing pre-event for "safety."
+
 | Earnings timing | Expiry selection |
 |----------------|-----------------|
 | Earnings within expiry window | Use it — capture the IV |
