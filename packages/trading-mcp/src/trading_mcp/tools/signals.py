@@ -5,19 +5,18 @@ from datetime import date, timedelta
 from fastmcp import Context, FastMCP
 from trading_clients import indicators as ta
 from trading_clients import options as opts
+from trading_clients.bsm import bsm_price
 from trading_clients.endpoint import CONTRACT_MULTIPLIER
-from trading_clients.endpoints import fred
 from trading_clients.endpoints import tastytrade as tt
 from trading_clients.endpoints import tradier as t
-from trading_clients.options_multi_exp import _bsm_price
 from trading_clients.table_helpers import kv_table, to_float
 
 from trading_mcp.helpers import (
     _conviction_data,
     _fetch_all_positions,
+    _fetch_risk_free_rate,
     _fetch_total_nlv,
     _format_conviction,
-    _fred,
     _tastytrade,
     _tradier,
 )
@@ -315,22 +314,6 @@ def _parse_csv_floats(value: str | None, default: list[float]) -> list[float]:
     return out or default
 
 
-async def _fetch_risk_free_rate(ctx: Context) -> float:
-    """Pull current Fed Funds rate from FRED. Returns 0.0 on any failure."""
-    try:
-        fred_client = _fred(ctx)
-        obs = await fred_client.get(
-            fred.OBSERVATIONS, fred.GetObservationsRequest("FEDFUNDS", 1)
-        )
-        if obs.observations:
-            val = obs.observations[0].get("value")
-            if val:
-                return float(val) / 100.0
-    except Exception:
-        pass
-    return 0.0
-
-
 @mcp.tool()
 async def project_option_grid(
     ctx: Context,
@@ -471,7 +454,7 @@ async def project_option_grid(
         row_label = f"${scen_spot:,.0f} ({pct:+.0f}%)"
         cells: list[str] = []
         for iv in ivs_decimal:
-            value = _bsm_price(scen_spot, strike, tte_years, iv, option_type, rate)
+            value = bsm_price(scen_spot, strike, tte_years, iv, option_type, rate)
             cell = f"${value:.2f}"
             if current_value > 0:
                 multiple = value / current_value

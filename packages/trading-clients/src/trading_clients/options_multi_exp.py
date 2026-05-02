@@ -2,51 +2,16 @@
 
 Handles calendar spreads, diagonal spreads (PMCC), double diagonals, and reverse
 calendars — strategies where legs have different expiration dates. Uses Black-Scholes
-to estimate the far-dated leg's value at the near-term expiration.
+(see trading_clients.bsm) to estimate the far-dated leg's value at the near-term
+expiration.
 
 Single-expiration strategies are handled by options.py.
 """
 
 from datetime import date
-from math import erf, log, sqrt
 
+from trading_clients.bsm import bsm_price
 from trading_clients.options import _build_result, _compute_net_premium
-
-# ---------------------------------------------------------------------------
-# Black-Scholes-Merton pricer
-# ---------------------------------------------------------------------------
-
-
-def _norm_cdf(x: float) -> float:
-    """Standard normal CDF using math.erf (exact, no scipy needed)."""
-    return 0.5 * (1.0 + erf(x / sqrt(2.0)))
-
-
-def _bsm_price(
-    stock_price: float,
-    strike: float,
-    tte: float,
-    iv: float,
-    option_type: str,
-    r: float = 0.0,
-) -> float:
-    """Black-Scholes option price. tte in years, r = annualized risk-free rate."""
-    if tte <= 0 or iv <= 0:
-        if option_type == "call":
-            return max(stock_price - strike, 0.0)
-        return max(strike - stock_price, 0.0)
-
-    from math import exp
-
-    sqrt_t = sqrt(tte)
-    d1 = (log(stock_price / strike) + (r + 0.5 * iv * iv) * tte) / (iv * sqrt_t)
-    d2 = d1 - iv * sqrt_t
-    discount = exp(-r * tte)
-
-    if option_type == "call":
-        return stock_price * _norm_cdf(d1) - strike * discount * _norm_cdf(d2)
-    return strike * discount * _norm_cdf(-d2) - stock_price * _norm_cdf(-d1)
-
 
 # ---------------------------------------------------------------------------
 # Multi-expiration strategy detection
@@ -159,7 +124,7 @@ def _evaluate_pnl_multi_exp(
             else:
                 # Far-term leg: BSM value with remaining time
                 iv = leg.get("iv") or 0.30
-                value = _bsm_price(price, strike, remaining_years, iv, otype, risk_free_rate)
+                value = bsm_price(price, strike, remaining_years, iv, otype, risk_free_rate)
 
             if leg["side"] == "sell":
                 pnl -= value * qty

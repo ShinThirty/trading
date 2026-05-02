@@ -5,11 +5,10 @@ from fastmcp import Context, FastMCP
 from trading_clients import indicators as ta
 from trading_clients import options as opts
 from trading_clients.endpoint import CONTRACT_MULTIPLIER
-from trading_clients.endpoints import fred
 from trading_clients.endpoints import tradier as t
 from trading_clients.table_helpers import fmt_number, kv_table, list_table
 
-from trading_mcp.helpers import _fred, _tradier
+from trading_mcp.helpers import _fetch_risk_free_rate, _tradier
 
 mcp = FastMCP("tradier-tools")
 
@@ -275,18 +274,7 @@ async def analyze_option_strategy(
     if is_multi_exp:
         from trading_clients.options_multi_exp import analyze_multi_exp_strategy
 
-        risk_free_rate = 0.0
-        try:
-            fred_client = _fred(ctx)
-            obs = await fred_client.get(
-                fred.OBSERVATIONS, fred.GetObservationsRequest("FEDFUNDS", 1)
-            )
-            if obs.observations:
-                val = obs.observations[0].get("value")
-                if val:
-                    risk_free_rate = float(val) / 100.0
-        except Exception:
-            pass
+        risk_free_rate = await _fetch_risk_free_rate(ctx)
         result = analyze_multi_exp_strategy(enriched_legs, stock_price, risk_free_rate)
     else:
         result = opts.strategy_analysis(enriched_legs, stock_price, equity_position)

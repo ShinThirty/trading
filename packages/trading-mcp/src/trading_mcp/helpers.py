@@ -8,6 +8,7 @@ from fastmcp import Context
 from trading_clients.alphavantage_client import AlphaVantageClient
 from trading_clients.endpoint import CONTRACT_MULTIPLIER
 from trading_clients.endpoints import finnhub as fh
+from trading_clients.endpoints import fred as fred_ep
 from trading_clients.endpoints import tradier as t
 from trading_clients.endpoints.webull import (
     ACCOUNT_LIST,
@@ -236,6 +237,29 @@ def _compute_csp_collateral(positions: list[dict]) -> float:
             continue
         total += p.get("strike", 0) * CONTRACT_MULTIPLIER * abs(qty)
     return total
+
+
+async def _fetch_risk_free_rate(ctx: Context) -> float:
+    """Pull current Fed Funds rate from FRED for use as r in BSM pricing.
+
+    Returns the rate as a decimal (e.g. 0.045 for 4.5%). Returns 0.0 on any
+    failure (FRED not configured, network error, missing observation).
+
+    Pairs conceptually with `trading_clients.bsm.bsm_price` — that function
+    takes `r` as input; this function provides the live market value.
+    """
+    try:
+        fred_client = _fred(ctx)
+        obs = await fred_client.get(
+            fred_ep.OBSERVATIONS, fred_ep.GetObservationsRequest("FEDFUNDS", 1)
+        )
+        if obs.observations:
+            val = obs.observations[0].get("value")
+            if val:
+                return float(val) / 100.0
+    except Exception:
+        pass
+    return 0.0
 
 
 async def _fetch_total_nlv(ctx: Context, fidelity_folder: str | None = None) -> float:
