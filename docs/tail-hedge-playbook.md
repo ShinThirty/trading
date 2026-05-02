@@ -143,19 +143,69 @@ These are what separate a tail program from a tactical trade. Without these, the
 | **Roll at 30 DTE remaining** | Captures most of time value before theta acceleration. Don't wait until expiry. |
 | **Don't close on rallies** | "Nothing is wrong" doesn't mean "no risk." That's the entire premise. |
 | **Don't close on losses** | Premium decay is the *normal* outcome. Losing the entire premium most of the time is how the program is supposed to work. |
-| **Only close on payoff** | If puts hit 5x+ during a crash, take 50% of contracts off, let rest ride further. |
+| **Only close on payoff** | When puts hit a payoff multiple, harvest mechanically per the tranching schedule (see Harvesting Payoffs section) and immediately redeploy into fresh deep-OTM strikes. |
 | **Resize at every roll** | Re-run `calculate_hedge` (with `fidelity_folder` + `crisis_multiplier`) before each new contract — the tool reads current NLV/beta, so you never need to track portfolio drift manually. |
 | **Don't short-circuit on signals** | The /hedge skill's reversal checklist is for opening discussions, not for closing this structural hedge. |
 
-## When to close (only payoff scenarios)
+## Harvesting payoffs (the structural rebalancing)
 
-The only valid reasons to close before the 30 DTE roll:
+"Structural" refers to **the program**, not individual contracts. When tail puts pay off in a crash, harvesting is **mandatory** — not optional, not "let it ride." Holding through a full payoff converts the position from tail insurance into a directional short-vol bet with worse risk/reward.
 
-1. **Multi-bagger payoff during a crash.** Use `get_portfolio_summary` to read current option P&L %; when the row shows ≥400% (5x), close 50% of contracts to lock in a portion. Let the rest ride; if the crash deepens, the remaining contracts compound.
-2. **Portfolio delta materially reduced.** If you sold 30%+ of the long book and no longer need 50% notional coverage, downsize at next roll (don't dump mid-cycle).
-3. **End of program.** If you're permanently exiting the strategy (going to cash, etc.), close after the next roll-equivalent date — don't accelerate the exit on a tactical signal.
+### Why holding through a payoff is wrong
 
-That's it. No "VIX dropped" close. No "regime cleared" close. No "premium decay is killing me" close.
+When SPY crashes 20%+ and VIX spikes from 17 → 50+, the contracts mutate:
+
+| Metric | At entry (deep OTM) | Post-crash (deep ITM) |
+|---|---|---|
+| Delta | -0.05 (tail) | -0.50+ (near-ATM) |
+| Vega | tiny | enormous (long massive vol) |
+| Convexity | high (asymmetric payoff was the point) | gone (linear payoff zone) |
+| Theta | small | bleeding hard |
+| Exposure type | Tail insurance | Directional short-vol bet |
+
+The contract has *completed its job*. Holding it now exposes you to vol mean-reversion — VIX 80 → 40 in days at the March 2020 nadir — which gives back gains even if SPY doesn't recover. Worse: post-crash VIX collapse and post-crash SPY rallies often happen together (March 23-26, 2020 had +9% SPY days during the crash). Unrealized gains evaporate fast.
+
+### Tranching schedule
+
+Use `get_portfolio_summary` to read live P&L %. Don't try to top-tick — execute mechanically.
+
+| P&L threshold | Action |
+|---|---|
+| **+400% (5x)** | Close 50% of contracts |
+| **+900% (10x)** | Close another 25% of original |
+| **+1900% (20x)+** | Close remaining (let small residue ride only if crash is grinding lower with fresh leg setups) |
+
+### Redeploy after each tranche
+
+Every harvest must be paired with **immediate redeployment** into fresh deep-OTM tail puts at the new lower SPY price. Two reasons:
+
+1. **The program continues.** The crash isn't over until VIX normalizes — you need tail protection on the books for the next leg down (2008 had three legs; 2020 was V-shaped but had a violent retest).
+2. **Fresh strikes are cheaper.** SPY $720 → SPY $580 means a 25% OTM put is now at $435 strike, not $540. Premium dollars buy more notional protection at the new floor.
+
+Workflow per harvest:
+1. Run `get_portfolio_summary` to confirm P&L threshold hit
+2. Sell the tranche (50% / 25% / remaining) via `place_order`
+3. Re-run `calculate_hedge` with current SPY + `fidelity_folder` + `crisis_multiplier=1.25`
+4. Open a fresh tail put at the new deep-OTM strike with the proceeds
+5. Record both legs: `decision_close` (old) + `decision_add` with action `WRITE_NEW` (new)
+
+This is how the program **makes money in a crash year** — not from one giant payoff, but from compounding harvest → redeploy cycles as the crash unfolds in waves.
+
+## Other valid closes (no payoff)
+
+The only non-payoff reasons to touch the position:
+
+| Reason | Action |
+|---|---|
+| **Portfolio delta materially reduced** (sold 30%+ of long book) | Downsize at next regular roll — don't dump mid-cycle |
+| **End of program** (going to cash permanently) | Close after the next roll-equivalent date — no tactical acceleration |
+| **Regular 30-DTE roll** | Sell expiring + buy fresh; routine |
+
+## What is NEVER a valid close
+
+- "VIX dropped" / "regime cleared" / "no signals firing" — this is the 4/30 anti-pattern
+- "Premium decay is killing me" — that's the program's cost, baked in
+- "I'm bored holding this" — gambler's fallacy in reverse
 
 ## Execution checklist
 
