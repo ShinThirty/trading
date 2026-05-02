@@ -15,6 +15,80 @@ from trading_mcp.helpers import _fetch_risk_free_rate, _tradier
 mcp = FastMCP("tradier-tools")
 
 
+# Strategy-type sets used by the analyze_option_strategy metric calculations.
+_CREDIT_SPREAD_TYPES = {
+    "Bull Put Spread",
+    "Bear Call Spread",
+    "Iron Condor",
+    "Iron Butterfly",
+}
+_EV_STRATEGY_TYPES = _CREDIT_SPREAD_TYPES | {"Cash-Secured Put"}
+
+
+def _lognormal_ev(
+    enriched_legs: list[dict],
+    strategy_type: str,
+    stock_price: float,
+    max_loss: float,
+    dte: int,
+    risk_free_rate: float,
+) -> tuple[float, float] | None:
+    """Risk-neutral expected P&L and EV / capital-at-risk for a credit strategy.
+
+    Integrates each leg's payoff over the lognormal terminal distribution using
+    its own implied vol, then nets against the upfront credit. Returns
+    (expected_pnl_dollars, ev_pct) or None if the strategy doesn't qualify or
+    inputs are missing.
+
+    Capital at risk:
+      - Cash-Secured Put: strike * 100 * qty per short put leg (collateral)
+      - Defined-risk credit spreads: abs(max_loss)
+    """
+    if strategy_type not in _EV_STRATEGY_TYPES or dte <= 0:
+        return None
+    if not all(el.get("iv") for el in enriched_legs):
+        return None
+
+    if strategy_type == "Cash-Secured Put":
+        capital_at_risk = sum(
+            el["strike"] * el["quantity"] * CONTRACT_MULTIPLIER
+            for el in enriched_legs
+            if el["side"] == "sell" and el["option_type"] == "put"
+        )
+    elif max_loss < 0:
+        capital_at_risk = abs(max_loss)
+    else:
+        return None
+
+    if not capital_at_risk or capital_at_risk <= 0:
+        return None
+
+    tte = dte / 365
+    forward_factor = exp(risk_free_rate * tte)
+    net_premium = sum(
+        (1 if el["side"] == "sell" else -1) * el["premium"] * el["quantity"] for el in enriched_legs
+    )
+    expected_pnl = net_premium * CONTRACT_MULTIPLIER
+    for el in enriched_legs:
+        # Risk-neutral expected payoff at expiration = bsm_price * exp(rT)
+        payoff = (
+            bsm_price(
+                stock_price=stock_price,
+                strike=el["strike"],
+                tte=tte,
+                iv=el["iv"],
+                option_type=el["option_type"],
+                r=risk_free_rate,
+            )
+            * forward_factor
+        )
+        side_sign = -1 if el["side"] == "sell" else 1
+        expected_pnl += side_sign * payoff * el["quantity"] * CONTRACT_MULTIPLIER
+
+    ev_pct = expected_pnl / capital_at_risk * 100
+    return expected_pnl, ev_pct
+
+
 @mcp.tool()
 async def get_option_expirations(ctx: Context, symbol: str) -> str:
     """Get all available option expiration dates for an underlying symbol.
@@ -351,12 +425,6 @@ async def analyze_option_strategy(
     data["Max Profit"] = f"${fmt_number(result['max_profit'])}"
     data["Max Loss"] = f"${fmt_number(result['max_loss'])}"
 
-    _CREDIT_SPREAD_TYPES = {
-        "Bull Put Spread",
-        "Bear Call Spread",
-        "Iron Condor",
-        "Iron Butterfly",
-    }
     strategy_type = result.get("strategy_type", "")
     if strategy_type in _CREDIT_SPREAD_TYPES and net > 0:
         strikes = sorted({el["strike"] for el in enriched_legs})
@@ -393,46 +461,19 @@ async def analyze_option_strategy(
     if result["probability_of_profit"] is not None:
         data["P(Profit)"] = f"{result['probability_of_profit'] * 100:.0f}%"
 
-    _EV_STRATEGY_TYPES = _CREDIT_SPREAD_TYPES | {"Cash-Secured Put"}
-    if (
-        not is_multi_exp
-        and strategy_type in _EV_STRATEGY_TYPES
-        and net > 0
-        and dte is not None
-        and dte > 0
-        and all(el.get("iv") for el in enriched_legs)
-    ):
-        capital_at_risk: float | None = None
-        if strategy_type == "Cash-Secured Put":
-            capital_at_risk = sum(
-                el["strike"] * el["quantity"] * CONTRACT_MULTIPLIER
-                for el in enriched_legs
-                if el["side"] == "sell" and el["option_type"] == "put"
-            )
-        elif strategy_type in _CREDIT_SPREAD_TYPES and result["max_loss"] < 0:
-            capital_at_risk = abs(result["max_loss"])
-        if capital_at_risk and capital_at_risk > 0:
-            risk_free_rate = await _fetch_risk_free_rate(ctx)
-            tte = dte / 365
-            forward_factor = exp(risk_free_rate * tte)
-            expected_pnl = net * CONTRACT_MULTIPLIER
-            for el in enriched_legs:
-                # Risk-neutral expected payoff at expiration = bsm_price * exp(rT)
-                payoff = (
-                    bsm_price(
-                        stock_price=stock_price,
-                        strike=el["strike"],
-                        tte=tte,
-                        iv=el["iv"],
-                        option_type=el["option_type"],
-                        r=risk_free_rate,
-                    )
-                    * forward_factor
-                )
-                side_sign = -1 if el["side"] == "sell" else 1
-                expected_pnl += side_sign * payoff * el["quantity"] * CONTRACT_MULTIPLIER
+    if not is_multi_exp and strategy_type in _EV_STRATEGY_TYPES and dte is not None and dte > 0:
+        rfr = await _fetch_risk_free_rate(ctx)
+        ev_result = _lognormal_ev(
+            enriched_legs=enriched_legs,
+            strategy_type=strategy_type,
+            stock_price=stock_price,
+            max_loss=result["max_loss"],
+            dte=dte,
+            risk_free_rate=rfr,
+        )
+        if ev_result is not None:
+            expected_pnl, ev_pct = ev_result
             data["Expected Value"] = f"${fmt_number(expected_pnl)}"
-            ev_pct = expected_pnl / capital_at_risk * 100
             data["EV / $"] = f"{ev_pct:+.2f}%"
 
     if result.get("if_called_return") is not None:
