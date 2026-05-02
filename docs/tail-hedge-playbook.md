@@ -143,31 +143,51 @@ These are what separate a tail program from a tactical trade. Without these, the
 | **Roll at 30 DTE remaining** | Captures most of time value before theta acceleration. Don't wait until expiry. |
 | **Don't close on rallies** | "Nothing is wrong" doesn't mean "no risk." That's the entire premise. |
 | **Don't close on losses** | Premium decay is the *normal* outcome. Losing the entire premium most of the time is how the program is supposed to work. |
-| **Only close on payoff** | When puts hit a payoff multiple, harvest mechanically per the tranching schedule (see Harvesting Payoffs section) and immediately redeploy into fresh deep-OTM strikes. |
+| **Only close on a rebalancing trigger** | Three valid triggers: maintenance roll (delta drift to -0.20 to -0.40), major harvest (5x+ via tranches), or routine 30-DTE roll. All three are close-and-immediate-redeploy. See Rebalancing the Program. |
 | **Resize at every roll** | Re-run `calculate_hedge` (with `fidelity_folder` + `crisis_multiplier`) before each new contract — the tool reads current NLV/beta, so you never need to track portfolio drift manually. |
 | **Don't short-circuit on signals** | The /hedge skill's reversal checklist is for opening discussions, not for closing this structural hedge. |
 
-## Harvesting payoffs (the structural rebalancing)
+## Rebalancing the program
 
-"Structural" refers to **the program**, not individual contracts. When tail puts pay off in a crash, harvesting is **mandatory** — not optional, not "let it ride." Holding through a full payoff converts the position from tail insurance into a directional short-vol bet with worse risk/reward.
+"Structural" refers to **the program**, not individual contracts. Contracts cycle out — via the routine 30-DTE roll, a maintenance roll when convexity has degraded, or a major-payoff harvest during a real crash. The continuity is: there is **always** a deep-OTM tail put on the books somewhere.
 
-### Why holding through a payoff is wrong
+### Why holding a degraded contract is wrong
 
-When SPY crashes 20%+ and VIX spikes from 17 → 50+, the contracts mutate:
+When SPY drops, the original deep-OTM put mutates:
 
-| Metric | At entry (deep OTM) | Post-crash (deep ITM) |
-|---|---|---|
-| Delta | -0.05 (tail) | -0.50+ (near-ATM) |
-| Vega | tiny | enormous (long massive vol) |
-| Convexity | high (asymmetric payoff was the point) | gone (linear payoff zone) |
-| Theta | small | bleeding hard |
-| Exposure type | Tail insurance | Directional short-vol bet |
+| Metric | At entry (25% OTM) | After SPY -10% (now ~17% OTM) | After SPY -25% (now ATM) |
+|---|---|---|---|
+| Delta | -0.05 (tail) | -0.20 (moderate) | -0.50 (near-ATM) |
+| Vega | tiny | medium | enormous (long massive vol) |
+| Convexity | high (asymmetric payoff was the point) | half-degraded | gone (linear payoff zone) |
+| Exposure type | Tail insurance | Correction insurance (mission drift) | Directional short-vol bet |
 
-The contract has *completed its job*. Holding it now exposes you to vol mean-reversion — VIX 80 → 40 in days at the March 2020 nadir — which gives back gains even if SPY doesn't recover. Worse: post-crash VIX collapse and post-crash SPY rallies often happen together (March 23-26, 2020 had +9% SPY days during the crash). Unrealized gains evaporate fast.
+In the 25% → 17% range, the contract is no longer doing the job it was bought for — it's now correction insurance, which the playbook explicitly avoids. In the deep-ITM range, holding exposes you to vol mean-reversion (VIX 80 → 40 in days at the March 2020 nadir, with +9% SPY days during the crash). Either way, the answer is **roll, don't hold and don't exit**.
 
-### Tranching schedule
+### Three rebalancing triggers (all data-driven, never gut feel)
 
-Use `get_portfolio_summary` to read live P&L %. Don't try to top-tick — execute mechanically.
+#### Trigger 1: Maintenance roll (default for non-crash drift)
+
+When SPY has dropped enough that your put is no longer in the tail zone but is far from a major payoff. Restore the 25% OTM profile by rolling to a fresh deeper strike at the new SPY.
+
+**Check via tools:**
+1. `get_quote` your put contract with `greeks=True` → read current delta
+2. `get_quote VIX` and `get_tradier_history VIX` → current vs spike high
+3. `get_portfolio_summary` → current put P&L %
+
+**Trigger fires when:**
+- Put delta is in **-0.20 to -0.40** range (was -0.05 at entry, indicates ~10-15% SPY drop), AND
+- One of: VIX retraced ≥50% from spike high, OR known catalyst resolved, OR put P&L is in 100-300% range and stalling
+
+**Do NOT roll if:**
+- Put delta still tighter than -0.15 (move hasn't materialized — give it room)
+- VIX still climbing or holding above 30 (move not done)
+- SPY making new lows daily (use Trigger 3 instead — bigger payoff coming)
+- Put P&L only 50-100% (premature — let convexity work)
+
+#### Trigger 2: Major payoff harvest (5x+ in tranches during a real crash)
+
+When the move is large and fast — VIX above 50, SPY down 20%+, puts deep ITM. Use `get_portfolio_summary` to read live P&L %. Don't try to top-tick — execute mechanically.
 
 | P&L threshold | Action |
 |---|---|
@@ -175,31 +195,42 @@ Use `get_portfolio_summary` to read live P&L %. Don't try to top-tick — execut
 | **+900% (10x)** | Close another 25% of original |
 | **+1900% (20x)+** | Close remaining (let small residue ride only if crash is grinding lower with fresh leg setups) |
 
-### Redeploy after each tranche
+#### Trigger 3: Routine 30-DTE roll (calendar-driven)
 
-Every harvest must be paired with **immediate redeployment** into fresh deep-OTM tail puts at the new lower SPY price. Two reasons:
+Sell expiring + buy fresh at the new 25% OTM strike. Re-run `calculate_hedge` for current sizing. No special conditions.
 
-1. **The program continues.** The crash isn't over until VIX normalizes — you need tail protection on the books for the next leg down (2008 had three legs; 2020 was V-shaped but had a violent retest).
-2. **Fresh strikes are cheaper.** SPY $720 → SPY $580 means a 25% OTM put is now at $435 strike, not $540. Premium dollars buy more notional protection at the new floor.
+### Universal workflow (any trigger)
 
-Workflow per harvest:
-1. Run `get_portfolio_summary` to confirm P&L threshold hit
-2. Sell the tranche (50% / 25% / remaining) via `place_order`
-3. Re-run `calculate_hedge` with current SPY + `fidelity_folder` + `crisis_multiplier=1.25`
-4. Open a fresh tail put at the new deep-OTM strike with the proceeds
-5. Record both legs: `decision_close` (old) + `decision_add` with action `WRITE_NEW` (new)
+The mechanic is the same — **close + immediate redeploy in the same session**. Never close and wait.
 
-This is how the program **makes money in a crash year** — not from one giant payoff, but from compounding harvest → redeploy cycles as the crash unfolds in waves.
+1. Confirm trigger via the tool checks above
+2. Sell the tranche via `place_order` (full position for Trigger 1/3, partial for Trigger 2)
+3. Re-run `calculate_hedge` with current SPY + `fidelity_folder` + `crisis_multiplier=1.25` to size the new contract
+4. Pick the new strike at 25% OTM from the *current* SPY price (not the original entry price)
+5. Place buy order for the new contracts
+6. Record both legs: `decision_close` (old) + `decision_add` with action `WRITE_NEW` (new)
 
-## Other valid closes (no payoff)
+The proceeds from the close typically buy **more contracts** at the new deeper strike than you started with — the new strike's premium is lower, and SPY-has-dropped means the same dollar notional covers a deeper hedge. You end up with fresher DTE + restored convexity + larger notional coverage at no net new capital outlay.
 
-The only non-payoff reasons to touch the position:
+This is how the program **makes money** in a crash year and **survives** in a slow-grind year — compounding rebalance cycles as conditions change.
+
+### The honest test
+
+Before any non-routine roll, ask: **would I make the same decision if I couldn't see the unrealized P&L?**
+
+- ✅ Yes → it's a principled rebalancing (delta drifted, IV crushed, catalyst resolved)
+- ❌ No → you're managing regret; hold strict to the next legitimate trigger
+
+Real Path 2 decisions are based on what the puts ARE (delta, IV state, distance from strike), not what they're worth.
+
+## Other valid closes (no rebalancing)
+
+The only reasons to touch the position outside the three rebalancing triggers:
 
 | Reason | Action |
 |---|---|
-| **Portfolio delta materially reduced** (sold 30%+ of long book) | Downsize at next regular roll — don't dump mid-cycle |
+| **Portfolio delta materially reduced** (sold 30%+ of long book) | Downsize at next maintenance roll — don't dump mid-cycle |
 | **End of program** (going to cash permanently) | Close after the next roll-equivalent date — no tactical acceleration |
-| **Regular 30-DTE roll** | Sell expiring + buy fresh; routine |
 
 ## What is NEVER a valid close
 
