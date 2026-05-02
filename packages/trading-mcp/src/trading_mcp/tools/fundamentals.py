@@ -1,3 +1,7 @@
+"""Company fundamentals: financials, profile, key metrics, EPS estimates,
+analyst targets, peers, ownership, insider activity, informed-flow scanner.
+"""
+
 import asyncio
 from datetime import date, timedelta
 
@@ -6,11 +10,12 @@ from trading_clients.endpoints import finnhub as fh
 from trading_clients.endpoints import fmp
 from trading_clients.endpoints import tastytrade as tt
 from trading_clients.endpoints import tradier as t
-from trading_clients.table_helpers import fmt_large, fmt_number, list_table, to_float
+from trading_clients.table_helpers import fmt_large, fmt_number, kv_table, list_table, to_float
 
 from trading_mcp.helpers import _finnhub, _fmp
+from trading_mcp.yfinance_helper import _yfc
 
-mcp = FastMCP("fmp-tools")
+mcp = FastMCP("fundamentals-tools")
 
 
 @mcp.tool()
@@ -37,8 +42,6 @@ async def get_income_statement(
     Requires [finnhub] section in ~/.tradingrc. Falls back to Yahoo Finance
     if Finnhub has no data for the symbol.
     """
-    from trading_mcp.tools.yahoo import _yfc
-
     freq = "quarterly" if period in ("quarter", "quarterly") else "annual"
     result = await _finnhub(ctx).get(
         fh.FINANCIALS_REPORTED, fh.FinancialsReportedRequest(symbol, freq)
@@ -124,55 +127,135 @@ async def get_key_metrics(ctx: Context, symbol: str, period: str = "annual", lim
 
 
 @mcp.tool()
-async def get_dividend_history(ctx: Context, symbol: str) -> str:
-    """Get dividend payment history: ex-date, pay date, record date, amount.
+async def get_basic_financials(ctx: Context, symbol: str) -> str:
+    """Get key financial metrics: P/E, P/B, EPS, dividend yield, 52-week high/low,
+    market cap, beta, ROE, debt/equity.
 
     symbol: ticker symbol (e.g. 'AAPL').
-    Requires [fmp] or [tastytrade] section in ~/.tradingrc.
+
+    Requires [finnhub] section in ~/.tradingrc.
     """
-    fmp_client = ctx.lifespan_context.get("fmp")
-    if fmp_client:
-        try:
-            resp = await fmp_client.get(fmp.DIVIDEND_HISTORY, fmp.SymbolRequest(symbol))
-            return resp.to_output()
-        except ValueError:
-            pass
-    tt_client = ctx.lifespan_context.get("tastytrade")
-    if tt_client:
-        resp = await tt_client.get(tt.DIVIDEND_HISTORY, tt.DividendHistoryRequest(symbol))
-        return resp.to_output()
-    raise RuntimeError(
-        "No dividend data source available. Add [fmp] or [tastytrade] to ~/.tradingrc"
+    resp = await _finnhub(ctx).get(fh.BASIC_FINANCIALS, fh.BasicFinancialsRequest(symbol))
+    return resp.to_output()
+
+
+@mcp.tool()
+async def get_eps_estimates(ctx: Context, symbol: str) -> str:
+    """Get analyst EPS estimates for upcoming quarters and years: average, high, low,
+    number of analysts, year-ago EPS, and growth rate.
+
+    Periods: current quarter (0q), next quarter (+1q), current year (0y), next year (+1y).
+
+    symbol: ticker symbol (e.g. 'AAPL').
+
+    Uses Yahoo Finance via yfinance (no API key required).
+    """
+    data = await _yfc().earnings_estimate(symbol)
+    if not data:
+        return f"(no EPS estimates for {symbol})"
+    rows = [
+        {
+            "Period": d["period"],
+            "# Analysts": str(int(d.get("numberOfAnalysts", 0))),
+            "Avg": fmt_number(d.get("avg")),
+            "Low": fmt_number(d.get("low")),
+            "High": fmt_number(d.get("high")),
+            "Year Ago": fmt_number(d.get("yearAgoEps")),
+            "Growth": fmt_number(d.get("growth")),
+        }
+        for d in data
+    ]
+    return list_table(rows)
+
+
+@mcp.tool()
+async def get_recommendation_trends(ctx: Context, symbol: str) -> str:
+    """Get analyst recommendation trends: counts of strong buy, buy, hold, sell, and
+    strong sell ratings by month.
+
+    symbol: ticker symbol (e.g. 'AAPL').
+
+    Requires [finnhub] section in ~/.tradingrc.
+    """
+    return (await _finnhub(ctx).get(fh.RECOMMENDATIONS, fh.SymbolRequest(symbol))).to_output()
+
+
+@mcp.tool()
+async def get_price_target(ctx: Context, symbol: str) -> str:
+    """Get analyst consensus price target: current price, high, low, mean, and median
+    target prices.
+
+    symbol: ticker symbol (e.g. 'AAPL').
+
+    Uses Yahoo Finance via yfinance (no API key required).
+    """
+    data = await _yfc().analyst_price_targets(symbol)
+    if not data:
+        return f"(no price targets for {symbol})"
+    return kv_table(
+        {
+            "Current": fmt_number(data.get("current")),
+            "Target Low": fmt_number(data.get("low")),
+            "Target Mean": fmt_number(data.get("mean")),
+            "Target Median": fmt_number(data.get("median")),
+            "Target High": fmt_number(data.get("high")),
+        }
     )
 
 
 @mcp.tool()
-async def get_fmp_earnings_calendar(ctx: Context, symbol: str, limit: int = 5) -> str:
-    """Get earnings history: date, EPS estimate/actual, revenue estimate/actual.
+async def get_company_peers(ctx: Context, symbol: str) -> str:
+    """Get a list of peer/competitor symbols for a company.
 
     symbol: ticker symbol (e.g. 'AAPL').
-    limit: number of recent earnings to return (default 5).
-    Requires [fmp] section in ~/.tradingrc.
+
+    Requires [finnhub] section in ~/.tradingrc.
     """
-    return (await _fmp(ctx).get(fmp.EARNINGS, fmp.EarningsRequest(symbol, limit))).to_output()
+    return (await _finnhub(ctx).get(fh.PEERS, fh.SymbolRequest(symbol))).to_output()
 
 
 @mcp.tool()
-async def get_sector_performance(ctx: Context, date: str, exchange: str = "NYSE") -> str:
-    """Get sector performance for a specific date: average percentage change for each
-    of 11 sectors (Technology, Healthcare, Financial Services, etc.), sorted best to worst.
+async def get_insider_transactions(ctx: Context, symbol: str, limit: int = 20) -> str:
+    """Get recent insider transactions: buys, sells, and grants by company officers
+    and directors.
 
-    Useful for understanding sector rotation and whether a stock's movement is
-    stock-specific or sector-wide.
+    symbol: ticker symbol (e.g. 'AAPL').
+    limit: max number of transactions to return (default 20).
 
-    date: trading date (YYYY-MM-DD). Use a recent trading day (not weekend/holiday).
-    exchange: 'NYSE' (default) or 'NASDAQ'.
-
-    Requires [fmp] section in ~/.tradingrc.
+    Requires [finnhub] section in ~/.tradingrc.
     """
-    return (
-        await _fmp(ctx).get(fmp.SECTOR_PERFORMANCE, fmp.SectorPerformanceRequest(date, exchange))
-    ).to_output()
+    resp = await _finnhub(ctx).get(fh.INSIDER_TRANSACTIONS, fh.SymbolRequest(symbol))
+    resp.transactions = resp.transactions[:limit]
+    return resp.to_output()
+
+
+@mcp.tool()
+async def get_institutional_ownership(ctx: Context, symbol: str) -> str:
+    """Get top institutional holders of a stock: holder name, shares held, percentage
+    held, position value, and recent change.
+
+    Shows who the biggest institutional investors are (Vanguard, BlackRock, etc.)
+    and whether they're accumulating or reducing positions.
+
+    symbol: ticker symbol (e.g. 'AAPL').
+
+    Uses Yahoo Finance via yfinance (no API key required).
+    """
+    holders = await _yfc.institutional_holders(symbol)
+    if not holders:
+        return f"(no institutional ownership data for {symbol})"
+    rows = [
+        {
+            "Holder": h.get("Holder", ""),
+            "Shares": fmt_large(h.get("Shares")),
+            "% Held": fmt_number(h.get("pctHeld", 0) * 100),
+            "Value": fmt_large(h.get("Value")),
+            "Change": fmt_number(h.get("pctChange", 0) * 100),
+            "Date": str(h.get("Date Reported", ""))[:10],
+        }
+        for h in holders
+    ]
+    return list_table(rows)
 
 
 @mcp.tool()
@@ -203,8 +286,6 @@ async def scan_informed_activity(
     Requires [finnhub] section in ~/.tradingrc.
     TastyTrade and Tradier are optional (used for IV and quote enrichment).
     """
-    from trading_mcp.tools.yahoo import _yfc
-
     finnhub_client = _finnhub(ctx)
 
     result = await _yfc.custom_screen(

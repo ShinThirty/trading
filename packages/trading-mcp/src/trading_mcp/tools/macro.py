@@ -1,19 +1,80 @@
+"""Macro and market-wide context: economic series, sector performance, market regime."""
+
 import asyncio
 from datetime import date
 
 from fastmcp import Context, FastMCP
 from trading_clients import indicators as ta
 from trading_clients import regime
-from trading_clients.endpoints import fred
+from trading_clients.endpoints import fmp, fred
 from trading_clients.endpoints import tastytrade as tt
 from trading_clients.endpoints import tradier as t
 from trading_clients.table_helpers import kv_table
 
-from trading_mcp.helpers import _fred, _tradier, _year_ago
+from trading_mcp.helpers import _fmp, _fred, _tradier, _year_ago
 
-mcp = FastMCP("market-regime-tools")
+mcp = FastMCP("macro-tools")
 
 HISTORY_SYMBOLS = ["SPY", "SMH", "IWM", *regime.SECTOR_ETFS]
+
+
+@mcp.tool()
+async def get_economic_data(
+    ctx: Context, series_id: str, limit: int = 12, sort_order: str = "desc"
+) -> str:
+    """Get historical values for a FRED economic data series.
+
+    series_id: FRED series ID. Common: 'CPIAUCSL' (CPI), 'GDP', 'UNRATE',
+      'FEDFUNDS', 'T10Y2Y' (yield curve), 'VIXCLS' (VIX), 'PAYEMS' (payrolls),
+      'UMCSENT' (sentiment), 'DGS10' (10Y yield).
+    limit: number of most recent observations (default 12).
+    sort_order: 'desc' (newest first) or 'asc'.
+
+    Requires [fred] section in ~/.tradingrc.
+    """
+    req = fred.GetObservationsRequest(series_id, limit, sort_order)
+    return (await _fred(ctx).get(fred.OBSERVATIONS, req)).to_output()
+
+
+@mcp.tool()
+async def get_fred_series_info(ctx: Context, series_id: str) -> str:
+    """Get metadata for a FRED series: title, frequency, units, seasonal adjustment.
+
+    series_id: FRED series ID (e.g. 'CPIAUCSL', 'GDP', 'VIXCLS').
+    Requires [fred] section in ~/.tradingrc.
+    """
+    return (await _fred(ctx).get(fred.SERIES_INFO, fred.SeriesIdRequest(series_id))).to_output()
+
+
+@mcp.tool()
+async def search_fred_series(ctx: Context, query: str, limit: int = 10) -> str:
+    """Search for FRED economic data series by keyword.
+
+    query: search terms (e.g. 'inflation', 'housing starts', 'consumer credit').
+    limit: max results to return (default 10).
+
+    Use the returned series_id with get_economic_data to fetch actual values.
+    Requires [fred] section in ~/.tradingrc.
+    """
+    return (await _fred(ctx).get(fred.SEARCH, fred.SearchRequest(query, limit))).to_output()
+
+
+@mcp.tool()
+async def get_sector_performance(ctx: Context, date: str, exchange: str = "NYSE") -> str:
+    """Get sector performance for a specific date: average percentage change for each
+    of 11 sectors (Technology, Healthcare, Financial Services, etc.), sorted best to worst.
+
+    Useful for understanding sector rotation and whether a stock's movement is
+    stock-specific or sector-wide.
+
+    date: trading date (YYYY-MM-DD). Use a recent trading day (not weekend/holiday).
+    exchange: 'NYSE' (default) or 'NASDAQ'.
+
+    Requires [fmp] section in ~/.tradingrc.
+    """
+    return (
+        await _fmp(ctx).get(fmp.SECTOR_PERFORMANCE, fmp.SectorPerformanceRequest(date, exchange))
+    ).to_output()
 
 
 @mcp.tool()

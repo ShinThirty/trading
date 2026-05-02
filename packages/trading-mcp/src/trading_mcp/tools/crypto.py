@@ -1,3 +1,5 @@
+"""Crypto quotes/history and the BTC entry-signal aggregator."""
+
 import asyncio
 from datetime import date
 from typing import Any
@@ -19,7 +21,7 @@ from trading_clients.table_helpers import kv_table, to_float
 
 from trading_mcp.helpers import _fred, _tradier, _webull, _year_ago
 
-mcp = FastMCP("btc-tools")
+mcp = FastMCP("crypto-tools")
 
 _FNG_URL = "https://api.alternative.me/fng/"
 

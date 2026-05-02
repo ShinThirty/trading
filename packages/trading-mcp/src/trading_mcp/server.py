@@ -17,28 +17,23 @@ from trading_mcp.db import open_db
 from trading_mcp.db.decisions import init_schema as init_decision_schema
 from trading_mcp.db.pipeline import init_schema as init_pipeline_schema
 from trading_mcp.db.rolls import init_schema as init_roll_schema
-from trading_mcp.tools.akshare import mcp as akshare_mcp
-from trading_mcp.tools.alphavantage import mcp as alphavantage_mcp
-from trading_mcp.tools.btc import mcp as btc_mcp
-from trading_mcp.tools.comparison import mcp as comparison_mcp
+from trading_mcp.tools.account import mcp as account_mcp
+from trading_mcp.tools.backtest import mcp as backtest_mcp
+from trading_mcp.tools.calendar import mcp as calendar_mcp
+from trading_mcp.tools.cn_market import mcp as cn_market_mcp
+from trading_mcp.tools.crypto import mcp as crypto_mcp
 from trading_mcp.tools.decisions import mcp as decisions_mcp
-from trading_mcp.tools.finnhub import mcp as finnhub_mcp
-from trading_mcp.tools.finra import mcp as finra_mcp
-from trading_mcp.tools.fmp import mcp as fmp_mcp
-from trading_mcp.tools.fred import mcp as fred_mcp
-from trading_mcp.tools.market_regime import mcp as regime_mcp
+from trading_mcp.tools.fundamentals import mcp as fundamentals_mcp
+from trading_mcp.tools.macro import mcp as macro_mcp
+from trading_mcp.tools.news import mcp as news_mcp
+from trading_mcp.tools.options import mcp as options_mcp
+from trading_mcp.tools.orders import mcp as orders_mcp
 from trading_mcp.tools.pipeline import mcp as pipeline_mcp
 from trading_mcp.tools.pipeline_catalysts import mcp as pipeline_catalysts_mcp
-from trading_mcp.tools.reddit import mcp as reddit_mcp
+from trading_mcp.tools.quotes import mcp as quotes_mcp
 from trading_mcp.tools.rolls import mcp as rolls_mcp
+from trading_mcp.tools.screens import mcp as screens_mcp
 from trading_mcp.tools.signals import mcp as signals_mcp
-from trading_mcp.tools.tastytrade import mcp as tastytrade_mcp
-from trading_mcp.tools.tradier_market import mcp as tradier_market_mcp
-from trading_mcp.tools.tradier_options import mcp as tradier_options_mcp
-from trading_mcp.tools.webull_orders import mcp as webull_orders_mcp
-from trading_mcp.tools.webull_portfolio import mcp as webull_portfolio_mcp
-from trading_mcp.tools.yahoo import mcp as yahoo_mcp
-from trading_mcp.tools.youtube import mcp as youtube_mcp
 
 
 @asynccontextmanager
@@ -74,28 +69,23 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
 
 mcp = FastMCP("trading-mcp", lifespan=lifespan)
 
-mcp.mount(webull_orders_mcp)
-mcp.mount(webull_portfolio_mcp)
-mcp.mount(tradier_options_mcp)
-mcp.mount(tradier_market_mcp)
-mcp.mount(finnhub_mcp)
-mcp.mount(finra_mcp)
-mcp.mount(fmp_mcp)
-mcp.mount(fred_mcp)
-mcp.mount(regime_mcp)
-mcp.mount(btc_mcp)
+mcp.mount(account_mcp)
+mcp.mount(orders_mcp)
+mcp.mount(quotes_mcp)
+mcp.mount(options_mcp)
+mcp.mount(fundamentals_mcp)
+mcp.mount(calendar_mcp)
+mcp.mount(macro_mcp)
+mcp.mount(news_mcp)
+mcp.mount(screens_mcp)
+mcp.mount(crypto_mcp)
+mcp.mount(cn_market_mcp)
+mcp.mount(backtest_mcp)
 mcp.mount(signals_mcp)
-mcp.mount(comparison_mcp)
 mcp.mount(pipeline_mcp)
 mcp.mount(pipeline_catalysts_mcp)
 mcp.mount(rolls_mcp)
 mcp.mount(decisions_mcp)
-mcp.mount(akshare_mcp)
-mcp.mount(alphavantage_mcp)
-mcp.mount(tastytrade_mcp)
-mcp.mount(yahoo_mcp)
-mcp.mount(youtube_mcp)
-mcp.mount(reddit_mcp)
 
 
 def main():

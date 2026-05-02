@@ -1,17 +1,34 @@
+"""Option analytics: chains, expected move, strategy/roll analysis, comparators,
+IV metrics, projection grid, and covered-call overlay tools.
+"""
+
 import asyncio
-from datetime import date
+from dataclasses import dataclass
+from datetime import date, timedelta
 from math import gcd
 
 from fastmcp import Context, FastMCP
 from trading_clients import options as opts
+from trading_clients.bsm import bsm_price
 from trading_clients.endpoint import CONTRACT_MULTIPLIER
+from trading_clients.endpoints import tastytrade as tt
 from trading_clients.endpoints import tradier as t
-from trading_clients.table_helpers import fmt_number, kv_table, list_table
+from trading_clients.endpoints.webull import (
+    ORDER_HISTORY,
+    POSITIONS,
+    AccountRequest,
+    GetOrderHistoryRequest,
+)
+from trading_clients.table_helpers import fmt_number, kv_table, list_table, to_float, to_float_zero
+from trading_clients.tradier_client import TradierClient
 
-from trading_mcp.helpers import _tradier
+from trading_mcp.helpers import _retry, _tastytrade, _tradier, _webull
 from trading_mcp.portfolio_fetching import _fetch_risk_free_rate
 
-mcp = FastMCP("tradier-options-tools")
+mcp = FastMCP("options-tools")
+
+
+# ── Chain discovery ─────────────────────────────────────────
 
 
 @mcp.tool()
@@ -97,6 +114,29 @@ async def get_option_lookup(ctx: Context, underlying: str) -> str:
     return (await _tradier(ctx).get(t.OPTION_LOOKUP, t.GetLookupRequest(underlying))).to_output()
 
 
+# ── IV metrics ──────────────────────────────────────────────
+
+
+@mcp.tool()
+async def get_iv_metrics(ctx: Context, symbols: str) -> str:
+    """Get implied volatility metrics: IV rank, IV percentile, IV index, 5-day IV change,
+    30-day IV/HV, 60-day HV, 90-day HV, next earnings date, and liquidity rating.
+
+    IV Rank shows where current IV sits relative to its 52-week high/low (0-100).
+    IV Percentile shows what % of days in the past year had lower IV (0-100%).
+    IV 5d Chg shows how IV index moved over the last 5 days (expanding/contracting).
+    HV 60d/90d provide longer historical vol windows to compare against IV.
+    Liquidity rating is 1-4 stars: 3-4 = tight spreads (most liquid), 1-2 = wider spreads.
+    Use these to time premium-selling strategies: high IV Rank = rich premiums.
+
+    symbols: comma-separated ticker symbols (e.g. 'AAPL,QCOM,ADBE').
+
+    Requires [tastytrade] section in ~/.tradingrc.
+    """
+    resp = await _tastytrade(ctx).get(tt.MARKET_METRICS, tt.MarketMetricsRequest(symbols))
+    return resp.to_output()
+
+
 @mcp.tool()
 async def get_expected_move(ctx: Context, symbol: str, expiration: str) -> str:
     """Compute the expected move for a stock at a given option expiration.
@@ -157,6 +197,9 @@ async def get_expected_move(ctx: Context, symbol: str, expiration: str) -> str:
         data["IV/HV Ratio"] = f"{ratio:.2f} ({label})"
 
     return f"## {symbol} Expected Move ({expiration})\n\n{kv_table(data)}"
+
+
+# ── Strategy + roll analysis ────────────────────────────────
 
 
 @mcp.tool()
@@ -383,11 +426,6 @@ async def analyze_option_strategy(
     if result["risk_reward_ratio"] is not None:
         data["Risk/Reward"] = f"{result['risk_reward_ratio']:.2f}"
 
-    # Lognormal PoP and EV are computed together to share the risk-free rate
-    # fetch. PoP is upgraded from delta-based to lognormal-derived where
-    # applicable; EV is only meaningful for the credit/debit strategies in
-    # opts.EV_STRATEGIES. Falls back to the delta-based PoP from
-    # strategy_analysis when lognormal can't be computed.
     lognormal_pop_value: float | None = None
     ev_result: tuple[float, float] | None = None
     if not is_multi_exp and dte is not None and dte > 0:
@@ -677,5 +715,673 @@ async def analyze_roll(
         sections.append("")
         sections.append("### Debit Roll Analysis")
         sections.append(kv_table(budget_data))
+
+    return "\n".join(sections)
+
+
+# ── Cross-stock comparators ─────────────────────────────────
+
+
+@dataclass
+class _OptionMatch:
+    symbol: str
+    stock_price: float
+    strike: float
+    exp: str
+    dte: int
+    delta: float
+    bid: float
+    ask: float
+    mid: float
+
+
+async def _gather_option_matches(
+    tradier: TradierClient,
+    tickers: list[str],
+    opt_type: str,
+    target_delta: float,
+    min_dte: int,
+    max_dte: int,
+) -> tuple[list[_OptionMatch], list[str]]:
+    today = date.today()
+    mid_dte = (min_dte + max_dte) / 2
+
+    results = await asyncio.gather(
+        tradier.get(t.QUOTES, t.GetQuotesRequest(",".join(tickers), greeks=False)),
+        *[tradier.get(t.EXPIRATIONS, t.GetExpirationsRequest(sym)) for sym in tickers],
+        return_exceptions=True,
+    )
+
+    quote_resp = results[0]
+    if isinstance(quote_resp, BaseException):
+        return [], tickers
+
+    prices: dict[str, float] = {}
+    for q in quote_resp.quotes:
+        sym = q.get("symbol", "")
+        last = to_float(q.get("last"))
+        if sym and last:
+            prices[sym] = last
+
+    selected: dict[str, tuple[str, int]] = {}
+    for i, sym in enumerate(tickers):
+        exp_resp = results[i + 1]
+        if isinstance(exp_resp, BaseException) or not exp_resp.dates:
+            continue
+        best_exp = None
+        best_score = float("inf")
+        for d_str in exp_resp.dates:
+            dte = (date.fromisoformat(d_str) - today).days
+            if dte < 1:
+                continue
+            in_window = min_dte <= dte <= max_dte
+            score = abs(dte - mid_dte) if in_window else 1000 + abs(dte - mid_dte)
+            if score < best_score:
+                best_score = score
+                best_exp = d_str
+        if best_exp:
+            selected[sym] = (best_exp, (date.fromisoformat(best_exp) - today).days)
+
+    chain_syms = [sym for sym in tickers if sym in selected and sym in prices]
+    if not chain_syms:
+        return [], tickers
+
+    chain_results = await asyncio.gather(
+        *[
+            tradier.get(t.CHAIN, t.GetChainRequest(sym, selected[sym][0], greeks=True))
+            for sym in chain_syms
+        ],
+        return_exceptions=True,
+    )
+
+    matches: list[_OptionMatch] = []
+    skipped: list[str] = []
+    for sym, chain_resp in zip(chain_syms, chain_results):
+        if isinstance(chain_resp, BaseException) or not chain_resp.options:
+            skipped.append(sym)
+            continue
+
+        options = [
+            o
+            for o in chain_resp.options
+            if o.get("option_type") == opt_type and (to_float(o.get("bid")) or 0) > 0
+        ]
+        if not options:
+            skipped.append(sym)
+            continue
+
+        best_opt = None
+        best_dist = float("inf")
+        for o in options:
+            greeks_d = o.get("greeks") or {}
+            delta = to_float(greeks_d.get("delta"))
+            if delta is None:
+                continue
+            dist = abs(abs(delta) - target_delta)
+            if dist < best_dist:
+                best_dist = dist
+                best_opt = o
+
+        if not best_opt:
+            skipped.append(sym)
+            continue
+
+        bid = to_float(best_opt.get("bid")) or 0
+        ask = to_float(best_opt.get("ask")) or 0
+        strike = to_float(best_opt.get("strike")) or 0
+        delta = to_float((best_opt.get("greeks") or {}).get("delta")) or 0
+        mid = (bid + ask) / 2
+
+        if mid <= 0 or strike <= 0:
+            skipped.append(sym)
+            continue
+
+        exp_str, dte = selected[sym]
+        matches.append(
+            _OptionMatch(
+                symbol=sym,
+                stock_price=prices[sym],
+                strike=strike,
+                exp=exp_str,
+                dte=dte,
+                delta=delta,
+                bid=bid,
+                ask=ask,
+                mid=mid,
+            )
+        )
+
+    skipped.extend(sym for sym in tickers if sym not in prices and sym not in skipped)
+    return matches, skipped
+
+
+@mcp.tool()
+async def compare_credit_efficiency(
+    ctx: Context,
+    symbols: str,
+    option_type: str = "put",
+    target_delta: float = 0.25,
+    min_dte: int = 30,
+    max_dte: int = 45,
+) -> str:
+    """Compare credit strategy premium efficiency across multiple stocks to
+    prioritize capital allocation when conviction is similar.
+
+    Finds the option closest to target_delta for each symbol and computes:
+    - Annualized Yield: premium collected / capital at risk, annualized by DTE.
+      Uses bid price (conservative — what you'd actually collect). Capital at
+      risk = strike (puts/CSPs) or stock price (calls/CCs). Higher = richer.
+    - Cushion/Yield: OTM distance (%) per unit of annualized yield. Higher = more
+      margin of safety per unit of return.
+    - Spread: bid/ask spread as % of mid price (informational — already reflected
+      in the yield via bid pricing).
+
+    symbols: comma-separated tickers (e.g. 'MU,ADBE,NVDA,LRCX').
+    option_type: 'put' for CSPs (default), 'call' for covered calls.
+    target_delta: absolute delta to target (default 0.25).
+    min_dte: minimum days to expiration (default 30).
+    max_dte: maximum days to expiration (default 45).
+
+    Requires [tradier] section in ~/.tradingrc.
+    """
+    tradier = _tradier(ctx)
+    tickers = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+    if not tickers:
+        return "(no symbols provided)"
+    opt_type = option_type.lower()
+    if opt_type not in ("put", "call"):
+        return "(option_type must be 'put' or 'call')"
+
+    matches, skipped = await _gather_option_matches(
+        tradier, tickers, opt_type, target_delta, min_dte, max_dte
+    )
+    if not matches:
+        return "(no options found matching criteria)"
+
+    rows: list[dict[str, str]] = []
+    for m in matches:
+        base = m.strike if opt_type == "put" else m.stock_price
+        ann_yield = (m.bid / base) * (365 / m.dte) * 100
+
+        if opt_type == "put":
+            otm_pct = (m.stock_price - m.strike) / m.stock_price * 100
+        else:
+            otm_pct = (m.strike - m.stock_price) / m.stock_price * 100
+
+        c_over_y = otm_pct / ann_yield if ann_yield > 0 else 0
+        spread = (m.ask - m.bid) / m.mid * 100 if m.mid > 0 else 0
+
+        rows.append(
+            {
+                "Symbol": m.symbol,
+                "Price": fmt_number(m.stock_price, 2),
+                "Strike": fmt_number(m.strike, 0),
+                "Exp": m.exp,
+                "DTE": str(m.dte),
+                "Delta": fmt_number(m.delta, 2),
+                "Bid": fmt_number(m.bid, 2),
+                "Ann Yld %": fmt_number(ann_yield, 1),
+                "OTM %": fmt_number(otm_pct, 1),
+                "C/Y": fmt_number(c_over_y, 2),
+                "Spread %": fmt_number(spread, 1),
+            }
+        )
+
+    rows.sort(key=lambda r: to_float(r["Ann Yld %"]) or 0, reverse=True)
+    columns = [
+        "Symbol",
+        "Price",
+        "Strike",
+        "Exp",
+        "DTE",
+        "Delta",
+        "Bid",
+        "Ann Yld %",
+        "OTM %",
+        "C/Y",
+        "Spread %",
+    ]
+    out = list_table(rows, columns)
+    if skipped:
+        out += f"\n\nSkipped (no chain/delta match): {', '.join(skipped)}"
+    return out
+
+
+@mcp.tool()
+async def compare_debit_efficiency(
+    ctx: Context,
+    symbols: str,
+    option_type: str = "call",
+    target_delta: float = 0.30,
+    min_dte: int = 30,
+    max_dte: int = 45,
+) -> str:
+    """Compare debit strategy cost efficiency across multiple stocks to
+    prioritize capital allocation when conviction is similar.
+
+    Finds the option closest to target_delta for each symbol and computes:
+    - Cost/Exposure: premium paid as % of delta-adjusted notional exposure.
+      Uses ask price (conservative — what you'd actually pay). Lower = cheaper
+      leverage (more directional bang per dollar).
+    - Spread: bid/ask spread as % of mid price (informational — already reflected
+      in the cost via ask pricing).
+
+    symbols: comma-separated tickers (e.g. 'MU,ADBE,NVDA,LRCX').
+    option_type: 'call' for long calls (default), 'put' for long puts.
+    target_delta: absolute delta to target (default 0.30).
+    min_dte: minimum days to expiration (default 30).
+    max_dte: maximum days to expiration (default 45).
+
+    Requires [tradier] section in ~/.tradingrc.
+    """
+    tradier = _tradier(ctx)
+    tickers = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+    if not tickers:
+        return "(no symbols provided)"
+    opt_type = option_type.lower()
+    if opt_type not in ("put", "call"):
+        return "(option_type must be 'put' or 'call')"
+
+    matches, skipped = await _gather_option_matches(
+        tradier, tickers, opt_type, target_delta, min_dte, max_dte
+    )
+    if not matches:
+        return "(no options found matching criteria)"
+
+    rows: list[dict[str, str]] = []
+    for m in matches:
+        abs_delta = abs(m.delta)
+        cost_exp = (m.ask / (abs_delta * m.stock_price) * 100) if abs_delta > 0 else 0
+        spread = (m.ask - m.bid) / m.mid * 100 if m.mid > 0 else 0
+
+        rows.append(
+            {
+                "Symbol": m.symbol,
+                "Price": fmt_number(m.stock_price, 2),
+                "Strike": fmt_number(m.strike, 0),
+                "Exp": m.exp,
+                "DTE": str(m.dte),
+                "Delta": fmt_number(m.delta, 2),
+                "Ask": fmt_number(m.ask, 2),
+                "Cost/Exp %": fmt_number(cost_exp, 1),
+                "Spread %": fmt_number(spread, 1),
+            }
+        )
+
+    rows.sort(key=lambda r: to_float(r["Cost/Exp %"]) or 0)
+    columns = [
+        "Symbol",
+        "Price",
+        "Strike",
+        "Exp",
+        "DTE",
+        "Delta",
+        "Ask",
+        "Cost/Exp %",
+        "Spread %",
+    ]
+    out = list_table(rows, columns)
+    if skipped:
+        out += f"\n\nSkipped (no chain/delta match): {', '.join(skipped)}"
+    return out
+
+
+# ── Scenario projection ─────────────────────────────────────
+
+
+def _parse_csv_floats(value: str | None, default: list[float]) -> list[float]:
+    if not value:
+        return default
+    out: list[float] = []
+    for part in value.split(","):
+        s = part.strip()
+        if s:
+            try:
+                out.append(float(s))
+            except ValueError:
+                continue
+    return out or default
+
+
+@mcp.tool()
+async def project_option_grid(
+    ctx: Context,
+    contract_symbol: str | None = None,
+    underlying: str | None = None,
+    strike: float | None = None,
+    expiration: str | None = None,
+    option_type: str | None = None,
+    as_of_date: str | None = None,
+    spot_pct_changes: str | None = None,
+    iv_levels: str | None = None,
+    contracts: int | None = None,
+    risk_free_rate: float | None = None,
+) -> str:
+    """Project an option's theoretical value across a grid of (spot price × IV) scenarios.
+
+    Use case: tail-hedge management — see the full distribution of hedge value under
+    different SPY drawdown + VIX-spike combinations to inform harvest/maintenance roll
+    timing. Also useful for any what-if scenario modeling on existing option positions.
+
+    Modes:
+    - Pass `contract_symbol` (OCC, e.g. 'SPY260821P00540000') to auto-detect strike,
+      expiration, and option_type. Current spot/IV pulled from get_quote.
+    - Or pass `underlying` + `strike` + `expiration` + `option_type` manually.
+
+    Optional params:
+    - as_of_date: project to this date (YYYY-MM-DD; default: today). Use to model
+      time decay — e.g., "what's this worth in 30 days if X happens?"
+    - spot_pct_changes: comma-separated % changes (default: '-30,-25,-20,-15,-10,-5,0,5')
+    - iv_levels: comma-separated IV % (default: '20,30,40,50,60,70')
+    - contracts: position size — when set, output also shows aggregate $ P&L per cell
+    - risk_free_rate: annualized rate (default: pulled from FRED FEDFUNDS series)
+
+    Returns a markdown grid: rows = spot prices, columns = IV levels, cells = option
+    value (and multiple from current value).
+
+    Requires [tradier] section in ~/.tradingrc. FRED is optional (falls back to 0%).
+    """
+    if contract_symbol:
+        try:
+            underlying, expiration, option_type, strike = opts.parse_occ(contract_symbol)
+        except Exception as e:
+            return f"Could not parse contract_symbol '{contract_symbol}': {e}"
+    if underlying is None or strike is None or expiration is None or option_type is None:
+        return (
+            "Specify either contract_symbol or all of: underlying, strike, expiration, option_type"
+        )
+    option_type = option_type.lower()
+
+    if option_type not in ("call", "put"):
+        return f"option_type must be 'call' or 'put', got '{option_type}'"
+
+    tradier = _tradier(ctx)
+
+    spot_task = tradier.get(t.QUOTES, t.GetQuotesRequest(underlying, greeks=False))
+    occ = contract_symbol or opts.build_occ(underlying, expiration, option_type, strike)
+    option_task = tradier.get(t.QUOTES, t.GetQuotesRequest(occ, greeks=True))
+    rate_task = (
+        asyncio.sleep(0, result=risk_free_rate)
+        if risk_free_rate is not None
+        else _fetch_risk_free_rate(ctx)
+    )
+
+    spot_resp, option_resp, rate = await asyncio.gather(
+        spot_task, option_task, rate_task, return_exceptions=False
+    )
+
+    current_spot = spot_resp.quotes[0].get("last", 0) if spot_resp.quotes else 0
+    if not current_spot:
+        return f"Could not get current quote for {underlying}"
+
+    current_option_q = option_resp.quotes[0] if option_resp.quotes else {}
+    current_value = current_option_q.get("last", 0) or current_option_q.get("ask", 0) or 0
+    current_iv_raw = current_option_q.get("greeks", {}).get("mid_iv", "")
+    current_iv = float(current_iv_raw) if current_iv_raw else 0.0
+    current_delta = current_option_q.get("greeks", {}).get("delta", "")
+
+    if as_of_date:
+        try:
+            ref_date = date.fromisoformat(as_of_date)
+        except ValueError:
+            return f"Invalid as_of_date '{as_of_date}' (use YYYY-MM-DD)"
+    else:
+        ref_date = date.today()
+    exp_date = date.fromisoformat(expiration)
+    dte_remaining = (exp_date - ref_date).days
+
+    if dte_remaining <= 0:
+        return f"Option has expired (or expires today) as of {ref_date}"
+
+    tte_years = dte_remaining / 365.0
+
+    pct_changes = _parse_csv_floats(spot_pct_changes, [-30, -25, -20, -15, -10, -5, 0, 5])
+    ivs_pct = _parse_csv_floats(iv_levels, [20, 30, 40, 50, 60, 70])
+    ivs_decimal = [iv / 100.0 for iv in ivs_pct]
+
+    header_meta = {
+        "Contract": occ,
+        "Underlying": f"{underlying} @ ${current_spot:,.2f}",
+        "Strike": f"${strike:,.2f} ({option_type})",
+        "Expiration": expiration,
+        "DTE remaining (as of grid date)": f"{dte_remaining} days",
+        "Grid date": ref_date.isoformat(),
+        "Current option value": f"${current_value:.2f}",
+        "Current IV": f"{current_iv * 100:.1f}%" if current_iv else "N/A",
+        "Current delta": str(current_delta) if current_delta else "N/A",
+        "Risk-free rate": f"{rate * 100:.2f}% (FRED FEDFUNDS)"
+        if risk_free_rate is None
+        else f"{rate * 100:.2f}% (override)",
+    }
+    if contracts:
+        header_meta["Contracts"] = str(contracts)
+
+    lines = [kv_table(header_meta), ""]
+
+    iv_header = " | ".join(f"IV {iv:.0f}%" for iv in ivs_pct)
+    lines.append(f"| Spot \\ IV | {iv_header} |")
+    lines.append("| --- | " + " | ".join("---" for _ in ivs_pct) + " |")
+
+    for pct in pct_changes:
+        scen_spot = current_spot * (1 + pct / 100.0)
+        if scen_spot <= 0:
+            continue
+        row_label = f"${scen_spot:,.0f} ({pct:+.0f}%)"
+        cells: list[str] = []
+        for iv in ivs_decimal:
+            value = bsm_price(scen_spot, strike, tte_years, iv, option_type, rate)
+            cell = f"${value:.2f}"
+            if current_value > 0:
+                multiple = value / current_value
+                cell += f" ({multiple:.1f}x)"
+            if contracts:
+                pnl = (value - current_value) * contracts * CONTRACT_MULTIPLIER
+                cell += f" / ${pnl:,.0f}"
+            cells.append(cell)
+        lines.append(f"| {row_label} | " + " | ".join(cells) + " |")
+
+    if contracts:
+        lines.append("")
+        lines.append(
+            "_Cell format: option_value (multiple_from_current) / position_pnl "
+            f"for {contracts} contracts._"
+        )
+    else:
+        lines.append("")
+        lines.append(
+            "_Cell format: option_value (multiple_from_current). "
+            "Pass `contracts` to also see position P&L._"
+        )
+
+    return "\n".join(lines)
+
+
+# ── Covered-call overlay analytics ──────────────────────────
+
+
+@mcp.tool()
+async def get_cc_coverage(
+    ctx: Context,
+    account_id: str,
+) -> str:
+    """Calculate covered call coverage ratio per underlying in a Webull account.
+
+    For each stock position with short calls, shows total shares, covered shares,
+    uncovered shares, and coverage %. Use before writing new CCs to decide how
+    many contracts to sell.
+
+    Coverage guidance from the decision framework:
+    - 0-25%: High conviction hold (minimal income, max upside)
+    - 50-75%: Growth with income (balanced)
+    - 75-100%: Exit/neutral (max income, capped upside)
+
+    account_id: Webull account ID.
+    """
+    client = _webull(ctx)
+    aid = client.ensure_account_id(account_id)
+
+    pos_resp = await _retry(_webull(ctx).get, POSITIONS, AccountRequest(aid))
+    positions = pos_resp.to_normalized()
+
+    shares_by_sym: dict[str, float] = {}
+    calls_by_sym: dict[str, list[dict]] = {}
+
+    for p in positions:
+        if p.get("is_cash"):
+            continue
+        if p.get("is_option"):
+            if p.get("option_type") == "call" and p.get("quantity", 0) < 0:
+                sym = p.get("underlying", "")
+                calls_by_sym.setdefault(sym, []).append(p)
+        else:
+            sym = p.get("symbol", "")
+            qty = p.get("quantity", 0)
+            if qty > 0:
+                shares_by_sym[sym] = shares_by_sym.get(sym, 0) + qty
+
+    all_syms = sorted(set(shares_by_sym) | set(calls_by_sym))
+    if not all_syms:
+        return "(no stock or short call positions found)"
+
+    cc_rows: list[dict[str, str]] = []
+    for sym in all_syms:
+        total_shares = shares_by_sym.get(sym, 0)
+        calls = calls_by_sym.get(sym, [])
+        covered_contracts = sum(abs(c.get("quantity", 0)) for c in calls)
+        covered_shares = covered_contracts * CONTRACT_MULTIPLIER
+        uncovered = max(0, total_shares - covered_shares)
+        coverage_pct = (covered_shares / total_shares * 100) if total_shares > 0 else 0
+
+        if coverage_pct == 0:
+            label = "None"
+        elif coverage_pct <= 25:
+            label = "High conviction"
+        elif coverage_pct <= 50:
+            label = "Moderate"
+        elif coverage_pct <= 75:
+            label = "Growth + income"
+        else:
+            label = "Exit/neutral"
+
+        row: dict[str, str] = {
+            "Symbol": sym,
+            "Shares": fmt_number(total_shares, 0),
+            "Covered": fmt_number(covered_shares, 0),
+            "Uncovered": fmt_number(uncovered, 0),
+            "Coverage": f"{coverage_pct:.0f}%",
+            "Label": label,
+        }
+
+        if calls:
+            call_details = ", ".join(
+                f"${fmt_number(c.get('strike'))} {c.get('expiration', '')}" for c in calls
+            )
+            row["Calls"] = call_details
+
+        cc_rows.append(row)
+
+    return f"## CC Coverage Ratio\n\n{list_table(cc_rows)}"
+
+
+@mcp.tool()
+async def get_cc_chain_pnl(
+    ctx: Context,
+    account_id: str,
+    symbol: str,
+    option_type: str = "call",
+    start_date: str | None = None,
+) -> str:
+    """Calculate the running P&L of a covered call or CSP roll chain.
+
+    Traces all filled option orders for a symbol, sums credits (SELL) and
+    debits (BUY), and shows the chain P&L. Useful before rolling to see
+    whether the chain is profitable or underwater.
+
+    account_id: Webull account ID.
+    symbol: underlying ticker (e.g. 'AMZN').
+    option_type: 'call' for covered calls, 'put' for CSPs (default 'call').
+    start_date: earliest date to search (YYYY-MM-DD). Defaults to 90 days ago.
+    """
+    client = _webull(ctx)
+    aid = client.ensure_account_id(account_id)
+
+    if not start_date:
+        start_date = (date.today().replace(day=1) - timedelta(days=90)).isoformat()
+
+    response = await client.get(
+        ORDER_HISTORY,
+        GetOrderHistoryRequest(
+            aid, page_size=100, start_date=start_date, end_date=date.today().isoformat()
+        ),
+    )
+
+    opt_type = option_type.lower()
+    chain_orders: list[dict] = []
+    for combo in response.combos:
+        for o in combo.get("orders", []):
+            if o.get("status") != "FILLED":
+                continue
+            if o.get("instrument_type") != "OPTION":
+                continue
+            if (o.get("symbol") or "").upper() != symbol.upper():
+                continue
+            order_legs = o.get("legs", [])
+            if not order_legs:
+                continue
+            leg = order_legs[0]
+            if (leg.get("option_type") or "").lower() != opt_type:
+                continue
+            chain_orders.append(o)
+
+    if not chain_orders:
+        return f"(no filled {opt_type} orders for {symbol} since {start_date})"
+
+    chain_orders.sort(key=lambda o: o.get("filled_time_at") or o.get("place_time_at") or "")
+
+    chain_rows: list[dict[str, str]] = []
+    total_credit = 0.0
+    total_debit = 0.0
+
+    for o in chain_orders:
+        side = o.get("side", "")
+        qty = to_float_zero(o.get("filled_quantity"))
+        price = to_float_zero(o.get("filled_price"))
+        amount = price * qty * CONTRACT_MULTIPLIER
+        leg = o.get("legs", [{}])[0]
+
+        if side == "SELL":
+            total_credit += amount
+        else:
+            total_debit += amount
+
+        chain_rows.append(
+            {
+                "Date": (o.get("filled_time_at") or o.get("place_time_at") or "")[:10],
+                "Side": side,
+                "Strike": fmt_number(leg.get("strike_price")),
+                "Exp": leg.get("option_expire_date", ""),
+                "Qty": fmt_number(qty, 0),
+                "Fill": fmt_number(price),
+                "Amount": f"{'+' if side == 'SELL' else '-'}${fmt_number(amount)}",
+            }
+        )
+
+    chain_pnl = total_credit - total_debit
+    pnl_sign = "+" if chain_pnl >= 0 else ""
+
+    type_label = "Covered Call" if opt_type == "call" else "CSP"
+    summary = kv_table(
+        {
+            "Symbol": symbol.upper(),
+            "Chain Type": type_label,
+            "Total Credits (SELL)": f"+${fmt_number(total_credit)}",
+            "Total Debits (BUY)": f"-${fmt_number(total_debit)}",
+            "Chain P&L": f"{pnl_sign}${fmt_number(chain_pnl)}",
+            "Orders": str(len(chain_orders)),
+        }
+    )
+
+    sections = [f"## {symbol.upper()} {type_label} Chain P&L\n\n{summary}"]
+    sections.append(f"\n### Order History\n\n{list_table(chain_rows)}")
 
     return "\n".join(sections)

@@ -63,27 +63,32 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │   └── src/trading_mcp/
 │   │       ├── server.py                # Lifespan, parent FastMCP, mount() calls
 │   │       ├── helpers.py               # Client extractors, shared helpers (_retry, etc.)
+│   │       ├── yfinance_helper.py       # Shared yfinance namespace (_yfc) for fundamentals + screens
 │   │       ├── db/                      # SQLite database layer (~/.trading/trading.db)
-│   │       │   ├── __init__.py          # Connection, shared utilities (now, normalize_enums, OptionType)
+│   │       │   ├── __init__.py          # Connection, shared utilities
 │   │       │   ├── pipeline.py          # Pipeline table schema, enums, async CRUD
 │   │       │   ├── rolls.py             # Rolls table schema, enums, async CRUD
 │   │       │   └── decisions.py         # Option decisions table schema, enums, async CRUD
-│   │       └── tools/                   # Domain-specific tool modules
-│   │           ├── webull.py            # Account, orders, portfolio
-│   │           ├── tradier.py           # Options, quotes, technicals
-│   │           ├── finnhub.py           # News, earnings, peers
-│   │           ├── fmp.py              # Fundamentals, profiles
-│   │           ├── fred.py             # Macro data
-│   │           ├── market_regime.py    # Cross-provider regime
-│   │           ├── btc.py             # Crypto quotes, BTC signals
-│   │           ├── signals.py         # Conviction, sizing, hedge, entry
-│   │           ├── pipeline.py        # Credit/debit comparison + pipeline tracking CRUD
-│   │           ├── rolls.py           # Option roll tracking CRUD
-│   │           ├── decisions.py      # Option decision tracking CRUD
-│   │           ├── alphavantage.py    # Sentiment, movers
-│   │           ├── tastytrade.py      # IV metrics, backtesting
-│   │           ├── yahoo.py           # Screener, ownership, short interest
-│   │           └── youtube.py         # Transcript
+│   │       └── tools/                   # Subdomain-organized tool modules
+│   │           ├── account.py           # Balances, positions, instruments, portfolio aggregates
+│   │           ├── orders.py            # Place/preview/replace/cancel orders, order history
+│   │           ├── quotes.py            # Stock/option quotes, history, intraday, technicals, clock
+│   │           ├── options.py           # Chains, expected move, strategy/roll analysis,
+│   │           │                        #   IV metrics, comparators, projection grid, CC overlay
+│   │           ├── fundamentals.py      # Financials, profile, EPS estimates, ownership,
+│   │           │                        #   insider activity, informed-flow scanner
+│   │           ├── calendar.py          # Earnings, dividends, upcoming economic releases
+│   │           ├── macro.py             # FRED series, sector performance, market regime
+│   │           ├── news.py              # Company/market news, sentiment, Reddit, YouTube
+│   │           ├── screens.py           # Yahoo screens, top movers, watchlists, short stats
+│   │           ├── crypto.py            # Crypto quotes/history, BTC entry signals
+│   │           ├── cn_market.py         # China A-share quotes, financials, fund flow (AKShare)
+│   │           ├── backtest.py          # TastyTrade option strategy backtests
+│   │           ├── signals.py           # Conviction, sizing, hedge, entry signals
+│   │           ├── pipeline.py          # Pipeline ticker CRUD
+│   │           ├── pipeline_catalysts.py # Pipeline catalyst CRUD
+│   │           ├── rolls.py             # Option roll tracking CRUD
+│   │           └── decisions.py         # Option decision tracking CRUD
 │   └── option-monitor/                  # Lambda monitoring service
 │       ├── pyproject.toml               # depends on: trading-clients + boto3 + pynacl
 │       ├── Makefile                     # deploy/destroy/credentials/test automation

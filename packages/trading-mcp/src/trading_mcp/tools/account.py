@@ -1,14 +1,17 @@
-from datetime import date, timedelta
+"""Brokerage account state: balances, positions, instruments, portfolio aggregates."""
 
 from fastmcp import Context, FastMCP
 from trading_clients import options as opts
 from trading_clients.endpoint import CONTRACT_MULTIPLIER
 from trading_clients.endpoints import tradier as t
 from trading_clients.endpoints.webull import (
-    ORDER_HISTORY,
+    ACCOUNT_LIST,
+    BALANCE,
+    INSTRUMENTS,
     POSITIONS,
     AccountRequest,
-    GetOrderHistoryRequest,
+    EmptyRequest,
+    GetInstrumentsRequest,
 )
 from trading_clients.portfolio import (
     PortfolioSummary,
@@ -17,16 +20,84 @@ from trading_clients.portfolio import (
     format_greeks_detail,
     format_portfolio_summary,
 )
-from trading_clients.table_helpers import fmt_number, kv_table, list_table, to_float_zero
+from trading_clients.table_helpers import fmt_number, kv_table, list_table
 
-from trading_mcp.helpers import _retry, _tradier, _webull, _write_temp_file
+from trading_mcp.helpers import _tradier, _webull, _write_temp_file
 from trading_mcp.portfolio_fetching import (
     _compute_csp_collateral,
     _fetch_accounts,
     _fetch_all_positions,
 )
 
-mcp = FastMCP("webull-portfolio-tools")
+mcp = FastMCP("account-tools")
+
+
+@mcp.tool()
+async def get_account_balance(ctx: Context, account_id: str) -> str:
+    """Get account balance: net liquidation, cash, buying power, market value, day P&L,
+    unrealized P&L, margin info.
+
+    account_id: Webull account ID (use get_app_subscriptions to find it).
+    """
+    client = _webull(ctx)
+    resp = await client.get(BALANCE, AccountRequest(client.ensure_account_id(account_id)))
+    return resp.to_output()
+
+
+@mcp.tool()
+async def get_account_positions(ctx: Context, account_id: str) -> str:
+    """Get all current portfolio holdings including option positions with full leg details
+    (strike, expiration, option type, strategy). Returns each position's symbol, type,
+    quantity, cost, last price, and unrealized P&L.
+
+    account_id: Webull account ID (use get_app_subscriptions to find it).
+    """
+    client = _webull(ctx)
+    resp = await client.get(POSITIONS, AccountRequest(client.ensure_account_id(account_id)))
+    return resp.to_output()
+
+
+@mcp.tool()
+async def refresh_webull_token(ctx: Context) -> str:
+    """Create a new Webull API access token and save it to ~/.tradingrc.
+
+    Use this when Webull tools fail with 401 errors (token expired after 15 days
+    of inactivity). After running this tool, the new token must be verified in the
+    Webull App: Menu > Messages > OpenAPI Notifications.
+
+    The token status will be PENDING until verified. Webull tools will fail until
+    verification is complete.
+    """
+    client = _webull(ctx)
+    token = await client._create_token()
+    return (
+        f"New token created: {token[:8]}...\n\n"
+        "**Action required:** Verify this token in the Webull App:\n"
+        "Menu > Messages > OpenAPI Notifications\n\n"
+        "Token is PENDING until verified. Webull tools will fail until then."
+    )
+
+
+@mcp.tool()
+async def get_app_subscriptions(ctx: Context) -> str:
+    """Get all Webull accounts linked to this API key.
+
+    Returns Account ID, Type, and Label for each account.
+    Use the 'Account ID' value as the account_id parameter for all other Webull tools.
+    """
+    return (await _webull(ctx).get(ACCOUNT_LIST, EmptyRequest())).to_output()
+
+
+@mcp.tool()
+async def get_instruments(ctx: Context, symbols: str, category: str = "US_STOCK") -> str:
+    """Look up instrument details for symbols: instrument_id, exchange, currency,
+    and trading attributes (shortable, fractionable, marginable).
+
+    symbols: comma-separated ticker symbols (e.g. 'AAPL,TSLA'). Max 100.
+    category: 'US_STOCK' (default) or 'US_ETF'.
+    """
+    resp = await _webull(ctx).get(INSTRUMENTS, GetInstrumentsRequest(symbols, category))
+    return resp.to_output()
 
 
 @mcp.tool()
@@ -205,194 +276,6 @@ async def get_free_capital(
         sections.append("\n### Errors")
         for label, err in errors.items():
             sections.append(f"- {label}: {err}")
-
-    return "\n".join(sections)
-
-
-@mcp.tool()
-async def get_cc_coverage(
-    ctx: Context,
-    account_id: str,
-) -> str:
-    """Calculate covered call coverage ratio per underlying in a Webull account.
-
-    For each stock position with short calls, shows total shares, covered shares,
-    uncovered shares, and coverage %. Use before writing new CCs to decide how
-    many contracts to sell.
-
-    Coverage guidance from the decision framework:
-    - 0-25%: High conviction hold (minimal income, max upside)
-    - 50-75%: Growth with income (balanced)
-    - 75-100%: Exit/neutral (max income, capped upside)
-
-    account_id: Webull account ID.
-    """
-    client = _webull(ctx)
-    aid = client.ensure_account_id(account_id)
-
-    pos_resp = await _retry(_webull(ctx).get, POSITIONS, AccountRequest(aid))
-    positions = pos_resp.to_normalized()
-
-    shares_by_sym: dict[str, float] = {}
-    calls_by_sym: dict[str, list[dict]] = {}
-
-    for p in positions:
-        if p.get("is_cash"):
-            continue
-        if p.get("is_option"):
-            if p.get("option_type") == "call" and p.get("quantity", 0) < 0:
-                sym = p.get("underlying", "")
-                calls_by_sym.setdefault(sym, []).append(p)
-        else:
-            sym = p.get("symbol", "")
-            qty = p.get("quantity", 0)
-            if qty > 0:
-                shares_by_sym[sym] = shares_by_sym.get(sym, 0) + qty
-
-    all_syms = sorted(set(shares_by_sym) | set(calls_by_sym))
-    if not all_syms:
-        return "(no stock or short call positions found)"
-
-    cc_rows: list[dict[str, str]] = []
-    for sym in all_syms:
-        total_shares = shares_by_sym.get(sym, 0)
-        calls = calls_by_sym.get(sym, [])
-        covered_contracts = sum(abs(c.get("quantity", 0)) for c in calls)
-        covered_shares = covered_contracts * CONTRACT_MULTIPLIER
-        uncovered = max(0, total_shares - covered_shares)
-        coverage_pct = (covered_shares / total_shares * 100) if total_shares > 0 else 0
-
-        if coverage_pct == 0:
-            label = "None"
-        elif coverage_pct <= 25:
-            label = "High conviction"
-        elif coverage_pct <= 50:
-            label = "Moderate"
-        elif coverage_pct <= 75:
-            label = "Growth + income"
-        else:
-            label = "Exit/neutral"
-
-        row: dict[str, str] = {
-            "Symbol": sym,
-            "Shares": fmt_number(total_shares, 0),
-            "Covered": fmt_number(covered_shares, 0),
-            "Uncovered": fmt_number(uncovered, 0),
-            "Coverage": f"{coverage_pct:.0f}%",
-            "Label": label,
-        }
-
-        if calls:
-            call_details = ", ".join(
-                f"${fmt_number(c.get('strike'))} {c.get('expiration', '')}" for c in calls
-            )
-            row["Calls"] = call_details
-
-        cc_rows.append(row)
-
-    return f"## CC Coverage Ratio\n\n{list_table(cc_rows)}"
-
-
-@mcp.tool()
-async def get_cc_chain_pnl(
-    ctx: Context,
-    account_id: str,
-    symbol: str,
-    option_type: str = "call",
-    start_date: str | None = None,
-) -> str:
-    """Calculate the running P&L of a covered call or CSP roll chain.
-
-    Traces all filled option orders for a symbol, sums credits (SELL) and
-    debits (BUY), and shows the chain P&L. Useful before rolling to see
-    whether the chain is profitable or underwater.
-
-    account_id: Webull account ID.
-    symbol: underlying ticker (e.g. 'AMZN').
-    option_type: 'call' for covered calls, 'put' for CSPs (default 'call').
-    start_date: earliest date to search (YYYY-MM-DD). Defaults to 90 days ago.
-    """
-    client = _webull(ctx)
-    aid = client.ensure_account_id(account_id)
-
-    if not start_date:
-        start_date = (date.today().replace(day=1) - timedelta(days=90)).isoformat()
-
-    response = await client.get(
-        ORDER_HISTORY,
-        GetOrderHistoryRequest(
-            aid, page_size=100, start_date=start_date, end_date=date.today().isoformat()
-        ),
-    )
-
-    opt_type = option_type.lower()
-    chain_orders: list[dict] = []
-    for combo in response.combos:
-        for o in combo.get("orders", []):
-            if o.get("status") != "FILLED":
-                continue
-            if o.get("instrument_type") != "OPTION":
-                continue
-            if (o.get("symbol") or "").upper() != symbol.upper():
-                continue
-            order_legs = o.get("legs", [])
-            if not order_legs:
-                continue
-            leg = order_legs[0]
-            if (leg.get("option_type") or "").lower() != opt_type:
-                continue
-            chain_orders.append(o)
-
-    if not chain_orders:
-        return f"(no filled {opt_type} orders for {symbol} since {start_date})"
-
-    chain_orders.sort(key=lambda o: o.get("filled_time_at") or o.get("place_time_at") or "")
-
-    chain_rows: list[dict[str, str]] = []
-    total_credit = 0.0
-    total_debit = 0.0
-
-    for o in chain_orders:
-        side = o.get("side", "")
-        qty = to_float_zero(o.get("filled_quantity"))
-        price = to_float_zero(o.get("filled_price"))
-        amount = price * qty * CONTRACT_MULTIPLIER
-        leg = o.get("legs", [{}])[0]
-
-        if side == "SELL":
-            total_credit += amount
-        else:
-            total_debit += amount
-
-        chain_rows.append(
-            {
-                "Date": (o.get("filled_time_at") or o.get("place_time_at") or "")[:10],
-                "Side": side,
-                "Strike": fmt_number(leg.get("strike_price")),
-                "Exp": leg.get("option_expire_date", ""),
-                "Qty": fmt_number(qty, 0),
-                "Fill": fmt_number(price),
-                "Amount": f"{'+' if side == 'SELL' else '-'}${fmt_number(amount)}",
-            }
-        )
-
-    chain_pnl = total_credit - total_debit
-    pnl_sign = "+" if chain_pnl >= 0 else ""
-
-    type_label = "Covered Call" if opt_type == "call" else "CSP"
-    summary = kv_table(
-        {
-            "Symbol": symbol.upper(),
-            "Chain Type": type_label,
-            "Total Credits (SELL)": f"+${fmt_number(total_credit)}",
-            "Total Debits (BUY)": f"-${fmt_number(total_debit)}",
-            "Chain P&L": f"{pnl_sign}${fmt_number(chain_pnl)}",
-            "Orders": str(len(chain_orders)),
-        }
-    )
-
-    sections = [f"## {symbol.upper()} {type_label} Chain P&L\n\n{summary}"]
-    sections.append(f"\n### Order History\n\n{list_table(chain_rows)}")
 
     return "\n".join(sections)
 

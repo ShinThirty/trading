@@ -1,3 +1,5 @@
+"""Equity and option quotes, history, intraday data, technical indicators, market clock."""
+
 import asyncio
 
 from fastmcp import Context, FastMCP
@@ -7,7 +9,7 @@ from trading_clients.table_helpers import fmt_number, kv_table, list_table
 
 from trading_mcp.helpers import _tradier
 
-mcp = FastMCP("tradier-market-tools")
+mcp = FastMCP("quotes-tools")
 
 
 @mcp.tool()
@@ -183,7 +185,6 @@ async def get_vwap(
     current_vwap = vwap_values[-1]
     total_bars = above_count + below_count
 
-    # VWAP slope: compare last quarter vs first quarter
     quarter = max(1, len(vwap_values) // 4)
     early_vwap = sum(vwap_values[:quarter]) / quarter
     late_vwap = sum(vwap_values[-quarter:]) / quarter
@@ -213,7 +214,6 @@ async def get_vwap(
     data["VWAP Slope"] = f"{slope_label} ({slope_pct:+.2f}%)"
     data["Cumulative Volume"] = fmt_number(cum_vol, 0)
 
-    # Sample ~12 rows for the table to keep output concise
     if len(rows) > 12:
         step = len(rows) // 11
         sampled = [rows[i] for i in range(0, len(rows) - 1, step)]

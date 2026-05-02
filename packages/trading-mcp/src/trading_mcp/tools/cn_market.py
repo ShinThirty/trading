@@ -1,3 +1,5 @@
+"""China A-share quotes, history, fundamentals, fund flow, Stock Connect (via AKShare)."""
+
 from typing import Any
 
 import akshare as ak
@@ -7,7 +9,7 @@ from trading_clients.table_helpers import fmt_large, fmt_number, kv_table, list_
 
 from trading_mcp.helpers import _cached
 
-mcp = FastMCP("akshare-tools")
+mcp = FastMCP("cn-market-tools")
 
 _cache = TTLCache()
 
@@ -111,9 +113,6 @@ class _ak:
             return [row.to_dict() for _, row in df.iterrows()]
 
         return await _cached(_cache, "cn_connect_summary", _TTL_QUOTE, _uncached)
-
-
-# ── MCP Tools ──────────────────────────────────────────────
 
 
 @mcp.tool()

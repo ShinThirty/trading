@@ -1,20 +1,15 @@
+"""Order placement, modification, cancellation, and history."""
+
 from fastmcp import Context, FastMCP
 from trading_clients.endpoints.webull import (
-    ACCOUNT_LIST,
-    BALANCE,
     CANCEL_ORDER,
-    INSTRUMENTS,
     OPEN_ORDERS,
     ORDER_DETAIL,
     ORDER_HISTORY,
     PLACE_ORDER,
-    POSITIONS,
     PREVIEW_ORDER,
     REPLACE_ORDER,
-    AccountRequest,
     CancelOrderRequest,
-    EmptyRequest,
-    GetInstrumentsRequest,
     GetOpenOrdersRequest,
     GetOrderDetailRequest,
     GetOrderHistoryRequest,
@@ -25,32 +20,7 @@ from trading_clients.endpoints.webull import (
 
 from trading_mcp.helpers import _check_market, _webull
 
-mcp = FastMCP("webull-orders-tools")
-
-
-@mcp.tool()
-async def get_account_balance(ctx: Context, account_id: str) -> str:
-    """Get account balance: net liquidation, cash, buying power, market value, day P&L,
-    unrealized P&L, margin info.
-
-    account_id: Webull account ID (use get_app_subscriptions to find it).
-    """
-    client = _webull(ctx)
-    resp = await client.get(BALANCE, AccountRequest(client.ensure_account_id(account_id)))
-    return resp.to_output()
-
-
-@mcp.tool()
-async def get_account_positions(ctx: Context, account_id: str) -> str:
-    """Get all current portfolio holdings including option positions with full leg details
-    (strike, expiration, option type, strategy). Returns each position's symbol, type,
-    quantity, cost, last price, and unrealized P&L.
-
-    account_id: Webull account ID (use get_app_subscriptions to find it).
-    """
-    client = _webull(ctx)
-    resp = await client.get(POSITIONS, AccountRequest(client.ensure_account_id(account_id)))
-    return resp.to_output()
+mcp = FastMCP("orders-tools")
 
 
 @mcp.tool()
@@ -269,46 +239,3 @@ async def cancel_order(ctx: Context, account_id: str, client_order_id: str) -> s
     client = _webull(ctx)
     req = CancelOrderRequest(client.ensure_account_id(account_id), client_order_id)
     return (await client.post(CANCEL_ORDER, req)).to_output()
-
-
-@mcp.tool()
-async def refresh_webull_token(ctx: Context) -> str:
-    """Create a new Webull API access token and save it to ~/.tradingrc.
-
-    Use this when Webull tools fail with 401 errors (token expired after 15 days
-    of inactivity). After running this tool, the new token must be verified in the
-    Webull App: Menu > Messages > OpenAPI Notifications.
-
-    The token status will be PENDING until verified. Webull tools will fail until
-    verification is complete.
-    """
-    client = _webull(ctx)
-    token = await client._create_token()
-    return (
-        f"New token created: {token[:8]}...\n\n"
-        "**Action required:** Verify this token in the Webull App:\n"
-        "Menu > Messages > OpenAPI Notifications\n\n"
-        "Token is PENDING until verified. Webull tools will fail until then."
-    )
-
-
-@mcp.tool()
-async def get_app_subscriptions(ctx: Context) -> str:
-    """Get all Webull accounts linked to this API key.
-
-    Returns Account ID, Type, and Label for each account.
-    Use the 'Account ID' value as the account_id parameter for all other Webull tools.
-    """
-    return (await _webull(ctx).get(ACCOUNT_LIST, EmptyRequest())).to_output()
-
-
-@mcp.tool()
-async def get_instruments(ctx: Context, symbols: str, category: str = "US_STOCK") -> str:
-    """Look up instrument details for symbols: instrument_id, exchange, currency,
-    and trading attributes (shortable, fractionable, marginable).
-
-    symbols: comma-separated ticker symbols (e.g. 'AAPL,TSLA'). Max 100.
-    category: 'US_STOCK' (default) or 'US_ETF'.
-    """
-    resp = await _webull(ctx).get(INSTRUMENTS, GetInstrumentsRequest(symbols, category))
-    return resp.to_output()
