@@ -238,7 +238,7 @@ def _compute_csp_collateral(positions: list[dict]) -> float:
     return total
 
 
-async def _fetch_total_nlv(ctx: Context) -> float:
+async def _fetch_total_nlv(ctx: Context, fidelity_folder: str | None = None) -> float:
     webull = _webull(ctx)
     account_list = await webull.get(ACCOUNT_LIST, EmptyRequest())
     total = 0.0
@@ -249,6 +249,14 @@ async def _fetch_total_nlv(ctx: Context) -> float:
             total += to_float_zero(bal.net_liquidation)
         except Exception:
             continue
+
+    if fidelity_folder:
+        try:
+            for acct in await parse_fidelity_folder(fidelity_folder):
+                total += acct.nlv
+        except Exception:
+            pass
+
     return total
 
 

@@ -124,6 +124,8 @@ Once intent is set and signals are collected, match to the right strategy. See [
 | **Bearish (L3)** | Bear spread (credit or debit per IV) | Bear call spread | Bear put spread |
 | **Hedge** | Protective put / collar | Collar (sell rich calls) | Protective put |
 
+For **portfolio-level tail-risk hedging** (deep OTM index puts as a structural program, not tactical correction protection), see [tail-hedge-playbook.md](tail-hedge-playbook.md).
+
 **Cross-stock tiebreaker:** When multiple pipeline names share the same intent and conviction tier, compare premium efficiency at a standardized delta to decide who goes first when capital is limited.
 
 - **Credit strategies** (CSPs, CCs): Run `compare_credit_efficiency`. Ranks by annualized yield (premium / capital at risk, annualized), cushion/yield (OTM distance per unit of yield), and liquidity cost (spread friction). Higher yield = richer; higher C/Y = more safety per return.

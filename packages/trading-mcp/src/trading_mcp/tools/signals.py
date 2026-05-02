@@ -1,4 +1,5 @@
 import asyncio
+import math
 from datetime import date, timedelta
 
 from fastmcp import Context, FastMCP
@@ -133,6 +134,8 @@ async def calculate_hedge(
     strike: float | None = None,
     hedge_ratio: float = 1.0,
     delta_adjusted: bool = False,
+    fidelity_folder: str | None = None,
+    crisis_multiplier: float = 1.0,
 ) -> str:
     """Calculate put contracts needed to hedge the portfolio.
 
@@ -145,19 +148,28 @@ async def calculate_hedge(
     hedge_ratio: fraction to hedge, 0.0-1.0 (default 1.0 = 100%).
     delta_adjusted: if True, divide by put delta for continuous 1:1 hedging.
       Default False = tail-risk mode (sized for full payout when puts go ITM).
+    fidelity_folder: path to folder containing Fidelity Positions_*.csv files
+      (e.g. '~/Downloads/fidelity'). Includes Fidelity equity + NLV in the
+      sizing math. Omit for Webull only.
+    crisis_multiplier: amplify portfolio beta to account for correlation spikes
+      during crashes (default 1.0 = trailing beta as-is). Recommended 1.25 for
+      tail-risk hedges per docs/tail-hedge-playbook.md — tech betas inflate
+      ~25% when a real selloff hits.
 
     Requires [webull] and [tradier] sections in ~/.tradingrc.
     """
     if hedge_index.upper() not in ("SPY", "QQQ"):
         return "hedge_index must be 'SPY' or 'QQQ'"
     hedge_index = hedge_index.upper()
+    if crisis_multiplier <= 0:
+        return "crisis_multiplier must be > 0"
 
     tradier = _tradier(ctx)
 
-    positions_task = _fetch_all_positions(ctx)
+    positions_task = _fetch_all_positions(ctx, fidelity_folder)
     quote_task = tradier.get(t.QUOTES, t.GetQuotesRequest(hedge_index, greeks=False))
     exp_task = tradier.get(t.EXPIRATIONS, t.GetExpirationsRequest(hedge_index))
-    bal_task = _fetch_total_nlv(ctx)
+    bal_task = _fetch_total_nlv(ctx, fidelity_folder)
 
     (positions, _pos_errors), quote_resp, exp_resp, total_nlv = await asyncio.gather(
         positions_task, quote_task, exp_task, bal_task
@@ -232,6 +244,7 @@ async def calculate_hedge(
             fallback_count += 1
 
     portfolio_beta = (total_equity / total_nlv) * weighted_beta if total_nlv > 0 else weighted_beta
+    effective_beta = portfolio_beta * crisis_multiplier
 
     occ = opts.build_occ(hedge_index, expiration, "put", strike)
     try:
@@ -245,11 +258,12 @@ async def calculate_hedge(
     put_delta = put_q.get("greeks", {}).get("delta", "")
     put_iv = put_q.get("greeks", {}).get("mid_iv", "")
 
-    notional = (total_nlv * portfolio_beta * hedge_ratio) / (index_price * CONTRACT_MULTIPLIER)
+    notional = (total_nlv * effective_beta * hedge_ratio) / (index_price * CONTRACT_MULTIPLIER)
     if delta_adjusted and put_delta:
         contracts = round(notional / abs(float(put_delta)))
     else:
-        contracts = round(notional)
+        # Round UP for tail-risk mode — undersizing is the costly direction
+        contracts = math.ceil(notional)
     if contracts < 1:
         contracts = 1
 
@@ -259,11 +273,15 @@ async def calculate_hedge(
 
     sizing_mode = "delta-adjusted (continuous)" if delta_adjusted else "notional (tail-risk)"
 
+    beta_display = f"{portfolio_beta:.2f}"
+    if crisis_multiplier != 1.0:
+        beta_display += f" → {effective_beta:.2f} (crisis-adj {crisis_multiplier:.2f}x)"
+
     hedge_data = {
         "Portfolio Value": f"${total_nlv:,.0f}",
         "Equity Value": f"${total_equity:,.0f}",
         "Equity Symbols": f"{len(symbols)} ({beta_count} with beta, {fallback_count} fallback)",
-        "Portfolio Beta": f"{portfolio_beta:.2f}",
+        "Portfolio Beta": beta_display,
         "Hedge Ratio": f"{hedge_ratio:.0%}",
         "Sizing Mode": sizing_mode,
         "---": "---",
