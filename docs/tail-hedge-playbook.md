@@ -43,16 +43,18 @@ If the goal is tail protection, the strike should be where you genuinely *can't*
 
 Tail hedges are a **structural program**, so the question isn't "when to open" — it's "do you commit to running the program."
 
+Pull current state via `get_portfolio_greeks` (net delta, vega) and `get_portfolio_summary` (NLV, equity/cash split) before deciding — never estimate these from memory.
+
 Conditions that argue **for** running the program:
-- Portfolio net delta sustained >$5K per $1 SPY move
-- Long-biased equity exposure >50% of NLV
-- Tech / high-beta concentration (crisis beta amplification)
+- Net delta sustained >$5K per $1 SPY move (from `get_portfolio_greeks`)
+- Equity exposure >50% of NLV (from `get_portfolio_summary`)
+- Tech / high-beta concentration (`calculate_hedge` returns blended beta — flag if >1.3)
 - Inability to quickly reduce exposure (long-term holdings, tax considerations)
 - Personal risk tolerance: would a -30% drawdown force selling at the bottom?
 
 Conditions that argue **against**:
-- Portfolio is naturally hedged (long puts, short equity, market-neutral)
-- Cash-heavy (>50% cash already provides downside protection)
+- Portfolio is naturally hedged (long puts, short equity, market-neutral — visible in `get_portfolio_greeks`)
+- Cash-heavy (>50% cash from `get_portfolio_summary` already provides downside protection)
 - Active position management with tight stops
 - Willing and able to liquidate fast when regime breaks
 
@@ -142,14 +144,14 @@ These are what separate a tail program from a tactical trade. Without these, the
 | **Don't close on rallies** | "Nothing is wrong" doesn't mean "no risk." That's the entire premise. |
 | **Don't close on losses** | Premium decay is the *normal* outcome. Losing the entire premium most of the time is how the program is supposed to work. |
 | **Only close on payoff** | If puts hit 5x+ during a crash, take 50% of contracts off, let rest ride further. |
-| **Resize when portfolio grows** | If portfolio moves +20%, hedge notional should scale at next roll. |
+| **Resize at every roll** | Re-run `calculate_hedge` (with `fidelity_folder` + `crisis_multiplier`) before each new contract — the tool reads current NLV/beta, so you never need to track portfolio drift manually. |
 | **Don't short-circuit on signals** | The /hedge skill's reversal checklist is for opening discussions, not for closing this structural hedge. |
 
 ## When to close (only payoff scenarios)
 
 The only valid reasons to close before the 30 DTE roll:
 
-1. **Multi-bagger payoff during a crash.** Puts at 5x+ entry → sell 50% of contracts to lock in a portion. Let the rest ride; if the crash deepens, the remaining contracts compound.
+1. **Multi-bagger payoff during a crash.** Use `get_portfolio_summary` to read current option P&L %; when the row shows ≥400% (5x), close 50% of contracts to lock in a portion. Let the rest ride; if the crash deepens, the remaining contracts compound.
 2. **Portfolio delta materially reduced.** If you sold 30%+ of the long book and no longer need 50% notional coverage, downsize at next roll (don't dump mid-cycle).
 3. **End of program.** If you're permanently exiting the strategy (going to cash, etc.), close after the next roll-equivalent date — don't accelerate the exit on a tactical signal.
 
@@ -159,17 +161,16 @@ That's it. No "VIX dropped" close. No "regime cleared" close. No "premium decay 
 
 Before placing the order:
 
-1. Run `calculate_hedge` with **all** of: chosen strike, expiration, `fidelity_folder` (if applicable), and `crisis_multiplier=1.25`. Verify contract count matches expectations.
-2. Check `get_iv_metrics` for SPY — log IV Rank for entry record
-3. Check option chain bid/ask — bid no wider than 5% of mid for SPY (most liquid in the world; wide spread = mispricing)
-4. Place at mid or better; SPY tail puts have tight markets at major strikes
-5. Record the trade as a `decision_add` with action `WRITE_NEW`, source `hedge`, deadline = roll date (30 DTE before expiry)
+1. Run `calculate_hedge` with **all** of: chosen strike, expiration, `fidelity_folder` (if applicable), and `crisis_multiplier=1.25`. Use the contract count it returns — don't re-derive it.
+2. Run `get_iv_metrics` for SPY — log IV Rank for entry record. Confirm Liquidity rating ≥ 3 (tight spreads); skip the strike if Liq ≤ 2.
+3. Run `preview_order` to confirm cost, then place at the previewed mid or better.
+4. Record the trade as a `decision_add` with action `WRITE_NEW`, source `hedge`, and `deadline` set 30 days before expiry (the platform handles the date math).
 
 After placing:
 
-1. Set a calendar reminder for roll date (entry DTE - 30)
-2. Update `project_portfolio_hedge.md` memory with strike/expiry/contract count
-3. Don't watch it. Daily price checks invite tactical second-guessing.
+1. Update `project_portfolio_hedge.md` memory with strike/expiry/contract count and the decision ID
+2. Don't watch it. Daily price checks invite tactical second-guessing.
+3. The `decision_list` deadline + roll cadence handles the reminder — no manual calendar math needed.
 
 ## Cost expectations
 
