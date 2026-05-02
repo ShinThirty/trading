@@ -335,9 +335,12 @@ Over a decade, expected total return ≈ **break-even to slightly positive**, wi
 
 ### Why we run it anyway — the strategic case
 
-**The hedge itself doesn't make money. But the rest of the portfolio makes MORE money because the hedge exists.**
+**The hedge skews the risk/reward distribution favorably by turning down the rewards a bit.** You pay ~80 bps of expected return to compress the left tail by 25+ percentage points, while leaving the right tail untouched.
 
-This is the right mental model, not "does the hedge generate P&L." The hedge is a leverage enabler — it lets you carry higher equity beta under the same risk budget than you could without it.
+Equivalent reframings:
+- The hedge itself doesn't make money — the *rest* of the portfolio makes more money because the hedge exists
+- It's a leverage enabler — lets you carry higher equity beta under the same risk budget
+- It's a positive skewness shift — concave utility curves (pain of -50% >> joy of +50%) make this trade especially valuable
 
 Comparing the three risk-management approaches at this portfolio's shape (beta 1.36):
 
