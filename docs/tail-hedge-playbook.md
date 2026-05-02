@@ -58,6 +58,43 @@ Conditions that argue **against**:
 - Active position management with tight stops
 - Willing and able to liquidate fast when regime breaks
 
+## Hedge index selection
+
+**Default: SPY.** The choice deserves a deliberate decision, but the answer is almost always SPY for portfolios under $5M.
+
+### Why SPY by default
+
+| Reason | Detail |
+|---|---|
+| **Liquidity at deep OTM strikes** | SPY 25% OTM puts typically have 30-50x the open interest of QQQ at equivalent depth; spreads ~0.8% vs ~2.6% |
+| **Spread cost compounds** | A program runs 4-6 rolls/year at deep OTM. Wider QQQ spreads add up across every entry/exit leg |
+| **Beta scaling** | Tech-heavy portfolios paradoxically have *higher* trailing beta vs SPY than vs QQQ (e.g., 1.36 vs 1.13 in this book) — the SPY hedge actually scales up the protection per contract |
+| **Broader coverage** | SPY captures defensive sleeves + commodity + cash positions that QQQ misses |
+
+### When QQQ is justified
+
+QQQ becomes the better choice when:
+- Portfolio is >85% concentrated in Nasdaq-listed tech
+- A specific tech catalyst is the primary risk (AGI hype peak, hyperscaler capex contraction, AI commoditization)
+- Willing to accept ~17-25% higher premium per dollar of notional and wider spreads in exchange for tighter correlation
+
+In a pure tech-bust scenario (2000-style), QQQ pays ~30% more than SPY. In a broad market crash (2008, 2020, 2022 — the modal case), SPY and QQQ pay roughly the same.
+
+### QQQ as a tactical overlay (advanced)
+
+For portfolios with strong tech tilt where you want to retain SPY's liquidity advantage but add tech-specific tail kicker, run a small QQQ overlay (5-10% of total hedge notional). Treat it as a separate program with its own rebalancing cycle. Only worth the management overhead at portfolio sizes >$3M, or when a specific tech catalyst is on the calendar (e.g., earnings cluster of MAG7 + hyperscaler guidance).
+
+### Indices NOT to use
+
+| Index | Why excluded |
+|---|---|
+| **XLK** (Tech Select) | Deep OTM strikes show 30-45% bid-ask spreads — mechanically unusable for tail puts even though you may own XLK shares directly |
+| **SMH** (Semis) | 48% IV at 25% OTM (vs SPY 33%) and ~12% spreads. Costs ~3x more per roll for sector-specific coverage that mostly tracks QQQ |
+| **IWM** (Russell 2000) | Low correlation with tech-heavy books; doesn't hedge actual exposure |
+| **DIA / VTI / IVV** | Less liquid option chains than SPY with no offsetting advantage |
+
+The default `hedge_index="SPY"` in `calculate_hedge` reflects this. Override only with deliberate justification, not because "QQQ feels more tech-y."
+
 ## Strike selection — deep OTM only
 
 The strike defines what event you're insuring against:
@@ -103,7 +140,7 @@ Use `calculate_hedge` with these parameters for tail-risk hedging:
 
 | Parameter | Tail-risk default | Why |
 |---|---|---|
-| `hedge_index` | `SPY` | Most liquid; `QQQ` if portfolio is overwhelmingly tech (>80%) |
+| `hedge_index` | `SPY` | See "Hedge index selection" — almost always SPY; QQQ only with explicit justification |
 | `hedge_ratio` | `0.5` | Hedge half the long delta; the other half rides the recovery |
 | `delta_adjusted` | `False` | Tail-risk mode (notional sizing) — sized for full payout when puts go ITM, not 1:1 delta hedging |
 | `fidelity_folder` | `~/Downloads/fidelity` (if applicable) | **Required if you hold equity in Fidelity.** Without this, sizing only covers Webull NLV |
