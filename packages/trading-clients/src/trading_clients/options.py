@@ -636,12 +636,15 @@ def _analyze_long_only(
 
 
 # ---------------------------------------------------------------------------
-# Public entry point
+# Strategy classifications
 # ---------------------------------------------------------------------------
+# Sets of strategy-type strings grouped by various characteristics. Used
+# internally by strategy_analysis() for routing and externally (e.g. by
+# trading-mcp's analyze_option_strategy) for metric calculations.
 
-# Strategy type → analysis category
-_EQUITY_STRATEGIES = {"Covered Call", "Protective Put", "Collar"}
-_DEFINED_RISK_STRATEGIES = {
+# --- Risk profile: routes strategy_analysis() to the correct analyzer ---
+EQUITY_STRATEGIES = {"Covered Call", "Protective Put", "Collar"}
+DEFINED_RISK_STRATEGIES = {
     "Bull Put Spread",
     "Bear Put Spread",
     "Bull Call Spread",
@@ -652,20 +655,66 @@ _DEFINED_RISK_STRATEGIES = {
     "Short Butterfly",
     "Condor",
 }
-_UNDEFINED_RISK_STRATEGIES = {
+UNDEFINED_RISK_STRATEGIES = {
     "Cash-Secured Put",
     "Short Call",
     "Short Straddle",
     "Short Strangle",
     "Ratio Spread",
 }
-_LONG_ONLY_STRATEGIES = {
+LONG_ONLY_STRATEGIES = {
     "Long Call",
     "Long Put",
     "Straddle",
     "Strangle",
     "Backspread",
 }
+
+# --- Premium direction: used by lognormal expected-value calculations ---
+CREDIT_SPREAD_STRATEGIES = {
+    "Bull Put Spread",
+    "Bear Call Spread",
+    "Iron Condor",
+    "Iron Butterfly",
+}
+DEBIT_STRATEGIES = {
+    "Long Call",
+    "Long Put",
+    "Bull Call Spread",
+    "Bear Put Spread",
+}
+EV_STRATEGIES = CREDIT_SPREAD_STRATEGIES | DEBIT_STRATEGIES | {"Cash-Secured Put"}
+
+# --- Profit zone shape: used by lognormal PoP calculations ---
+PROFIT_ABOVE_BREAKEVEN = {
+    "Cash-Secured Put",
+    "Bull Put Spread",
+    "Bull Call Spread",
+    "Long Call",
+}
+PROFIT_BELOW_BREAKEVEN = {
+    "Bear Call Spread",
+    "Bear Put Spread",
+    "Long Put",
+    "Short Call",
+}
+PROFIT_BETWEEN_BREAKEVENS = {
+    "Iron Condor",
+    "Iron Butterfly",
+    "Butterfly",
+    "Short Straddle",
+    "Short Strangle",
+}
+PROFIT_OUTSIDE_BREAKEVENS = {
+    "Straddle",
+    "Strangle",
+    "Short Butterfly",
+}
+
+
+# ---------------------------------------------------------------------------
+# Public entry point
+# ---------------------------------------------------------------------------
 
 
 def strategy_analysis(
@@ -695,13 +744,13 @@ def strategy_analysis(
 
     strategy_type = detect_strategy(legs, equity_position)
 
-    if strategy_type in _EQUITY_STRATEGIES and equity_position:
+    if strategy_type in EQUITY_STRATEGIES and equity_position:
         return _analyze_equity_strategy(strategy_type, legs, stock_price, equity_position)
-    if strategy_type in _DEFINED_RISK_STRATEGIES:
+    if strategy_type in DEFINED_RISK_STRATEGIES:
         return _analyze_defined_risk(strategy_type, legs, stock_price)
-    if strategy_type in _UNDEFINED_RISK_STRATEGIES:
+    if strategy_type in UNDEFINED_RISK_STRATEGIES:
         return _analyze_undefined_risk(strategy_type, legs, stock_price)
-    if strategy_type in _LONG_ONLY_STRATEGIES:
+    if strategy_type in LONG_ONLY_STRATEGIES:
         return _analyze_long_only(strategy_type, legs, stock_price)
 
     # Fallback for unrecognized strategies

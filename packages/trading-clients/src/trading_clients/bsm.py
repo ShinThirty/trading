@@ -53,3 +53,24 @@ def bsm_price(
     if option_type == "call":
         return stock_price * norm_cdf(d1) - strike * discount * norm_cdf(d2)
     return strike * discount * norm_cdf(-d2) - stock_price * norm_cdf(-d1)
+
+
+def lognormal_cdf(
+    price: float,
+    stock_price: float,
+    tte: float,
+    iv: float,
+    r: float = 0.0,
+) -> float:
+    """Risk-neutral P(S_T <= price) under lognormal terminal distribution.
+
+    Uses log(S_T/S_0) ~ N((r - σ²/2)T, σ²T). Returns 0 for non-positive price
+    and clamps to [0, 1] otherwise.
+    """
+    if price <= 0:
+        return 0.0
+    if tte <= 0 or iv <= 0:
+        return 1.0 if stock_price <= price else 0.0
+    drift = (r - 0.5 * iv * iv) * tte
+    z = (log(price / stock_price) - drift) / (iv * sqrt(tte))
+    return norm_cdf(z)
