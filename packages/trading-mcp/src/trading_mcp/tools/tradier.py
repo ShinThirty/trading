@@ -1,4 +1,5 @@
 import asyncio
+from datetime import date
 from math import gcd
 
 from fastmcp import Context, FastMCP
@@ -317,11 +318,18 @@ async def analyze_option_strategy(
         "Strategy": result.get("strategy_type", ""),
         "Stock Price": fmt_number(stock_price),
     }
+    dte: int | None = None
     if is_multi_exp:
         data["Near Expiration"] = result.get("near_exp", unique_exps[0])
         data["Far Expiration"] = result.get("far_exp", unique_exps[-1])
     else:
         data["Expiration"] = unique_exps[0]
+        try:
+            dte = (date.fromisoformat(unique_exps[0]) - date.today()).days
+            if dte >= 0:
+                data["DTE"] = str(dte)
+        except ValueError:
+            dte = None
 
     if equity_position:
         data["Cost Basis"] = fmt_number(equity_position["cost_basis"])
@@ -360,6 +368,21 @@ async def analyze_option_strategy(
                 ratio = per_share / width * 100
                 warning = " \u26a0 Below 30% minimum" if ratio < 30 else ""
                 data["Credit/Width"] = f"{ratio:.0f}%{warning}"
+
+    if not is_multi_exp and net > 0 and dte is not None and dte > 0:
+        capital_at_risk: float | None = None
+        if strategy_type == "Cash-Secured Put":
+            capital_at_risk = sum(
+                el["strike"] * el["quantity"] * CONTRACT_MULTIPLIER
+                for el in enriched_legs
+                if el["side"] == "sell" and el["option_type"] == "put"
+            )
+        elif strategy_type in _CREDIT_SPREAD_TYPES:
+            capital_at_risk = abs(result["max_loss"])
+        if capital_at_risk and capital_at_risk > 0:
+            total_credit = result["max_profit"]
+            ann_yld = total_credit / capital_at_risk * 365 / dte * 100
+            data["Ann Yield"] = f"{ann_yld:.1f}%"
 
     if result["breakevens"]:
         data["Breakeven"] = ", ".join(f"${fmt_number(b)}" for b in result["breakevens"])
@@ -786,13 +809,15 @@ async def get_vwap(
         elif close < vwap:
             below_count += 1
 
-        rows.append({
-            "Time": tick.get("time", "")[-8:],
-            "Close": fmt_number(close),
-            "Volume": fmt_number(volume, 0),
-            "VWAP": fmt_number(vwap),
-            "Diff": f"{((close - vwap) / vwap) * 100:+.2f}%",
-        })
+        rows.append(
+            {
+                "Time": tick.get("time", "")[-8:],
+                "Close": fmt_number(close),
+                "Volume": fmt_number(volume, 0),
+                "VWAP": fmt_number(vwap),
+                "Diff": f"{((close - vwap) / vwap) * 100:+.2f}%",
+            }
+        )
 
     if not vwap_values:
         return f"(no volume data for {symbol})"
