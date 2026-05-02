@@ -22,7 +22,13 @@ _CREDIT_SPREAD_TYPES = {
     "Iron Condor",
     "Iron Butterfly",
 }
-_EV_STRATEGY_TYPES = _CREDIT_SPREAD_TYPES | {"Cash-Secured Put"}
+_DEBIT_STRATEGY_TYPES = {
+    "Long Call",
+    "Long Put",
+    "Bull Call Spread",
+    "Bear Put Spread",
+}
+_EV_STRATEGY_TYPES = _CREDIT_SPREAD_TYPES | _DEBIT_STRATEGY_TYPES | {"Cash-Secured Put"}
 
 
 def _lognormal_ev(
@@ -33,16 +39,18 @@ def _lognormal_ev(
     dte: int,
     risk_free_rate: float,
 ) -> tuple[float, float] | None:
-    """Risk-neutral expected P&L and EV / capital-at-risk for a credit strategy.
+    """Risk-neutral expected P&L and EV / capital-at-risk for a credit or
+    debit strategy.
 
     Integrates each leg's payoff over the lognormal terminal distribution using
-    its own implied vol, then nets against the upfront credit. Returns
+    its own implied vol, then nets against the upfront credit/debit. Returns
     (expected_pnl_dollars, ev_pct) or None if the strategy doesn't qualify or
     inputs are missing.
 
     Capital at risk:
       - Cash-Secured Put: strike * 100 * qty per short put leg (collateral)
-      - Defined-risk credit spreads: abs(max_loss)
+      - Defined-risk strategies (credit spreads, debit spreads, long options):
+        abs(max_loss)
     """
     if strategy_type not in _EV_STRATEGY_TYPES or dte <= 0:
         return None
