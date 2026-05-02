@@ -303,6 +303,58 @@ Realistic budget for a $1.2M portfolio at 50% notional ratio, 25% OTM, 90-120 DT
 
 In a real crash year (2008, 2020), one cycle's payoff (50-100x premium) covers years of drag and provides $100K+ of liquidity to deploy at the bottom. That's the whole bet.
 
+## Realistic performance expectations
+
+**Most tail-hedge programs fail not from bad math but from operator fatigue during benign streaks.** Document this section and re-read it during quiet periods so future-you doesn't quit in year 4 of a 5-year benign stretch and miss the year 6 crash.
+
+### Expected outcome distribution (rough base rates)
+
+| Year type | Frequency | Hedge P&L | Examples |
+|---|---|---|---|
+| **Pure bull, no spikes** | ~50% of years | -0.8 to -1.0% drag | 2017, 2019, 2021, 2023, 2024 |
+| **Bull with one wobble** | ~25% of years | -0.3 to +0.5% | 2016 |
+| **Sharp correction recovered** | ~15% of years | +1 to +3% | 2018 Q1, Aug 2024 |
+| **Sharp + slow recovery** | ~7% of years | +3 to +8% | 2018 Q4, 2022 H1 |
+| **Real crash** | ~3% of years | +10 to +30% | 2008, March 2020, 2000-02 |
+
+Over a decade, expected total return ≈ **break-even to slightly positive**, with massive variance concentrated in 1-2 crash events.
+
+### Three payoff sources
+
+1. **Maintenance roll captures** (sharp 10-15% moves with vol spike) — most common; 3-5x premium expansion via vega, locked in by Trigger 1
+2. **Major harvest tranches** (real crash, 20%+ drawdowns) — rare but huge; 5x/10x/20x sequential closes
+3. **Compounding harvest → redeploy cycles** (multi-leg crashes like 2008) — proceeds redeployed at deeper strikes catch the next leg
+
+### Three failure modes (be honest about these)
+
+| Mode | What happens | Why |
+|---|---|---|
+| **Slow grinding bear** (2022 H1) | -20% over 9 months, VIX never above 35. Rolls capture little. | Decay outpaces slow drift |
+| **Choppy/sideways** (2015-16) | Multiple wobbles but no sustained moves. | Each scare resolves before triggers fire |
+| **Strong bull** (most years) | Pure drag. | Program working as designed — paying for protection that didn't trigger |
+
+### Why we run it anyway — the strategic case
+
+The hedge isn't an investment. It's the mechanism that **enables sustained long exposure to high-volatility growth sectors** (tech, semis, AI capex) without forcing one of two bad alternatives:
+
+| Alternative to running the hedge | Cost |
+|---|---|
+| **Reduce equity exposure** (sell 10-20% of high-conviction names) | Forgoes ~1-3%/year expected return; same cost as the hedge but no protection |
+| **Hold full exposure unhedged** | Exposed to forced selling at the bottom in a crash; one event can wipe out years of compounding |
+| **Toggle hedges tactically** | The 4/30 anti-pattern; locks in drag without convex payoff |
+
+The structural hedge is the **cheapest** of the three. Same drag as reducing exposure, but you keep the upside *and* get the crash payoff.
+
+### The harvest-as-buying-power second order
+
+The often-missed payoff: **harvest proceeds during a crash become cash to deploy at the bottom.** March 2020 lows weren't just a recovery — they were a generational entry point. A program paying $80K of harvest at SPY -25% becomes $80K of buying power for stocks at -30% off, when most operators are paralyzed or selling.
+
+Without the hedge, you'd be deploying *existing cash* at the bottom (if you have any). With the hedge, you're deploying *crash-generated cash* — money that wouldn't exist otherwise.
+
+### The hardest truth
+
+Expect **3-7 consecutive losing years** before a crash arrives. That's the test most operators fail. The 4/30 close on the SPY 690P was a 10-day version of the same psychology — closing because nothing was wrong yet. **Nothing being wrong is the entire premise.**
+
 ## When this playbook DOES NOT apply
 
 - **Active correction hedging** — use 5-10% OTM, shorter DTE, and the /hedge skill's signal-driven matrix
