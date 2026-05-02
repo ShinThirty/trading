@@ -1,10 +1,11 @@
 import asyncio
 from datetime import date
-from math import gcd
+from math import exp, gcd
 
 from fastmcp import Context, FastMCP
 from trading_clients import indicators as ta
 from trading_clients import options as opts
+from trading_clients.bsm import bsm_price
 from trading_clients.endpoint import CONTRACT_MULTIPLIER
 from trading_clients.endpoints import tradier as t
 from trading_clients.table_helpers import fmt_number, kv_table, list_table
@@ -233,11 +234,11 @@ async def analyze_option_strategy(
 
     unique_exps = sorted({leg["expiration"] for leg in legs})
     chains: dict[str, list[dict]] = {}
-    for exp in unique_exps:
-        chain = await tradier.get(t.CHAIN, t.GetChainRequest(symbol, exp, greeks=True))
+    for exp_date in unique_exps:
+        chain = await tradier.get(t.CHAIN, t.GetChainRequest(symbol, exp_date, greeks=True))
         if not chain.options:
-            return f"(no option chain for {symbol} at {exp})"
-        chains[exp] = chain.options
+            return f"(no option chain for {symbol} at {exp_date})"
+        chains[exp_date] = chain.options
 
     enriched_legs = []
     for leg in legs:
@@ -366,8 +367,7 @@ async def analyze_option_strategy(
                 width = strikes[-1] - strikes[0]
             if width > 0:
                 ratio = per_share / width * 100
-                warning = " \u26a0 Below 30% minimum" if ratio < 30 else ""
-                data["Credit/Width"] = f"{ratio:.0f}%{warning}"
+                data["Credit/Width"] = f"{ratio:.0f}%"
 
     if not is_multi_exp and net > 0 and dte is not None and dte > 0:
         capital_at_risk: float | None = None
@@ -392,6 +392,48 @@ async def analyze_option_strategy(
 
     if result["probability_of_profit"] is not None:
         data["P(Profit)"] = f"{result['probability_of_profit'] * 100:.0f}%"
+
+    _EV_STRATEGY_TYPES = _CREDIT_SPREAD_TYPES | {"Cash-Secured Put"}
+    if (
+        not is_multi_exp
+        and strategy_type in _EV_STRATEGY_TYPES
+        and net > 0
+        and dte is not None
+        and dte > 0
+        and all(el.get("iv") for el in enriched_legs)
+    ):
+        capital_at_risk: float | None = None
+        if strategy_type == "Cash-Secured Put":
+            capital_at_risk = sum(
+                el["strike"] * el["quantity"] * CONTRACT_MULTIPLIER
+                for el in enriched_legs
+                if el["side"] == "sell" and el["option_type"] == "put"
+            )
+        elif strategy_type in _CREDIT_SPREAD_TYPES and result["max_loss"] < 0:
+            capital_at_risk = abs(result["max_loss"])
+        if capital_at_risk and capital_at_risk > 0:
+            risk_free_rate = await _fetch_risk_free_rate(ctx)
+            tte = dte / 365
+            forward_factor = exp(risk_free_rate * tte)
+            expected_pnl = net * CONTRACT_MULTIPLIER
+            for el in enriched_legs:
+                # Risk-neutral expected payoff at expiration = bsm_price * exp(rT)
+                payoff = (
+                    bsm_price(
+                        stock_price=stock_price,
+                        strike=el["strike"],
+                        tte=tte,
+                        iv=el["iv"],
+                        option_type=el["option_type"],
+                        r=risk_free_rate,
+                    )
+                    * forward_factor
+                )
+                side_sign = -1 if el["side"] == "sell" else 1
+                expected_pnl += side_sign * payoff * el["quantity"] * CONTRACT_MULTIPLIER
+            data["Expected Value"] = f"${fmt_number(expected_pnl)}"
+            ev_pct = expected_pnl / capital_at_risk * 100
+            data["EV / $"] = f"{ev_pct:+.2f}%"
 
     if result.get("if_called_return") is not None:
         data["If-Called Return"] = f"{result['if_called_return'] * 100:.2f}%"
