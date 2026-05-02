@@ -11,14 +11,12 @@ from trading_clients.endpoints import tastytrade as tt
 from trading_clients.endpoints import tradier as t
 from trading_clients.table_helpers import kv_table, to_float
 
-from trading_mcp.helpers import (
-    _conviction_data,
+from trading_mcp.conviction import _conviction_data, _format_conviction
+from trading_mcp.helpers import _tastytrade, _tradier
+from trading_mcp.portfolio_fetching import (
     _fetch_all_positions,
     _fetch_risk_free_rate,
     _fetch_total_nlv,
-    _format_conviction,
-    _tastytrade,
-    _tradier,
 )
 
 mcp = FastMCP("signals-tools")
@@ -358,15 +356,9 @@ async def project_option_grid(
             underlying, expiration, option_type, strike = opts.parse_occ(contract_symbol)
         except Exception as e:
             return f"Could not parse contract_symbol '{contract_symbol}': {e}"
-    if (
-        underlying is None
-        or strike is None
-        or expiration is None
-        or option_type is None
-    ):
+    if underlying is None or strike is None or expiration is None or option_type is None:
         return (
-            "Specify either contract_symbol or all of: "
-            "underlying, strike, expiration, option_type"
+            "Specify either contract_symbol or all of: underlying, strike, expiration, option_type"
         )
     option_type = option_type.lower()
 
@@ -416,9 +408,7 @@ async def project_option_grid(
     tte_years = dte_remaining / 365.0
 
     # Parse grid axes
-    pct_changes = _parse_csv_floats(
-        spot_pct_changes, [-30, -25, -20, -15, -10, -5, 0, 5]
-    )
+    pct_changes = _parse_csv_floats(spot_pct_changes, [-30, -25, -20, -15, -10, -5, 0, 5])
     ivs_pct = _parse_csv_floats(iv_levels, [20, 30, 40, 50, 60, 70])
     ivs_decimal = [iv / 100.0 for iv in ivs_pct]
 
@@ -473,8 +463,10 @@ async def project_option_grid(
         )
     else:
         lines.append("")
-        lines.append("_Cell format: option_value (multiple_from_current). "
-                     "Pass `contracts` to also see position P&L._")
+        lines.append(
+            "_Cell format: option_value (multiple_from_current). "
+            "Pass `contracts` to also see position P&L._"
+        )
 
     return "\n".join(lines)
 

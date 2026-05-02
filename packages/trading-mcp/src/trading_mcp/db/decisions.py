@@ -2,7 +2,19 @@ import asyncio
 import sqlite3
 from enum import StrEnum
 
-from trading_mcp.db import OptionType, normalize_enums, now
+from trading_mcp.db import (
+    EnumFields,
+    OptionType,
+    filter_updatable,
+    insert_row,
+    normalize_enums,
+    normalize_input,
+    now,
+    resolve_terminal,
+    select_by_id,
+    select_required,
+    update_by_id,
+)
 
 
 class Action(StrEnum):
@@ -24,7 +36,7 @@ TERMINAL_STATUSES = frozenset(
     {DecisionStatus.DONE, DecisionStatus.EXPIRED, DecisionStatus.CANCELLED}
 )
 
-_ENUM_FIELDS: dict[str, tuple[type[StrEnum], callable]] = {
+_ENUM_FIELDS: EnumFields = {
     "option_type": (OptionType, str.lower),
     "action": (Action, str.upper),
     "status": (DecisionStatus, str.upper),
@@ -51,6 +63,8 @@ DECISION_COLUMNS = [
 ]
 
 UPDATABLE_FIELDS = frozenset(DECISION_COLUMNS) - {"id", "created_at", "updated_at", "completed_at"}
+
+_TABLE = "option_decisions"
 
 _SCHEMA = """\
 CREATE TABLE IF NOT EXISTS option_decisions (
@@ -87,30 +101,17 @@ def init_schema(conn: sqlite3.Connection) -> None:
 
 
 def _add_decision(conn: sqlite3.Connection, data: dict) -> dict:
-    normalize_enums(data, _ENUM_FIELDS)
-    data["ticker"] = data["ticker"].upper()
+    normalize_input(data, _ENUM_FIELDS, uppercase_ticker=True)
     data.setdefault("status", DecisionStatus.PENDING.value)
     ts = now()
     data["created_at"] = ts
     data["updated_at"] = ts
-
-    fields = [k for k in DECISION_COLUMNS if k != "id" and k in data]
-    placeholders = ", ".join(["?"] * len(fields))
-    cols = ", ".join(fields)
-    values = [data[k] for k in fields]
-
-    cur = conn.execute(
-        f"INSERT INTO option_decisions ({cols}) VALUES ({placeholders})", values
-    )
-    conn.commit()
-    return _get_decision_by_id(conn, cur.lastrowid)
+    row_id = insert_row(conn, _TABLE, data, DECISION_COLUMNS)
+    return select_required(conn, _TABLE, row_id)
 
 
 def _get_decision_by_id(conn: sqlite3.Connection, decision_id: int) -> dict | None:
-    row = conn.execute(
-        "SELECT * FROM option_decisions WHERE id = ?", (decision_id,)
-    ).fetchone()
-    return dict(row) if row else None
+    return select_by_id(conn, _TABLE, decision_id)
 
 
 def _list_decisions(
@@ -153,25 +154,20 @@ def _list_decisions(
 
 
 def _update_decision(conn: sqlite3.Connection, decision_id: int, updates: dict) -> dict:
-    decision = _get_decision_by_id(conn, decision_id)
+    decision = select_by_id(conn, _TABLE, decision_id)
     if decision is None:
         raise ValueError(f"No decision with id {decision_id}")
     if decision["status"] in TERMINAL_STATUSES:
         raise ValueError(f"Decision {decision_id} is already {decision['status']}")
 
     normalize_enums(updates, _ENUM_FIELDS)
-
-    fields = {k: v for k, v in updates.items() if k in UPDATABLE_FIELDS and v is not None}
+    fields = filter_updatable(updates, UPDATABLE_FIELDS)
     if not fields:
         raise ValueError("No valid fields to update")
 
     fields["updated_at"] = now()
-
-    set_clause = ", ".join(f"{k} = ?" for k in fields)
-    values = list(fields.values()) + [decision_id]
-    conn.execute(f"UPDATE option_decisions SET {set_clause} WHERE id = ?", values)
-    conn.commit()
-    return _get_decision_by_id(conn, decision_id)
+    update_by_id(conn, _TABLE, decision_id, fields)
+    return select_required(conn, _TABLE, decision_id)
 
 
 def _close_decision(
@@ -180,25 +176,17 @@ def _close_decision(
     status: str,
     outcome: str | None = None,
 ) -> dict:
-    resolved = DecisionStatus(status.upper())
-    if resolved not in TERMINAL_STATUSES:
-        terminal = ", ".join(s.value for s in TERMINAL_STATUSES)
-        raise ValueError(f"Status must be terminal: {terminal}")
-
-    decision = _get_decision_by_id(conn, decision_id)
-    if decision is None:
+    resolved = resolve_terminal(status, DecisionStatus, str.upper, TERMINAL_STATUSES)
+    if select_by_id(conn, _TABLE, decision_id) is None:
         raise ValueError(f"No decision with id {decision_id}")
 
     ts = now()
-    updates: dict = {"status": resolved.value, "updated_at": ts, "completed_at": ts}
+    fields: dict = {"status": resolved.value, "updated_at": ts, "completed_at": ts}
     if outcome:
-        updates["outcome"] = outcome
+        fields["outcome"] = outcome
 
-    set_clause = ", ".join(f"{k} = ?" for k in updates)
-    values = list(updates.values()) + [decision_id]
-    conn.execute(f"UPDATE option_decisions SET {set_clause} WHERE id = ?", values)
-    conn.commit()
-    return _get_decision_by_id(conn, decision_id)
+    update_by_id(conn, _TABLE, decision_id, fields)
+    return select_required(conn, _TABLE, decision_id)
 
 
 # -- Async public API --
@@ -244,6 +232,4 @@ async def close_decision(
     status: str,
     outcome: str | None = None,
 ) -> dict:
-    return await asyncio.to_thread(
-        _close_decision, conn, decision_id, status, outcome=outcome
-    )
+    return await asyncio.to_thread(_close_decision, conn, decision_id, status, outcome=outcome)

@@ -38,13 +38,15 @@ from trading_clients.table_helpers import fmt_number, kv_table, list_table, to_f
 
 from trading_mcp.helpers import (
     _check_market,
-    _compute_csp_collateral,
-    _fetch_accounts,
-    _fetch_all_positions,
     _retry,
     _tradier,
     _webull,
     _write_temp_file,
+)
+from trading_mcp.portfolio_fetching import (
+    _compute_csp_collateral,
+    _fetch_accounts,
+    _fetch_all_positions,
 )
 
 mcp = FastMCP("webull-tools")

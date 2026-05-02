@@ -2,7 +2,19 @@ import asyncio
 import sqlite3
 from enum import StrEnum
 
-from trading_mcp.db import OptionType, normalize_enums, now
+from trading_mcp.db import (
+    EnumFields,
+    OptionType,
+    filter_updatable,
+    insert_row,
+    normalize_enums,
+    normalize_input,
+    now,
+    resolve_terminal,
+    select_by_id,
+    select_required,
+    update_by_id,
+)
 
 
 class RollStatus(StrEnum):
@@ -18,7 +30,7 @@ TERMINAL_STATUSES = frozenset(
     {RollStatus.FILLED, RollStatus.EXPIRED, RollStatus.CANCELLED, RollStatus.SKIP}
 )
 
-_ENUM_FIELDS: dict[str, tuple[type[StrEnum], callable]] = {
+_ENUM_FIELDS: EnumFields = {
     "option_type": (OptionType, str.lower),
     "status": (RollStatus, str.upper),
 }
@@ -42,6 +54,8 @@ ROLL_COLUMNS = [
 ]
 
 UPDATABLE_FIELDS = frozenset(ROLL_COLUMNS) - {"id", "created_at", "updated_at", "filled_at"}
+
+_TABLE = "rolls"
 
 _SCHEMA = """\
 CREATE TABLE IF NOT EXISTS rolls (
@@ -75,26 +89,17 @@ def init_schema(conn: sqlite3.Connection) -> None:
 
 
 def _add_roll(conn: sqlite3.Connection, data: dict) -> dict:
-    normalize_enums(data, _ENUM_FIELDS)
-    data["ticker"] = data["ticker"].upper()
+    normalize_input(data, _ENUM_FIELDS, uppercase_ticker=True)
     data.setdefault("status", RollStatus.PLANNED.value)
     ts = now()
     data["created_at"] = ts
     data["updated_at"] = ts
-
-    fields = [k for k in ROLL_COLUMNS if k != "id" and k in data]
-    placeholders = ", ".join(["?"] * len(fields))
-    cols = ", ".join(fields)
-    values = [data[k] for k in fields]
-
-    cur = conn.execute(f"INSERT INTO rolls ({cols}) VALUES ({placeholders})", values)
-    conn.commit()
-    return _get_roll_by_id(conn, cur.lastrowid)
+    row_id = insert_row(conn, _TABLE, data, ROLL_COLUMNS)
+    return select_required(conn, _TABLE, row_id)
 
 
 def _get_roll_by_id(conn: sqlite3.Connection, roll_id: int) -> dict | None:
-    row = conn.execute("SELECT * FROM rolls WHERE id = ?", (roll_id,)).fetchone()
-    return dict(row) if row else None
+    return select_by_id(conn, _TABLE, roll_id)
 
 
 def _get_active_rolls(conn: sqlite3.Connection, ticker: str) -> list[dict]:
@@ -142,25 +147,20 @@ def _list_rolls(
 
 
 def _update_roll(conn: sqlite3.Connection, roll_id: int, updates: dict) -> dict:
-    roll = _get_roll_by_id(conn, roll_id)
+    roll = select_by_id(conn, _TABLE, roll_id)
     if roll is None:
         raise ValueError(f"No roll with id {roll_id}")
     if roll["status"] in TERMINAL_STATUSES:
         raise ValueError(f"Roll {roll_id} is already {roll['status']}")
 
     normalize_enums(updates, _ENUM_FIELDS)
-
-    fields = {k: v for k, v in updates.items() if k in UPDATABLE_FIELDS and v is not None}
+    fields = filter_updatable(updates, UPDATABLE_FIELDS)
     if not fields:
         raise ValueError("No valid fields to update")
 
     fields["updated_at"] = now()
-
-    set_clause = ", ".join(f"{k} = ?" for k in fields)
-    values = list(fields.values()) + [roll_id]
-    conn.execute(f"UPDATE rolls SET {set_clause} WHERE id = ?", values)
-    conn.commit()
-    return _get_roll_by_id(conn, roll_id)
+    update_by_id(conn, _TABLE, roll_id, fields)
+    return select_required(conn, _TABLE, roll_id)
 
 
 def _close_roll(
@@ -170,29 +170,21 @@ def _close_roll(
     reason: str | None = None,
     net_credit: float | None = None,
 ) -> dict:
-    resolved = RollStatus(status.upper())
-    if resolved not in TERMINAL_STATUSES:
-        terminal = ", ".join(s.value for s in TERMINAL_STATUSES)
-        raise ValueError(f"Status must be terminal: {terminal}")
-
-    roll = _get_roll_by_id(conn, roll_id)
-    if roll is None:
+    resolved = resolve_terminal(status, RollStatus, str.upper, TERMINAL_STATUSES)
+    if select_by_id(conn, _TABLE, roll_id) is None:
         raise ValueError(f"No roll with id {roll_id}")
 
     ts = now()
-    updates: dict = {"status": resolved.value, "updated_at": ts}
+    fields: dict = {"status": resolved.value, "updated_at": ts}
     if resolved == RollStatus.FILLED:
-        updates["filled_at"] = ts
+        fields["filled_at"] = ts
     if reason:
-        updates["reason"] = reason
+        fields["reason"] = reason
     if net_credit is not None:
-        updates["net_credit"] = net_credit
+        fields["net_credit"] = net_credit
 
-    set_clause = ", ".join(f"{k} = ?" for k in updates)
-    values = list(updates.values()) + [roll_id]
-    conn.execute(f"UPDATE rolls SET {set_clause} WHERE id = ?", values)
-    conn.commit()
-    return _get_roll_by_id(conn, roll_id)
+    update_by_id(conn, _TABLE, roll_id, fields)
+    return select_required(conn, _TABLE, roll_id)
 
 
 # -- Async public API --

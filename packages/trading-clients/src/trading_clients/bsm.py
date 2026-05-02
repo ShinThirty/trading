@@ -4,10 +4,10 @@ Pure math module — no I/O, no API calls. Used for hypothetical option valuatio
 in scenario analysis (e.g. tail-hedge `project_option_grid`) and for valuing
 the far-dated leg of multi-expiration strategies (calendar/diagonal spreads).
 
-For risk-free rate retrieval to feed `bsm_price`, see `trading_mcp.helpers.
-_fetch_risk_free_rate` — that function lives in the trading-mcp package because
-it requires the FRED client (Context-dependent), but conceptually pairs with
-this module.
+For risk-free rate retrieval to feed `bsm_price`, see
+`trading_mcp.portfolio_fetching._fetch_risk_free_rate` — that function lives
+in the trading-mcp package because it requires the FRED client
+(Context-dependent), but conceptually pairs with this module.
 
 Reference: Hull, *Options, Futures, and Other Derivatives*, Ch. 14.
 """

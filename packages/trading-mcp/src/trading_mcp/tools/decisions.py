@@ -33,7 +33,15 @@ _DETAIL_FIELDS = [
 ]
 
 _LIST_COLUMNS = [
-    "ID", "Ticker", "Strike", "Exp", "Type", "Action", "Status", "Deadline", "Source",
+    "ID",
+    "Ticker",
+    "Strike",
+    "Exp",
+    "Type",
+    "Action",
+    "Status",
+    "Deadline",
+    "Source",
 ]
 
 

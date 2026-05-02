@@ -359,7 +359,14 @@ _DETAIL_FIELDS = [
 ]
 
 _LIST_COLUMNS = [
-    "Ticker", "Intent", "Status", "Pipeline", "Tier", "Conviction", "Priority", "Earnings",
+    "Ticker",
+    "Intent",
+    "Status",
+    "Pipeline",
+    "Tier",
+    "Conviction",
+    "Priority",
+    "Earnings",
 ]
 
 
@@ -530,10 +537,7 @@ async def pipeline_get(ctx: Context, ticker: str) -> str:
     out = _entry_detail(entry)
     notes = await get_notes(conn, entry["id"])
     if notes:
-        note_rows = [
-            {"Date": n["created_at"], "Note": n["note"]}
-            for n in notes
-        ]
+        note_rows = [{"Date": n["created_at"], "Note": n["note"]} for n in notes]
         out += "\n\n**Notes:**\n" + list_table(note_rows, ["Date", "Note"])
     return out
 
@@ -694,9 +698,7 @@ async def pipeline_catalyst_list(
         if entry is None:
             return f"No active pipeline entry for {ticker.upper()}"
         entry_id = entry["id"]
-    catalysts = await list_catalysts(
-        conn, entry_id=entry_id, status=status, days_ahead=days_ahead
-    )
+    catalysts = await list_catalysts(conn, entry_id=entry_id, status=status, days_ahead=days_ahead)
     if not catalysts:
         return "(no catalysts match filters)"
     return _catalysts_table(catalysts)

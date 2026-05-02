@@ -1,127 +1,18 @@
 import asyncio
 from datetime import date
-from math import exp, gcd
+from math import gcd
 
 from fastmcp import Context, FastMCP
 from trading_clients import indicators as ta
 from trading_clients import options as opts
-from trading_clients.bsm import bsm_price, lognormal_cdf
 from trading_clients.endpoint import CONTRACT_MULTIPLIER
 from trading_clients.endpoints import tradier as t
 from trading_clients.table_helpers import fmt_number, kv_table, list_table
 
-from trading_mcp.helpers import _fetch_risk_free_rate, _tradier
+from trading_mcp.helpers import _tradier
+from trading_mcp.portfolio_fetching import _fetch_risk_free_rate
 
 mcp = FastMCP("tradier-tools")
-
-
-def _lognormal_ev(
-    enriched_legs: list[dict],
-    strategy_type: str,
-    stock_price: float,
-    max_loss: float,
-    dte: int,
-    risk_free_rate: float,
-) -> tuple[float, float] | None:
-    """Risk-neutral expected P&L and EV / capital-at-risk for a credit or
-    debit strategy.
-
-    Integrates each leg's payoff over the lognormal terminal distribution using
-    its own implied vol, then nets against the upfront credit/debit. Returns
-    (expected_pnl_dollars, ev_pct) or None if the strategy doesn't qualify or
-    inputs are missing.
-
-    Capital at risk:
-      - Cash-Secured Put: strike * 100 * qty per short put leg (collateral)
-      - Defined-risk strategies (credit spreads, debit spreads, long options):
-        abs(max_loss)
-    """
-    if strategy_type not in opts.EV_STRATEGIES or dte <= 0:
-        return None
-    if not all(el.get("iv") for el in enriched_legs):
-        return None
-
-    if strategy_type == "Cash-Secured Put":
-        capital_at_risk = sum(
-            el["strike"] * el["quantity"] * CONTRACT_MULTIPLIER
-            for el in enriched_legs
-            if el["side"] == "sell" and el["option_type"] == "put"
-        )
-    elif max_loss < 0:
-        capital_at_risk = abs(max_loss)
-    else:
-        return None
-
-    if not capital_at_risk or capital_at_risk <= 0:
-        return None
-
-    tte = dte / 365
-    forward_factor = exp(risk_free_rate * tte)
-    net_premium = sum(
-        (1 if el["side"] == "sell" else -1) * el["premium"] * el["quantity"] for el in enriched_legs
-    )
-    expected_pnl = net_premium * CONTRACT_MULTIPLIER
-    for el in enriched_legs:
-        # Risk-neutral expected payoff at expiration = bsm_price * exp(rT)
-        payoff = (
-            bsm_price(
-                stock_price=stock_price,
-                strike=el["strike"],
-                tte=tte,
-                iv=el["iv"],
-                option_type=el["option_type"],
-                r=risk_free_rate,
-            )
-            * forward_factor
-        )
-        side_sign = -1 if el["side"] == "sell" else 1
-        expected_pnl += side_sign * payoff * el["quantity"] * CONTRACT_MULTIPLIER
-
-    ev_pct = expected_pnl / capital_at_risk * 100
-    return expected_pnl, ev_pct
-
-
-def _lognormal_pop(
-    strategy_type: str,
-    breakevens: list[float],
-    enriched_legs: list[dict],
-    stock_price: float,
-    dte: int,
-    risk_free_rate: float,
-) -> float | None:
-    """Probability of finishing in the strategy's profit zone using lognormal CDF.
-
-    Uses the average IV across legs as the underlying terminal-vol proxy, then
-    computes P(S_T in profit_zone) by integrating the risk-neutral lognormal
-    distribution. More accurate than the delta-based approximation for
-    multi-leg strategies (especially iron condors/butterflies and long
-    options where delta conflates ITM with above-breakeven). Returns None if
-    the strategy isn't classifiable, breakevens are missing, or IVs are
-    unavailable.
-    """
-    if not breakevens or dte <= 0:
-        return None
-    ivs = [el.get("iv") for el in enriched_legs if el.get("iv")]
-    if not ivs:
-        return None
-    iv = sum(ivs) / len(ivs)
-    if iv <= 0:
-        return None
-
-    tte = dte / 365
-
-    def cdf(price: float) -> float:
-        return lognormal_cdf(price, stock_price, tte, iv, risk_free_rate)
-
-    if strategy_type in opts.PROFIT_ABOVE_BREAKEVEN and len(breakevens) >= 1:
-        return 1.0 - cdf(breakevens[0])
-    if strategy_type in opts.PROFIT_BELOW_BREAKEVEN and len(breakevens) >= 1:
-        return cdf(breakevens[0])
-    if strategy_type in opts.PROFIT_BETWEEN_BREAKEVENS and len(breakevens) >= 2:
-        return cdf(breakevens[1]) - cdf(breakevens[0])
-    if strategy_type in opts.PROFIT_OUTSIDE_BREAKEVENS and len(breakevens) >= 2:
-        return cdf(breakevens[0]) + (1.0 - cdf(breakevens[1]))
-    return None
 
 
 @mcp.tool()
@@ -498,12 +389,12 @@ async def analyze_option_strategy(
     # applicable; EV is only meaningful for the credit/debit strategies in
     # opts.EV_STRATEGIES. Falls back to the delta-based PoP from
     # strategy_analysis when lognormal can't be computed.
-    lognormal_pop: float | None = None
+    lognormal_pop_value: float | None = None
     ev_result: tuple[float, float] | None = None
     if not is_multi_exp and dte is not None and dte > 0:
         rfr = await _fetch_risk_free_rate(ctx)
         if result["breakevens"]:
-            lognormal_pop = _lognormal_pop(
+            lognormal_pop_value = opts.lognormal_pop(
                 strategy_type=strategy_type,
                 breakevens=result["breakevens"],
                 enriched_legs=enriched_legs,
@@ -512,7 +403,7 @@ async def analyze_option_strategy(
                 risk_free_rate=rfr,
             )
         if strategy_type in opts.EV_STRATEGIES:
-            ev_result = _lognormal_ev(
+            ev_result = opts.lognormal_ev(
                 enriched_legs=enriched_legs,
                 strategy_type=strategy_type,
                 stock_price=stock_price,
@@ -521,7 +412,9 @@ async def analyze_option_strategy(
                 risk_free_rate=rfr,
             )
 
-    pop_value = lognormal_pop if lognormal_pop is not None else result["probability_of_profit"]
+    pop_value = (
+        lognormal_pop_value if lognormal_pop_value is not None else result["probability_of_profit"]
+    )
     if pop_value is not None:
         data["P(Profit)"] = f"{pop_value * 100:.0f}%"
 

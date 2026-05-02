@@ -428,5 +428,3 @@ def classify_breadth(
         label = "Mixed"
 
     return label, "; ".join(parts)
-
-

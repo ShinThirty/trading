@@ -232,7 +232,8 @@ async def scan_informed_activity(
         except Exception:
             continue
         purchases = [
-            tx for tx in resp.transactions
+            tx
+            for tx in resp.transactions
             if tx.get("transactionCode") == "P"
             and (tx.get("transactionDate", "") >= cutoff)
             and (to_float(tx.get("change")) or 0) > 0

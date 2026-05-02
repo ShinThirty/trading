@@ -32,13 +32,15 @@ async def _fetch_day(client: httpx.AsyncClient, d: date) -> list[dict]:
         parts = line.split("|")
         if len(parts) < 5:
             continue
-        rows.append({
-            "date": parts[0],
-            "symbol": parts[1],
-            "short_volume": float(parts[2]),
-            "short_exempt_volume": float(parts[3]),
-            "total_volume": float(parts[4]),
-        })
+        rows.append(
+            {
+                "date": parts[0],
+                "symbol": parts[1],
+                "short_volume": float(parts[2]),
+                "short_exempt_volume": float(parts[3]),
+                "total_volume": float(parts[4]),
+            }
+        )
 
     _cache.put(key, rows)
     return rows
@@ -81,13 +83,15 @@ async def get_short_volume(ctx: Context, symbol: str, days: int = 20) -> str:
                     short_vol = r["short_volume"]
                     total_vol = r["total_volume"]
                     ratio = short_vol / total_vol * 100 if total_vol > 0 else 0
-                    results.append({
-                        "Date": d.strftime("%Y-%m-%d"),
-                        "Short Vol": fmt_large(short_vol),
-                        "Total Vol": fmt_large(total_vol),
-                        "Short %": f"{ratio:.1f}%",
-                        "Exempt Vol": fmt_large(r["short_exempt_volume"]),
-                    })
+                    results.append(
+                        {
+                            "Date": d.strftime("%Y-%m-%d"),
+                            "Short Vol": fmt_large(short_vol),
+                            "Total Vol": fmt_large(total_vol),
+                            "Short %": f"{ratio:.1f}%",
+                            "Exempt Vol": fmt_large(r["short_exempt_volume"]),
+                        }
+                    )
                     break
 
     if not results:

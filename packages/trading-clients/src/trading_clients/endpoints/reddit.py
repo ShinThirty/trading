@@ -65,8 +65,12 @@ class PostRequest(ParamsRequest, PathRequest):
 
     def to_params(self) -> dict[str, str]:
         sort_map = {
-            "best": "confidence", "top": "top", "new": "new",
-            "controversial": "controversial", "old": "old", "qa": "qa",
+            "best": "confidence",
+            "top": "top",
+            "new": "new",
+            "controversial": "controversial",
+            "old": "old",
+            "qa": "qa",
         }
         return {
             "sort": sort_map.get(self.comment_sort, "confidence"),
@@ -158,12 +162,14 @@ class PostResponse:
             author = cd.get("author", "[deleted]")
             if author == "VisualMod":
                 continue
-            comments.append({
-                "author": author,
-                "score": cd.get("score", 0),
-                "body": _truncate(cd.get("body", ""), 400),
-                "created_utc": cd.get("created_utc"),
-            })
+            comments.append(
+                {
+                    "author": author,
+                    "score": cd.get("score", 0),
+                    "body": _truncate(cd.get("body", ""), 400),
+                    "created_utc": cd.get("created_utc"),
+                }
+            )
         link_url = post.get("url_overridden_by_dest", "")
         return cls(
             title=post.get("title", ""),

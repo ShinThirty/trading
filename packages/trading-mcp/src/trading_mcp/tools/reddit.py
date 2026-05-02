@@ -36,8 +36,9 @@ async def search_reddit(
     limit: Max posts to return (1-25, default 10).
     """
     client = _reddit(ctx)
-    req = r.SearchRequest(query=query, subreddit=subreddit, sort=sort,
-                          time_filter=time_filter, limit=limit)
+    req = r.SearchRequest(
+        query=query, subreddit=subreddit, sort=sort, time_filter=time_filter, limit=limit
+    )
     resp = await client.get(r.SEARCH, req)
     if not resp.posts:
         return f"No results for '{query}' in r/{subreddit}"
@@ -61,8 +62,7 @@ async def get_subreddit_posts(
     limit: Max posts to return (1-25, default 10).
     """
     client = _reddit(ctx)
-    req = r.SubredditRequest(subreddit=subreddit, sort=sort,
-                             time_filter=time_filter, limit=limit)
+    req = r.SubredditRequest(subreddit=subreddit, sort=sort, time_filter=time_filter, limit=limit)
     resp = await client.get(r.SUBREDDIT, req)
     if not resp.posts:
         return f"No posts found in r/{subreddit}"
@@ -85,7 +85,6 @@ async def get_reddit_post(
     """
     client = _reddit(ctx)
     post_id = _post_id_from_url(url)
-    req = r.PostRequest(post_id=post_id, comment_limit=comment_limit,
-                        comment_sort=comment_sort)
+    req = r.PostRequest(post_id=post_id, comment_limit=comment_limit, comment_sort=comment_sort)
     resp = await client.get(r.POST, req)
     return resp.to_output()

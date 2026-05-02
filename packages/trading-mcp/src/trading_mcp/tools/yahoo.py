@@ -47,8 +47,14 @@ class _yfc:
 
         key = f"custom_screen:{sort_field}:{sort_asc}:{size}:" + str(criteria)
         return await _cached(
-            _cache, key, _TTL_SCREENER, _screen, query,
-            sortField=sort_field, sortAsc=sort_asc, size=size,
+            _cache,
+            key,
+            _TTL_SCREENER,
+            _screen,
+            query,
+            sortField=sort_field,
+            sortAsc=sort_asc,
+            size=size,
         )
 
     @staticmethod

@@ -31,7 +31,15 @@ _DETAIL_FIELDS = [
 ]
 
 _LIST_COLUMNS = [
-    "ID", "Ticker", "Account", "Type", "Qty", "From", "To", "Status", "Credit",
+    "ID",
+    "Ticker",
+    "Account",
+    "Type",
+    "Qty",
+    "From",
+    "To",
+    "Status",
+    "Credit",
 ]
 
 

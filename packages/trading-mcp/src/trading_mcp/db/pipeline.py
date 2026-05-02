@@ -2,7 +2,18 @@ import asyncio
 import sqlite3
 from enum import StrEnum
 
-from trading_mcp.db import normalize_enums, now
+from trading_mcp.db import (
+    EnumFields,
+    filter_updatable,
+    insert_row,
+    normalize_enums,
+    normalize_input,
+    now,
+    resolve_terminal,
+    select_by_id,
+    select_required,
+    update_by_id,
+)
 
 
 class Intent(StrEnum):
@@ -65,8 +76,7 @@ class CatalystStatus(StrEnum):
     PASSED = "passed"
 
 
-# Maps field name to (enum class, normalizer applied before enum lookup)
-_ENUM_FIELDS: dict[str, tuple[type[StrEnum], callable]] = {
+_ENUM_FIELDS: EnumFields = {
     "intent": (Intent, str.lower),
     "status": (Status, str.upper),
     "pipeline": (Pipeline, str.lower),
@@ -74,7 +84,7 @@ _ENUM_FIELDS: dict[str, tuple[type[StrEnum], callable]] = {
     "conviction": (Conviction, str.lower),
 }
 
-_CATALYST_ENUM_FIELDS: dict[str, tuple[type[StrEnum], callable]] = {
+_CATALYST_ENUM_FIELDS: EnumFields = {
     "type": (CatalystType, str.lower),
     "status": (CatalystStatus, str.lower),
     "magnitude": (Tier, str.lower),
@@ -109,6 +119,10 @@ ENTRY_COLUMNS = [
 ]
 
 UPDATABLE_FIELDS = frozenset(ENTRY_COLUMNS) - {"id", "created_at", "updated_at", "closed_at"}
+
+_ENTRIES_TABLE = "pipeline_entries"
+_NOTES_TABLE = "pipeline_notes"
+_CATALYSTS_TABLE = "pipeline_catalysts"
 
 _SCHEMA = """\
 CREATE TABLE IF NOT EXISTS pipeline_entries (
@@ -181,24 +195,13 @@ def init_schema(conn: sqlite3.Connection) -> None:
 
 
 def _add_entry(conn: sqlite3.Connection, data: dict) -> dict:
-    normalize_enums(data, _ENUM_FIELDS)
-
-    data["ticker"] = data["ticker"].upper()
+    normalize_input(data, _ENUM_FIELDS, uppercase_ticker=True)
     data.setdefault("status", Status.PIPELINE.value)
     ts = now()
     data["created_at"] = ts
     data["updated_at"] = ts
-
-    fields = [k for k in ENTRY_COLUMNS if k != "id" and k in data]
-    placeholders = ", ".join(["?"] * len(fields))
-    cols = ", ".join(fields)
-    values = [data[k] for k in fields]
-
-    cur = conn.execute(
-        f"INSERT INTO pipeline_entries ({cols}) VALUES ({placeholders})", values
-    )
-    conn.commit()
-    return _get_entry_by_id(conn, cur.lastrowid)
+    row_id = insert_row(conn, _ENTRIES_TABLE, data, ENTRY_COLUMNS)
+    return select_required(conn, _ENTRIES_TABLE, row_id)
 
 
 def _get_active_entry(conn: sqlite3.Connection, ticker: str) -> dict | None:
@@ -212,10 +215,7 @@ def _get_active_entry(conn: sqlite3.Connection, ticker: str) -> dict | None:
 
 
 def _get_entry_by_id(conn: sqlite3.Connection, entry_id: int) -> dict | None:
-    row = conn.execute(
-        "SELECT * FROM pipeline_entries WHERE id = ?", (entry_id,)
-    ).fetchone()
-    return dict(row) if row else None
+    return select_by_id(conn, _ENTRIES_TABLE, entry_id)
 
 
 def _list_entries(
@@ -255,8 +255,7 @@ def _update_entry(conn: sqlite3.Connection, ticker: str, updates: dict) -> dict:
         raise ValueError(f"No active pipeline entry for {ticker.upper()}")
 
     normalize_enums(updates, _ENUM_FIELDS)
-
-    fields = {k: v for k, v in updates.items() if k in UPDATABLE_FIELDS and v is not None}
+    fields = filter_updatable(updates, UPDATABLE_FIELDS)
     if not fields:
         raise ValueError("No valid fields to update")
 
@@ -267,30 +266,24 @@ def _update_entry(conn: sqlite3.Connection, ticker: str, updates: dict) -> dict:
     if new_status in TERMINAL_STATUSES:
         fields["closed_at"] = ts
 
-    set_clause = ", ".join(f"{k} = ?" for k in fields)
-    values = list(fields.values()) + [entry["id"]]
-    conn.execute(f"UPDATE pipeline_entries SET {set_clause} WHERE id = ?", values)
-    conn.commit()
-    return _get_entry_by_id(conn, entry["id"])
+    update_by_id(conn, _ENTRIES_TABLE, entry["id"], fields)
+    return select_required(conn, _ENTRIES_TABLE, entry["id"])
 
 
 def _close_entry(conn: sqlite3.Connection, ticker: str, status: str = "CLOSED") -> dict:
-    resolved = Status(status.upper())
-    if resolved not in TERMINAL_STATUSES:
-        terminal = ", ".join(s.value for s in TERMINAL_STATUSES)
-        raise ValueError(f"Status must be terminal: {terminal}")
-
+    resolved = resolve_terminal(status, Status, str.upper, TERMINAL_STATUSES)
     entry = _get_active_entry(conn, ticker)
     if entry is None:
         raise ValueError(f"No active pipeline entry for {ticker.upper()}")
 
     ts = now()
-    conn.execute(
-        "UPDATE pipeline_entries SET status = ?, closed_at = ?, updated_at = ? WHERE id = ?",
-        (resolved.value, ts, ts, entry["id"]),
+    update_by_id(
+        conn,
+        _ENTRIES_TABLE,
+        entry["id"],
+        {"status": resolved.value, "closed_at": ts, "updated_at": ts},
     )
-    conn.commit()
-    return _get_entry_by_id(conn, entry["id"])
+    return select_required(conn, _ENTRIES_TABLE, entry["id"])
 
 
 def _add_note(conn: sqlite3.Connection, ticker: str, note: str) -> dict:
@@ -298,13 +291,13 @@ def _add_note(conn: sqlite3.Connection, ticker: str, note: str) -> dict:
     if entry is None:
         raise ValueError(f"No active pipeline entry for {ticker.upper()}")
 
-    cur = conn.execute(
-        "INSERT INTO pipeline_notes (entry_id, note) VALUES (?, ?)",
-        (entry["id"], note),
+    note_id = insert_row(
+        conn,
+        _NOTES_TABLE,
+        {"entry_id": entry["id"], "note": note},
+        ["id", "entry_id", "note"],
     )
-    conn.commit()
-    row = conn.execute("SELECT * FROM pipeline_notes WHERE id = ?", (cur.lastrowid,)).fetchone()
-    return dict(row)
+    return select_required(conn, _NOTES_TABLE, note_id)
 
 
 def _get_notes(conn: sqlite3.Connection, entry_id: int) -> list[dict]:
@@ -318,32 +311,30 @@ def _get_notes(conn: sqlite3.Connection, entry_id: int) -> list[dict]:
 # -- Catalyst sync internals --
 
 CATALYST_COLUMNS = [
-    "id", "entry_id", "type", "date", "magnitude",
-    "description", "status", "outcome", "created_at", "updated_at",
+    "id",
+    "entry_id",
+    "type",
+    "date",
+    "magnitude",
+    "description",
+    "status",
+    "outcome",
+    "created_at",
+    "updated_at",
 ]
 
 CATALYST_UPDATABLE = frozenset(CATALYST_COLUMNS) - {"id", "entry_id", "created_at", "updated_at"}
 
 
 def _add_catalyst(conn: sqlite3.Connection, entry_id: int, data: dict) -> dict:
-    normalize_enums(data, _CATALYST_ENUM_FIELDS)
+    normalize_input(data, _CATALYST_ENUM_FIELDS)
     data["entry_id"] = entry_id
     data.setdefault("status", CatalystStatus.UPCOMING.value)
     ts = now()
     data["created_at"] = ts
     data["updated_at"] = ts
-
-    fields = [k for k in CATALYST_COLUMNS if k != "id" and k in data]
-    placeholders = ", ".join(["?"] * len(fields))
-    cols = ", ".join(fields)
-    values = [data[k] for k in fields]
-
-    cur = conn.execute(
-        f"INSERT INTO pipeline_catalysts ({cols}) VALUES ({placeholders})", values
-    )
-    conn.commit()
-    row = conn.execute("SELECT * FROM pipeline_catalysts WHERE id = ?", (cur.lastrowid,)).fetchone()
-    return dict(row)
+    row_id = insert_row(conn, _CATALYSTS_TABLE, data, CATALYST_COLUMNS)
+    return select_required(conn, _CATALYSTS_TABLE, row_id)
 
 
 def _list_catalysts(
@@ -364,9 +355,7 @@ def _list_catalysts(
         clauses.append("c.entry_id = ?")
         params.append(entry_id)
     else:
-        clauses.append(
-            "e.status NOT IN ('CLOSED', 'REMOVED', 'SHELVED', 'SKIP')"
-        )
+        clauses.append("e.status NOT IN ('CLOSED', 'REMOVED', 'SHELVED', 'SKIP')")
 
     if status:
         clauses.append("c.status = ?")
@@ -379,31 +368,22 @@ def _list_catalysts(
         params.append(days_ahead)
 
     where = " AND ".join(clauses) if clauses else "1=1"
-    rows = conn.execute(
-        f"{query} WHERE {where} ORDER BY c.date, e.ticker", params
-    ).fetchall()
+    rows = conn.execute(f"{query} WHERE {where} ORDER BY c.date, e.ticker", params).fetchall()
     return [dict(r) for r in rows]
 
 
 def _update_catalyst(conn: sqlite3.Connection, catalyst_id: int, updates: dict) -> dict:
-    row = conn.execute(
-        "SELECT * FROM pipeline_catalysts WHERE id = ?", (catalyst_id,)
-    ).fetchone()
-    if row is None:
+    if select_by_id(conn, _CATALYSTS_TABLE, catalyst_id) is None:
         raise ValueError(f"No catalyst with id {catalyst_id}")
 
     normalize_enums(updates, _CATALYST_ENUM_FIELDS)
-    fields = {k: v for k, v in updates.items() if k in CATALYST_UPDATABLE and v is not None}
+    fields = filter_updatable(updates, CATALYST_UPDATABLE)
     if not fields:
         raise ValueError("No valid fields to update")
 
     fields["updated_at"] = now()
-    set_clause = ", ".join(f"{k} = ?" for k in fields)
-    values = list(fields.values()) + [catalyst_id]
-    conn.execute(f"UPDATE pipeline_catalysts SET {set_clause} WHERE id = ?", values)
-    conn.commit()
-    row = conn.execute("SELECT * FROM pipeline_catalysts WHERE id = ?", (catalyst_id,)).fetchone()
-    return dict(row)
+    update_by_id(conn, _CATALYSTS_TABLE, catalyst_id, fields)
+    return select_required(conn, _CATALYSTS_TABLE, catalyst_id)
 
 
 def _close_catalyst(
@@ -413,20 +393,16 @@ def _close_catalyst(
     if resolved == CatalystStatus.UPCOMING:
         raise ValueError("Cannot close a catalyst as 'upcoming' — use hit, missed, or passed")
 
-    row = conn.execute(
-        "SELECT * FROM pipeline_catalysts WHERE id = ?", (catalyst_id,)
-    ).fetchone()
-    if row is None:
+    if select_by_id(conn, _CATALYSTS_TABLE, catalyst_id) is None:
         raise ValueError(f"No catalyst with id {catalyst_id}")
 
-    ts = now()
-    conn.execute(
-        "UPDATE pipeline_catalysts SET status = ?, outcome = ?, updated_at = ? WHERE id = ?",
-        (resolved.value, outcome, ts, catalyst_id),
+    update_by_id(
+        conn,
+        _CATALYSTS_TABLE,
+        catalyst_id,
+        {"status": resolved.value, "outcome": outcome, "updated_at": now()},
     )
-    conn.commit()
-    row = conn.execute("SELECT * FROM pipeline_catalysts WHERE id = ?", (catalyst_id,)).fetchone()
-    return dict(row)
+    return select_required(conn, _CATALYSTS_TABLE, catalyst_id)
 
 
 # -- Async public API --

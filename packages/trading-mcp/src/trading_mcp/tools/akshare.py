@@ -260,9 +260,7 @@ async def get_cn_financials(ctx: Context, symbol: str, periods: int = 4) -> str:
 
 
 @mcp.tool()
-async def get_cn_fund_flow(
-    ctx: Context, symbol: str, market: str = "", limit: int = 10
-) -> str:
+async def get_cn_fund_flow(ctx: Context, symbol: str, market: str = "", limit: int = 10) -> str:
     """Get capital (money) flow data for a China A-share stock.
 
     Shows net inflow/outflow by investor size: super-large orders, large orders,
