@@ -20,6 +20,7 @@ from trading_mcp.db.rolls import init_schema as init_roll_schema
 from trading_mcp.tools.akshare import mcp as akshare_mcp
 from trading_mcp.tools.alphavantage import mcp as alphavantage_mcp
 from trading_mcp.tools.btc import mcp as btc_mcp
+from trading_mcp.tools.comparison import mcp as comparison_mcp
 from trading_mcp.tools.decisions import mcp as decisions_mcp
 from trading_mcp.tools.finnhub import mcp as finnhub_mcp
 from trading_mcp.tools.finra import mcp as finra_mcp
@@ -27,12 +28,15 @@ from trading_mcp.tools.fmp import mcp as fmp_mcp
 from trading_mcp.tools.fred import mcp as fred_mcp
 from trading_mcp.tools.market_regime import mcp as regime_mcp
 from trading_mcp.tools.pipeline import mcp as pipeline_mcp
+from trading_mcp.tools.pipeline_catalysts import mcp as pipeline_catalysts_mcp
 from trading_mcp.tools.reddit import mcp as reddit_mcp
 from trading_mcp.tools.rolls import mcp as rolls_mcp
 from trading_mcp.tools.signals import mcp as signals_mcp
 from trading_mcp.tools.tastytrade import mcp as tastytrade_mcp
-from trading_mcp.tools.tradier import mcp as tradier_mcp
-from trading_mcp.tools.webull import mcp as webull_mcp
+from trading_mcp.tools.tradier_market import mcp as tradier_market_mcp
+from trading_mcp.tools.tradier_options import mcp as tradier_options_mcp
+from trading_mcp.tools.webull_orders import mcp as webull_orders_mcp
+from trading_mcp.tools.webull_portfolio import mcp as webull_portfolio_mcp
 from trading_mcp.tools.yahoo import mcp as yahoo_mcp
 from trading_mcp.tools.youtube import mcp as youtube_mcp
 
@@ -70,8 +74,10 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
 
 mcp = FastMCP("trading-mcp", lifespan=lifespan)
 
-mcp.mount(webull_mcp)
-mcp.mount(tradier_mcp)
+mcp.mount(webull_orders_mcp)
+mcp.mount(webull_portfolio_mcp)
+mcp.mount(tradier_options_mcp)
+mcp.mount(tradier_market_mcp)
 mcp.mount(finnhub_mcp)
 mcp.mount(finra_mcp)
 mcp.mount(fmp_mcp)
@@ -79,7 +85,9 @@ mcp.mount(fred_mcp)
 mcp.mount(regime_mcp)
 mcp.mount(btc_mcp)
 mcp.mount(signals_mcp)
+mcp.mount(comparison_mcp)
 mcp.mount(pipeline_mcp)
+mcp.mount(pipeline_catalysts_mcp)
 mcp.mount(rolls_mcp)
 mcp.mount(decisions_mcp)
 mcp.mount(akshare_mcp)
