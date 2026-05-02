@@ -335,15 +335,25 @@ Over a decade, expected total return ≈ **break-even to slightly positive**, wi
 
 ### Why we run it anyway — the strategic case
 
-The hedge isn't an investment. It's the mechanism that **enables sustained long exposure to high-volatility growth sectors** (tech, semis, AI capex) without forcing one of two bad alternatives:
+**The hedge itself doesn't make money. But the rest of the portfolio makes MORE money because the hedge exists.**
 
-| Alternative to running the hedge | Cost |
-|---|---|
-| **Reduce equity exposure** (sell 10-20% of high-conviction names) | Forgoes ~1-3%/year expected return; same cost as the hedge but no protection |
-| **Hold full exposure unhedged** | Exposed to forced selling at the bottom in a crash; one event can wipe out years of compounding |
-| **Toggle hedges tactically** | The 4/30 anti-pattern; locks in drag without convex payoff |
+This is the right mental model, not "does the hedge generate P&L." The hedge is a leverage enabler — it lets you carry higher equity beta under the same risk budget than you could without it.
 
-The structural hedge is the **cheapest** of the three. Same drag as reducing exposure, but you keep the upside *and* get the crash payoff.
+Comparing the three risk-management approaches at this portfolio's shape (beta 1.36):
+
+| Approach | Equity beta | Expected return (8% market) | Tail risk |
+|---|---|---|---|
+| **Full exposure + hedge** (this playbook) | 1.36 | **10.9%** | Protected |
+| Reduce exposure (no hedge) | ~1.0 (sell 25-30% of high-beta names) | 8.0% | Equivalent protection but no upside |
+| Full exposure, no hedge | 1.36 | 10.9% | Forced selling at -30% wipes years of compounding |
+| Toggle hedges tactically | varies | 8-9% | The 4/30 anti-pattern; locks in drag without convex payoff |
+
+Net economics of running the program:
+- Hedge cost: ~0.83%/year (drag from premium)
+- Forgone return from de-risking instead: ~2.9%/year (1.36 × 8% minus 1.0 × 8%)
+- **Net benefit of running the hedge: ~2.0%/year of expected return that you keep**
+
+That's the real number. Not the hedge's own P&L, but the portfolio P&L that the hedge enables — sustained exposure to the high-vol growth sectors (tech, semis, AI capex) where conviction is highest, without paying the de-risking tax.
 
 ### The harvest-as-buying-power second order
 
