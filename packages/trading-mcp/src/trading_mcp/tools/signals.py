@@ -6,8 +6,10 @@ from fastmcp import Context, FastMCP
 from trading_clients import indicators as ta
 from trading_clients import options as opts
 from trading_clients.endpoint import CONTRACT_MULTIPLIER
+from trading_clients.endpoints import fred
 from trading_clients.endpoints import tastytrade as tt
 from trading_clients.endpoints import tradier as t
+from trading_clients.options_multi_exp import _bsm_price
 from trading_clients.table_helpers import kv_table, to_float
 
 from trading_mcp.helpers import (
@@ -15,6 +17,7 @@ from trading_mcp.helpers import (
     _fetch_all_positions,
     _fetch_total_nlv,
     _format_conviction,
+    _fred,
     _tastytrade,
     _tradier,
 )
@@ -296,6 +299,201 @@ async def calculate_hedge(
     }
 
     return kv_table(hedge_data)
+
+
+def _parse_csv_floats(value: str | None, default: list[float]) -> list[float]:
+    if not value:
+        return default
+    out: list[float] = []
+    for part in value.split(","):
+        s = part.strip()
+        if s:
+            try:
+                out.append(float(s))
+            except ValueError:
+                continue
+    return out or default
+
+
+async def _fetch_risk_free_rate(ctx: Context) -> float:
+    """Pull current Fed Funds rate from FRED. Returns 0.0 on any failure."""
+    try:
+        fred_client = _fred(ctx)
+        obs = await fred_client.get(
+            fred.OBSERVATIONS, fred.GetObservationsRequest("FEDFUNDS", 1)
+        )
+        if obs.observations:
+            val = obs.observations[0].get("value")
+            if val:
+                return float(val) / 100.0
+    except Exception:
+        pass
+    return 0.0
+
+
+@mcp.tool()
+async def project_option_grid(
+    ctx: Context,
+    contract_symbol: str | None = None,
+    underlying: str | None = None,
+    strike: float | None = None,
+    expiration: str | None = None,
+    option_type: str | None = None,
+    as_of_date: str | None = None,
+    spot_pct_changes: str | None = None,
+    iv_levels: str | None = None,
+    contracts: int | None = None,
+    risk_free_rate: float | None = None,
+) -> str:
+    """Project an option's theoretical value across a grid of (spot price × IV) scenarios.
+
+    Use case: tail-hedge management — see the full distribution of hedge value under
+    different SPY drawdown + VIX-spike combinations to inform harvest/maintenance roll
+    timing. Also useful for any what-if scenario modeling on existing option positions.
+
+    Modes:
+    - Pass `contract_symbol` (OCC, e.g. 'SPY260821P00540000') to auto-detect strike,
+      expiration, and option_type. Current spot/IV pulled from get_quote.
+    - Or pass `underlying` + `strike` + `expiration` + `option_type` manually.
+
+    Optional params:
+    - as_of_date: project to this date (YYYY-MM-DD; default: today). Use to model
+      time decay — e.g., "what's this worth in 30 days if X happens?"
+    - spot_pct_changes: comma-separated % changes (default: '-30,-25,-20,-15,-10,-5,0,5')
+    - iv_levels: comma-separated IV % (default: '20,30,40,50,60,70')
+    - contracts: position size — when set, output also shows aggregate $ P&L per cell
+    - risk_free_rate: annualized rate (default: pulled from FRED FEDFUNDS series)
+
+    Returns a markdown grid: rows = spot prices, columns = IV levels, cells = option
+    value (and multiple from current value).
+
+    Requires [tradier] section in ~/.tradingrc. FRED is optional (falls back to 0%).
+    """
+    # Resolve contract details
+    if contract_symbol:
+        try:
+            underlying, expiration, option_type, strike = opts.parse_occ(contract_symbol)
+        except Exception as e:
+            return f"Could not parse contract_symbol '{contract_symbol}': {e}"
+    if (
+        underlying is None
+        or strike is None
+        or expiration is None
+        or option_type is None
+    ):
+        return (
+            "Specify either contract_symbol or all of: "
+            "underlying, strike, expiration, option_type"
+        )
+    option_type = option_type.lower()
+
+    if option_type not in ("call", "put"):
+        return f"option_type must be 'call' or 'put', got '{option_type}'"
+
+    tradier = _tradier(ctx)
+
+    # Fetch current spot + current option state
+    spot_task = tradier.get(t.QUOTES, t.GetQuotesRequest(underlying, greeks=False))
+    occ = contract_symbol or opts.build_occ(underlying, expiration, option_type, strike)
+    option_task = tradier.get(t.QUOTES, t.GetQuotesRequest(occ, greeks=True))
+    rate_task = (
+        asyncio.sleep(0, result=risk_free_rate)
+        if risk_free_rate is not None
+        else _fetch_risk_free_rate(ctx)
+    )
+
+    spot_resp, option_resp, rate = await asyncio.gather(
+        spot_task, option_task, rate_task, return_exceptions=False
+    )
+
+    current_spot = spot_resp.quotes[0].get("last", 0) if spot_resp.quotes else 0
+    if not current_spot:
+        return f"Could not get current quote for {underlying}"
+
+    current_option_q = option_resp.quotes[0] if option_resp.quotes else {}
+    current_value = current_option_q.get("last", 0) or current_option_q.get("ask", 0) or 0
+    current_iv_raw = current_option_q.get("greeks", {}).get("mid_iv", "")
+    current_iv = float(current_iv_raw) if current_iv_raw else 0.0
+    current_delta = current_option_q.get("greeks", {}).get("delta", "")
+
+    # Compute DTE remaining at as_of_date
+    if as_of_date:
+        try:
+            ref_date = date.fromisoformat(as_of_date)
+        except ValueError:
+            return f"Invalid as_of_date '{as_of_date}' (use YYYY-MM-DD)"
+    else:
+        ref_date = date.today()
+    exp_date = date.fromisoformat(expiration)
+    dte_remaining = (exp_date - ref_date).days
+
+    if dte_remaining <= 0:
+        return f"Option has expired (or expires today) as of {ref_date}"
+
+    tte_years = dte_remaining / 365.0
+
+    # Parse grid axes
+    pct_changes = _parse_csv_floats(
+        spot_pct_changes, [-30, -25, -20, -15, -10, -5, 0, 5]
+    )
+    ivs_pct = _parse_csv_floats(iv_levels, [20, 30, 40, 50, 60, 70])
+    ivs_decimal = [iv / 100.0 for iv in ivs_pct]
+
+    # Build header
+    header_meta = {
+        "Contract": occ,
+        "Underlying": f"{underlying} @ ${current_spot:,.2f}",
+        "Strike": f"${strike:,.2f} ({option_type})",
+        "Expiration": expiration,
+        "DTE remaining (as of grid date)": f"{dte_remaining} days",
+        "Grid date": ref_date.isoformat(),
+        "Current option value": f"${current_value:.2f}",
+        "Current IV": f"{current_iv * 100:.1f}%" if current_iv else "N/A",
+        "Current delta": str(current_delta) if current_delta else "N/A",
+        "Risk-free rate": f"{rate * 100:.2f}% (FRED FEDFUNDS)"
+        if risk_free_rate is None
+        else f"{rate * 100:.2f}% (override)",
+    }
+    if contracts:
+        header_meta["Contracts"] = str(contracts)
+
+    # Build grid
+    lines = [kv_table(header_meta), ""]
+
+    iv_header = " | ".join(f"IV {iv:.0f}%" for iv in ivs_pct)
+    lines.append(f"| Spot \\ IV | {iv_header} |")
+    lines.append("| --- | " + " | ".join("---" for _ in ivs_pct) + " |")
+
+    for pct in pct_changes:
+        scen_spot = current_spot * (1 + pct / 100.0)
+        if scen_spot <= 0:
+            continue
+        row_label = f"${scen_spot:,.0f} ({pct:+.0f}%)"
+        cells: list[str] = []
+        for iv in ivs_decimal:
+            value = _bsm_price(scen_spot, strike, tte_years, iv, option_type, rate)
+            cell = f"${value:.2f}"
+            if current_value > 0:
+                multiple = value / current_value
+                cell += f" ({multiple:.1f}x)"
+            if contracts:
+                pnl = (value - current_value) * contracts * CONTRACT_MULTIPLIER
+                cell += f" / ${pnl:,.0f}"
+            cells.append(cell)
+        lines.append(f"| {row_label} | " + " | ".join(cells) + " |")
+
+    if contracts:
+        lines.append("")
+        lines.append(
+            "_Cell format: option_value (multiple_from_current) / position_pnl "
+            f"for {contracts} contracts._"
+        )
+    else:
+        lines.append("")
+        lines.append("_Cell format: option_value (multiple_from_current). "
+                     "Pass `contracts` to also see position P&L._")
+
+    return "\n".join(lines)
 
 
 @mcp.tool()
