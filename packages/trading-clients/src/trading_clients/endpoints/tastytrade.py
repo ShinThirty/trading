@@ -72,6 +72,18 @@ def _fmt_raw_pct(val: float | str | None) -> str:
         return str(val)
 
 
+def _fmt_updated_at(val: str | None) -> str:
+    """Format an ISO 8601 timestamp like '2026-05-01T19:54:33.797Z' as '2026-05-01 19:54Z'."""
+    if not val:
+        return ""
+    s = str(val)
+    if "T" not in s:
+        return s
+    date, _, rest = s.partition("T")
+    hm = rest[:5]
+    return f"{date} {hm}Z"
+
+
 def _fmt_earnings(earnings: dict | None) -> str:
     """Format earnings info: date + time-of-day + estimated flag."""
     if not earnings:
@@ -115,6 +127,7 @@ class MarketMetricsResponse:
                 "IV-HV": _fmt_raw_pct(item.get("iv-hv-30-day-difference")),
                 "Earnings": _fmt_earnings(item.get("earnings")),
                 "Liq": str(item.get("liquidity-rating", "")),
+                "IV As Of": _fmt_updated_at(item.get("implied-volatility-updated-at")),
             }
             rows.append(row)
         return list_table(rows)

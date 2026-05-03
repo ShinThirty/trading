@@ -120,7 +120,8 @@ async def get_option_lookup(ctx: Context, underlying: str) -> str:
 @mcp.tool()
 async def get_iv_metrics(ctx: Context, symbols: str) -> str:
     """Get implied volatility metrics: IV rank, IV percentile, IV index, 5-day IV change,
-    30-day IV/HV, 60-day HV, 90-day HV, next earnings date, and liquidity rating.
+    30-day IV/HV, 60-day HV, 90-day HV, next earnings date, liquidity rating, and the
+    timestamp the IV figures were last computed.
 
     IV Rank shows where current IV sits relative to its 52-week high/low (0-100).
     IV Percentile shows what % of days in the past year had lower IV (0-100%).
