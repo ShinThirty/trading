@@ -79,20 +79,30 @@ async def get_sector_performance(ctx: Context, date: str, exchange: str = "NYSE"
 
 @mcp.tool()
 async def get_market_regime(ctx: Context) -> str:
-    """Get current market regime classification across volatility, trend,
-    breadth, macro, and sector dimensions.
+    """Get current market regime classification with a synthesized verdict.
 
-    Aggregates Tradier (live VIX/VIX3M quotes, SPY/IWM technicals,
-    11 SPDR sector ETF histories), FRED (yield curve, fed funds), and
-    TastyTrade (IV enrichment) into simple regime labels.
+    Aggregates Tradier (VIX quotes + history, SPY/IWM technicals, 11 SPDR
+    sector ETF histories), FRED (yield curve, fed funds, HY credit spreads),
+    and TastyTrade (IV enrichment) into a single regime verdict + dimensional
+    labels.
 
-    Returns regime labels with supporting data:
-    - Volatility: Low / Normal / Elevated / Crisis (VIX + term structure)
-    - Trend: Uptrend / Sideways / Downtrend (SPY RSI + SMA 50/200)
-    - Breadth: Broadening / Healthy / Mixed / Narrowing (SPY/IWM, XLU/XLY, volume)
-    - Macro: Steep / Flat / Inverted yield curve (10Y-2Y + Fed funds)
-    - Sectors: Risk-On / Rotation / Risk-Off (multi-timeframe ETF rotation
-      with 30/60/90d returns, leadership ranking, and momentum shifts)
+    Output starts with a verdict line synthesized from all dimensions:
+    - Crash Active: vol Crisis (VIX backwardation or >=35) — gates Trigger 2
+      of the structural tail-hedge program (harvest tranches)
+    - Pre-Crash Watch: vol Elevated + (tape Fast OR credit Widening), or
+      vol Normal + (tape Fast AND credit Widening)
+    - Recovery: vol Elevated + Broadening breadth + Risk-On
+    - Bear Setup: bear_score >= 3 (Downtrend / Narrowing / Risk-Off /
+      un-inversion trap×2 / semi divergence)
+    - Late Cycle: warnings emerging (Inverted / Narrowing / Rotation /
+      un-inversion trap) but trend still Uptrend or Sideways
+    - Expansion: Uptrend + Healthy/Broadening + Risk-On
+    - Mixed: signals don't cohere
+
+    Dimensional labels surfaced below the verdict:
+    - Volatility, Trend, Breadth, Macro, Sectors (existing)
+    - Credit: Widening / Stable / Tightening (HY OAS 5-day delta)
+    - Tape Speed: Fast / Normal (SPY 5d return + VIX 5d %change)
 
     Requires [fred] and [tradier] sections in ~/.tradingrc.
     TastyTrade is optional enrichment.
@@ -106,7 +116,10 @@ async def get_market_regime(ctx: Context) -> str:
         tradier.get(t.QUOTES, t.GetQuotesRequest("VIX,VIX3M")),
         fred_client.get(fred.OBSERVATIONS, fred.GetObservationsRequest("T10Y2Y", 130)),
         fred_client.get(fred.OBSERVATIONS, fred.GetObservationsRequest("FEDFUNDS", 2)),
+        fred_client.get(fred.OBSERVATIONS, fred.GetObservationsRequest("BAMLH0A0HYM2", 30)),
+        tradier.get(t.HISTORY, t.GetHistoryRequest("VIX", "daily", start=start)),
     ]
+    sector_offset = len(tasks)
 
     for sym in HISTORY_SYMBOLS:
         tasks.append(tradier.get(t.HISTORY, t.GetHistoryRequest(sym, "daily", start=start)))
@@ -124,16 +137,31 @@ async def get_market_regime(ctx: Context) -> str:
     vix_quotes_resp = _ok(0)
     spread_resp = _ok(1)
     ff_resp = _ok(2)
+    credit_resp = _ok(3)
+    vix_hist_resp = _ok(4)
 
     closes: dict[str, list[float]] = {}
     volumes: dict[str, list[float]] = {}
     for i, sym in enumerate(HISTORY_SYMBOLS):
-        resp = _ok(3 + i)
+        resp = _ok(sector_offset + i)
         if resp and resp.days:
             closes[sym] = [float(b["close"]) for b in resp.days]
             volumes[sym] = [float(b["volume"]) for b in resp.days]
 
+    vix_closes: list[float] = []
+    if vix_hist_resp and vix_hist_resp.days:
+        vix_closes = [float(b["close"]) for b in vix_hist_resp.days]
+
     data: dict[str, str | None] = {}
+    labels: dict[str, str | None] = {
+        "volatility": None,
+        "trend": None,
+        "breadth": None,
+        "macro": None,
+        "sectors": None,
+        "credit": None,
+        "speed": None,
+    }
 
     vix_val: float | None = None
     vix3m_val: float | None = None
@@ -146,6 +174,7 @@ async def get_market_regime(ctx: Context) -> str:
                 vix3m_val = q.get("last")
     if vix_val is not None:
         label, detail = regime.classify_volatility(vix_val, vix3m_val)
+        labels["volatility"] = label
         data["Volatility"] = f"{label} ({detail})"
 
     spy_closes = closes.get("SPY", [])
@@ -156,6 +185,7 @@ async def get_market_regime(ctx: Context) -> str:
         sma50_vals = ta.sma(spy_closes, 50)
         sma200_vals = ta.sma(spy_closes, 200)
         label, detail = regime.classify_trend(price, rsi_vals[-1], sma50_vals[-1], sma200_vals[-1])
+        labels["trend"] = label
         data["Trend"] = f"{label} ({detail})"
 
     iwm_closes = closes.get("IWM", [])
@@ -165,6 +195,7 @@ async def get_market_regime(ctx: Context) -> str:
         label, detail = regime.classify_breadth(
             spy_closes, iwm_closes, spy_volumes, xlu_closes, xly_closes
         )
+        labels["breadth"] = label
         data["Breadth"] = f"{label} ({detail})"
 
     spread_observations = spread_resp.observations if spread_resp else []
@@ -174,6 +205,7 @@ async def get_market_regime(ctx: Context) -> str:
     prev_ff_obs = ff_observations[1:] if len(ff_observations) > 1 else []
     prev_ff_val, _ = regime.parse_fred_value(prev_ff_obs)
     label, detail = regime.classify_macro(spread_val, ff_val, prev_ff_val)
+    labels["macro"] = label
     data["Macro"] = f"{label} ({detail})"
 
     spread_history = []
@@ -191,13 +223,38 @@ async def get_market_regime(ctx: Context) -> str:
     sector_closes = {sym: closes[sym] for sym in regime.SECTOR_ETFS if sym in closes}
     if len(sector_closes) >= 6:
         label, detail = regime.classify_sector_rotation(sector_closes)
+        labels["sectors"] = label
         data["Sectors"] = f"{label} ({detail})"
 
     smh_closes = closes.get("SMH", [])
+    semi_warning: str | None = None
     if smh_closes and spy_closes:
         semi_warning = regime.detect_semi_divergence(smh_closes, spy_closes)
         if semi_warning:
             data["⚠ Sectors"] = semi_warning
+
+    credit_observations = credit_resp.observations if credit_resp else []
+    credit_val, _ = regime.parse_fred_value(credit_observations)
+    credit_history: list[float] = []
+    for obs in credit_observations:
+        v = obs.get("value", ".")
+        if v != ".":
+            try:
+                credit_history.append(float(v))
+            except (ValueError, TypeError):
+                pass
+    label, detail = regime.classify_credit(credit_val, credit_history)
+    labels["credit"] = label
+    data["Credit"] = f"{label} ({detail})"
+
+    credit_trap_warning = regime.detect_credit_trap(credit_val, credit_history)
+    if credit_trap_warning:
+        data["⚠ Credit"] = credit_trap_warning
+
+    if spy_closes or vix_closes:
+        label, detail = regime.classify_tape_speed(spy_closes, vix_closes)
+        labels["speed"] = label
+        data["Tape Speed"] = f"{label} ({detail})"
 
     tt_resp = _ok(tt_idx) if tt_idx is not None else None
     if tt_resp and tt_resp.items:
@@ -212,4 +269,22 @@ async def get_market_regime(ctx: Context) -> str:
         if parts:
             data["IV Context"] = f"SPY {', '.join(parts)}"
 
-    return f"## Market Regime\n\n{kv_table(data)}"
+    warnings: set[str] = set()
+    if trap_warning:
+        warnings.add("uninversion_trap")
+    if semi_warning:
+        warnings.add("semi_divergence")
+    if credit_trap_warning:
+        warnings.add("credit_trap")
+    verdict, evidence = regime.synthesize_verdict(
+        labels["volatility"],
+        labels["trend"],
+        labels["breadth"],
+        labels["macro"],
+        labels["sectors"],
+        labels["credit"],
+        labels["speed"],
+        warnings,
+    )
+
+    return f"## Market Regime\n\n**Verdict: {verdict}**  \n*Why: {evidence}*\n\n{kv_table(data)}"

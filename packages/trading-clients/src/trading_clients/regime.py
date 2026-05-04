@@ -358,10 +358,12 @@ def classify_breadth(
     spy_volumes: daily volume for the same period as spy_closes.
 
     Returns (label, detail_string) where label is one of:
-    - Broadening: small caps leading, cyclicals leading, heavy volume (recovery has legs)
-    - Healthy: broad participation, no divergences
-    - Mixed: conflicting signals
-    - Narrowing: divergences emerging, defensive rotation, or thin volume
+    - Broadening: 0 warnings + ≥2 strengths (recovery has legs)
+    - Healthy: 0 warnings + 0-1 strengths (clean or mildly bullish tape)
+    - Mixed: ≥1 warning AND <2 warnings (genuine conflict — warnings present but
+      not yet majority)
+    - Narrowing: ≥2 warnings (divergences emerging, defensive rotation,
+      or thin volume)
     """
     if (
         len(spy_closes) < lookback + 1
@@ -420,11 +422,216 @@ def classify_breadth(
 
     if warnings >= 2:
         label = "Narrowing"
+    elif warnings >= 1:
+        label = "Mixed"
     elif strengths >= 2:
         label = "Broadening"
-    elif warnings == 0 and strengths == 0:
-        label = "Healthy"
     else:
-        label = "Mixed"
+        label = "Healthy"
 
     return label, "; ".join(parts)
+
+
+def classify_credit(
+    current_oas: float | None,
+    oas_history: list[float],
+) -> tuple[str, str]:
+    """Classify credit spread direction from HY OAS observations.
+
+    Credit spreads (high-yield option-adjusted spread) widen sharply at the
+    onset of crashes — typically 100-300 bps in the first weeks of stress.
+    Uses 5-day delta as the speed signal.
+
+    current_oas: latest HY OAS value (percent, not bps).
+    oas_history: recent observations (newest-first, ~30 days).
+
+    Returns (label, detail_string) where label is one of:
+    - Widening: 5-day delta > +50 bps (active stress)
+    - Stable: |5-day delta| <= 50 bps (normal range)
+    - Tightening: 5-day delta < -50 bps (recovery / risk-on)
+    """
+    if current_oas is None or len(oas_history) < 6:
+        return "Unknown", "credit data unavailable"
+
+    # Newest-first; index 0 is current, index 5 is 5 trading days ago.
+    # OAS is in percent; convert delta to bps for readability.
+    oas_5d_ago = oas_history[5]
+    delta_bps = (current_oas - oas_5d_ago) * 100
+
+    if delta_bps > 50:
+        label = "Widening"
+    elif delta_bps < -50:
+        label = "Tightening"
+    else:
+        label = "Stable"
+
+    return label, f"HY OAS {current_oas:.2f}% (Δ5d {delta_bps:+.0f} bps)"
+
+
+def detect_credit_trap(
+    current_oas: float | None,
+    oas_history: list[float],
+) -> str | None:
+    """Detect slow credit-spread deterioration trap.
+
+    Companion to detect_uninversion_trap. Catches HY OAS grinding wider
+    over weeks without single-day spikes that would trip the Widening
+    label in classify_credit. Pattern: current OAS sits >100 bps above
+    its rolling 1-month low, indicating sustained leak from a recent floor.
+
+    Examples this catches that classify_credit misses:
+    - 2022 H1: HY OAS drifted from ~3% to ~6% over months without
+      single 5-day +50 bps spikes
+    - 2007 H2: pre-crisis credit leak while equity still grinding up
+
+    current_oas: latest HY OAS value (percent).
+    oas_history: recent observations (newest-first), at least 22 days.
+
+    Returns a warning string, or None if the trap is not active.
+    """
+    if current_oas is None or len(oas_history) < 22:
+        return None
+
+    # Newest-first; first 22 obs span the trailing month
+    recent_low = min(oas_history[:22])
+    rise_bps = (current_oas - recent_low) * 100
+
+    if rise_bps > 100:
+        return (
+            f"Credit trap: HY OAS {current_oas:.2f}% has risen {rise_bps:+.0f} bps "
+            f"from 1mo low ({recent_low:.2f}%) — slow deterioration"
+        )
+    return None
+
+
+def classify_tape_speed(
+    spy_closes: list[float],
+    vix_closes: list[float],
+) -> tuple[str, str]:
+    """Classify tape speed from SPY return magnitude and VIX rate-of-change.
+
+    Crashes deliver vol expansion + speed together. A -5% SPY move or a
+    +50% VIX surge over 5 days indicates tape-speed regime shift toward
+    crash territory.
+
+    spy_closes: SPY daily closes (oldest-first), at least 6 bars.
+    vix_closes: VIX daily closes (oldest-first), at least 6 bars.
+
+    Returns (label, detail_string) where label is one of:
+    - Fast: SPY 5d return < -5% OR VIX 5d %change > +50%
+    - Normal: otherwise
+    """
+    parts: list[str] = []
+    spy_fast = False
+    vix_fast = False
+
+    if len(spy_closes) >= 6:
+        spy_5d_ret = (spy_closes[-1] - spy_closes[-6]) / spy_closes[-6] * 100
+        parts.append(f"SPY 5d {spy_5d_ret:+.1f}%")
+        if spy_5d_ret < -5.0:
+            spy_fast = True
+
+    if len(vix_closes) >= 6:
+        vix_5d_chg = (vix_closes[-1] - vix_closes[-6]) / vix_closes[-6] * 100
+        parts.append(f"VIX Δ5d {vix_5d_chg:+.0f}%")
+        if vix_5d_chg > 50.0:
+            vix_fast = True
+
+    if not parts:
+        return "Unknown", "insufficient data"
+
+    label = "Fast" if (spy_fast or vix_fast) else "Normal"
+    return label, ", ".join(parts)
+
+
+def synthesize_verdict(
+    volatility: str | None,
+    trend: str | None,
+    breadth: str | None,
+    macro: str | None,
+    sectors: str | None,
+    credit: str | None,
+    speed: str | None,
+    warnings: set[str],
+) -> tuple[str, str]:
+    """Synthesize a single regime verdict from dimensional labels + warnings.
+
+    Priority-ordered decision tree — first match wins. Verdict drives portfolio
+    sizing and accumulation timing. Only Crash Active gates the structural
+    hedge program's Trigger 2 (harvest tranches); other verdicts inform
+    position-level decisions, not hedge actions.
+
+    warnings: set of warning identifiers, e.g. {"uninversion_trap", "semi_divergence"}.
+
+    Returns (verdict, evidence_string).
+    """
+    # 1. Crash Active — volatility Crisis is decisive
+    if volatility == "Crisis":
+        return "Crash Active", "Volatility = Crisis"
+
+    # 2. Pre-Crash Watch — leading indicators ahead of vol expansion
+    if volatility == "Elevated" and (speed == "Fast" or credit == "Widening"):
+        triggers: list[str] = []
+        if speed == "Fast":
+            triggers.append("tape Fast")
+        if credit == "Widening":
+            triggers.append("credit Widening")
+        return "Pre-Crash Watch", f"Vol Elevated + {' + '.join(triggers)}"
+    if volatility == "Normal" and speed == "Fast" and credit == "Widening":
+        return "Pre-Crash Watch", "Vol Normal but tape Fast + credit Widening"
+
+    # 3. Recovery — vol coming off elevated with broadening + risk-on
+    if volatility == "Elevated" and breadth == "Broadening" and sectors == "Risk-On":
+        return "Recovery", "Vol Elevated + Broadening breadth + Risk-On"
+
+    # 4. Bear Setup — structural deterioration without vol Crisis
+    bear_score = 0
+    bear_parts: list[str] = []
+    if trend == "Downtrend":
+        bear_score += 1
+        bear_parts.append("Downtrend")
+    if breadth == "Narrowing":
+        bear_score += 1
+        bear_parts.append("Narrowing")
+    if sectors == "Risk-Off":
+        bear_score += 1
+        bear_parts.append("Risk-Off")
+    if "uninversion_trap" in warnings:
+        bear_score += 2
+        bear_parts.append("un-inversion trap")
+    if "semi_divergence" in warnings:
+        bear_score += 1
+        bear_parts.append("semi divergence")
+    if "credit_trap" in warnings:
+        bear_score += 1
+        bear_parts.append("credit trap")
+    if bear_score >= 3:
+        return "Bear Setup", f"{' + '.join(bear_parts)} (score {bear_score}/7)"
+
+    # 5. Late Cycle — warnings emerging but trend still up
+    late_score = 0
+    late_parts: list[str] = []
+    if macro == "Inverted":
+        late_score += 1
+        late_parts.append("Inverted")
+    if breadth == "Narrowing":
+        late_score += 1
+        late_parts.append("Narrowing")
+    if sectors in ("Rotation", "Risk-Off"):
+        late_score += 1
+        late_parts.append(str(sectors))
+    if "uninversion_trap" in warnings:
+        late_score += 2
+        late_parts.append("un-inversion trap")
+    if "credit_trap" in warnings:
+        late_score += 1
+        late_parts.append("credit trap")
+    if late_score >= 2 and trend in ("Uptrend", "Sideways"):
+        return "Late Cycle", f"{' + '.join(late_parts)} (score {late_score}/6, trend {trend})"
+
+    # 6. Expansion — clean bull
+    if trend == "Uptrend" and breadth in ("Healthy", "Broadening") and sectors == "Risk-On":
+        return "Expansion", f"Uptrend + {breadth} breadth + Risk-On"
+
+    # 7. Mixed — fallback when signals don't cohere
+    return "Mixed", "signals don't cohere"
