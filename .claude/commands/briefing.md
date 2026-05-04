@@ -18,7 +18,7 @@ Also call `get_quote USO,USL,BNO,VIX` and `get_tradier_history USO` (last 10 day
 
 1. **Equity vol divergence**: USO 5-day % change vs VIX 5-day point change
    - If USO up >5% over 5+ sessions while VIX stays sub-20 and SPY holds within 1% of ATH → flag as **🔴 Commodity divergence firing**
-   - Inflationary supply shock not being priced in equity vol. Refer to `/hedge` for full reversal signal scoring.
+   - Inflationary supply shock not yet priced in equity vol. **Informational only** — adjust position-level strikes/sizing (deeper CSPs, smaller new entries, momentum names sized down). Does NOT drive structural hedge changes; the program is trigger-based, not signal-based (see [tail-hedge-playbook.md](../../docs/tail-hedge-playbook.md)).
 
 2. **Backwardation monitor (USO/USL ratio)**: Front-month vs 12-month strip ratio
    - Compute `USO_price / USL_price` — this measures futures curve shape
@@ -52,26 +52,33 @@ Skip positions with no alerts. Only surface what needs action.
 
 ## Step 2b: Hedge Monitor
 
-Check portfolio-level hedge health. Call `get_portfolio_greeks` (with `fidelity_folder` if provided in Step 2).
+Daily health check on the structural tail-risk hedge program (per [tail-hedge-playbook.md](../../docs/tail-hedge-playbook.md)). Surfaces whether one of the playbook's three rebalancing triggers is approaching — does NOT recommend opening, closing, or resizing based on regime, vol, or signals. For full evaluation, run `/hedge`.
 
-Present a hedge snapshot table:
+Call `get_portfolio_greeks` (with `fidelity_folder` if provided in Step 2). Identify any long SPY/QQQ puts (the structural hedge book). For each, also call `get_quote` on the contract with `greeks=True` to read current delta.
 
-| Metric | Value |
-|--------|-------|
-| Net Delta | (total across all positions) |
-| Hedge Delta | (delta from long puts only) |
-| Hedge Ratio | hedge delta / net delta (before hedge) |
-| Net Vega | (exposure to IV changes) |
-| Hedge DTE | days to expiration on protective puts |
-| Hedge P&L | current mark vs cost |
+Present a hedge snapshot:
 
-Flag if any of these conditions are true:
-- **Hedge DTE <14**: roll or replace decision needed soon
-- **Hedge ratio <10%**: underhedged relative to portfolio delta
-- **Net vega < -$2,000**: significant short vol exposure — an IV spike would hurt
-- **No hedge positions found**: flag as unhedged
+| Metric | Value | Notes |
+|--------|-------|-------|
+| Hedge contracts | (N puts at K strike, exp date) | — |
+| Strike % OTM | X% | Sweet spot: 20-25%; <15% = legacy correction-zone |
+| Current put delta | -X.XX | Entry delta ~-0.05 |
+| DTE remaining | X | Roll at 30 DTE per playbook |
+| Put P&L % | X% | Decay is the modal outcome |
+| Net portfolio delta | (informational) | Not a hedge-sizing signal |
+| Net vega | (informational) | Long vega from hedge offsets short vega from CCs |
 
-One-liner on whether hedge is adequate given current regime (from Step 1). For example, "Elevated vol + downtrend = hedge is critical" vs "Low vol + uptrend = hedge is optional, consider letting it expire."
+Flag only against playbook triggers:
+
+- **DTE ≤ 30** → Trigger 3 (routine roll) imminent. Run `/hedge`.
+- **Put delta in -0.20 to -0.40** → Trigger 1 (maintenance roll) candidate. Run `/hedge` for full criteria.
+- **Put P&L ≥ +400%** → Trigger 2 (harvest tranche) live. Run `/hedge` immediately.
+- **Strike <15% OTM** → Legacy correction-zone position; flag for migration to 25% OTM at next maintenance window.
+- **No structural hedge in book** → Program is silent. This is a **one-time program-commit decision**, not a daily signal call — run `/hedge` Step 5 to decide.
+
+**Do NOT flag based on:** "regime cleared," "vol normalizing," "hedge ratio low," "no signals firing," "premium decaying." These are the 4/30 anti-pattern. Premium decay and benign regime are the program's expected cost; closing on them locks in drag without convex payoff (see playbook "What is NEVER a valid close").
+
+If no triggers fired and a hedge exists → **"Hedge healthy, hold."** That's the answer.
 
 ## Step 3: Pipeline Catalysts
 
