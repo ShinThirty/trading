@@ -1,6 +1,22 @@
 # Market Regime Framework
 
-Use `get_market_regime` to get a quick snapshot before diving into individual signals. The tool classifies the market across 4 dimensions — each label maps to strategy preferences in the [decision framework](decision-framework.md).
+Use `get_market_regime` to get a quick snapshot before diving into individual signals. The tool produces a synthesized **verdict** plus seven dimensional labels — each maps to strategy preferences in the [decision framework](decision-framework.md). Read the verdict first; drop into dimensions when you need the *why*.
+
+## Verdict
+
+The verdict is a first-match-wins decision tree over the dimensions and warning flags. Treat it as the most actionable thing the tape is doing right now.
+
+| Verdict | Trigger | What it means | Strategy implications |
+|---------|---------|---------------|----------------------|
+| **Crash Active** | Volatility = Crisis | Active panic | Cash is a position. Pause new accumulation. Aligns with Trigger 2 (harvest tranches) of the structural tail-hedge program — see [tail-hedge-playbook.md](tail-hedge-playbook.md). Verdict is informational; hedge triggers fire on P&L + price action, not the label. |
+| **Pre-Crash Watch** | Vol Elevated + (Tape Fast OR Credit Widening), OR Vol Normal + (Tape Fast AND Credit Widening) | Leading indicators are firing ahead of vol expansion | Pause directional adds. Widen CSP strikes, prefer defined-risk on new exposure. Verify the tail hedge is in place — do not open new structural hedges reactively. |
+| **Recovery** | Vol Elevated + Broadening breadth + Risk-On | Vol coming off elevated with broad participation | Best window to accumulate quality at discount. CSPs catch falling knives; direct buys catch the bottom. Premium still rich. |
+| **Bear Setup** | bear_score ≥ 3 from: Downtrend (1), Narrowing (1), Risk-Off (1), un-inversion trap (2), semi divergence (1), credit trap (1) | Structural deterioration without vol Crisis | Defensive. Reduce concentration, favor bearish L2/L3 setups in deteriorating names, keep cash for the eventual vol expansion. |
+| **Late Cycle** | late_score ≥ 2 from: Inverted (1), Narrowing (1), Rotation/Risk-Off (1), un-inversion trap (2), credit trap (1) — AND trend = Uptrend or Sideways | Warnings emerging but trend still up | Stay invested but rotate quality. Reduce position sizes, tighten new-entry filters, favor margin expansion over multiple expansion. |
+| **Expansion** | Uptrend + (Healthy or Broadening) breadth + Risk-On | Clean bull tape | Default framework applies. Accumulate intent favored, directional leverage works. |
+| **Mixed** | Signals don't cohere | No clean read | Trade the individual stock signal, not the regime. Don't size up based on regime context. |
+
+Only **Crash Active** corresponds to a structural hedge program state (Trigger 2 conditions). All other verdicts are informational — they shape position sizing, accumulation cadence, and entry timing, not hedge open/close.
 
 ## Regime Dimensions
 
@@ -26,6 +42,17 @@ Based on SPY price relative to 50-day and 200-day simple moving averages.
 | **Uptrend** | Price > SMA50 > SMA200 | Accumulate intent favored, directional leverage works |
 | **Sideways** | Mixed SMA alignment | Harvest premium, iron condors, range-bound strategies |
 | **Downtrend** | Price < SMA50 < SMA200 | CSPs shine (rich IV + falling prices = entry at discount). Avoid directional long calls. |
+
+### Breadth: Broadening / Healthy / Mixed / Narrowing
+
+Three sub-signals over a 20-day window: SPY vs IWM relative performance (large-vs-small divergence), XLU vs XLY (defensive-vs-cyclical rotation), and SPY 5d-vs-20d volume trend. Each sub-signal contributes a warning (≥3pp lag, ≥2pp defensive, <75% volume) or a strength (≥3pp lead, ≥2pp cyclical, >125% volume).
+
+| Label | Condition | What it means | Strategy implications |
+|-------|-----------|---------------|----------------------|
+| **Broadening** | 0 warnings + ≥2 strengths | Recovery has legs — small caps and cyclicals participating on real volume | Favors Recovery and Expansion verdicts. Accumulate intent strongest here. |
+| **Healthy** | 0 warnings + 0-1 strengths | Clean tape, mildly bullish | Default framework applies as-is |
+| **Mixed** | ≥1 warning, <2 warnings | Genuine conflict — one breadth fault but not majority | Read the underlying sub-signal; don't size up on regime context |
+| **Narrowing** | ≥2 warnings | Divergences emerging, defensive rotation, or thin volume | Adds 1 to bear_score and late_score. Reduce concentration; suspect rallies. |
 
 ### Macro: Steep / Flat / Inverted
 
@@ -60,6 +87,27 @@ Multi-timeframe analysis of the 11 SPDR sector ETFs (XLK, XLF, XLE, XLV, XLC, XL
 - **Fading** (rank declined): leadership is rotating *away* — delay entries or tighten stops on existing positions
 
 **Semi divergence check:** The high-beta sector basket includes broad Tech (AAPL, MSFT) which often acts as a safe haven in late-cycle environments due to massive cash piles. This can produce a false Risk-On signal while semiconductors are already rolling over. If your portfolio is semi-concentrated, cross-check SMH vs SPY relative strength. If semis are underperforming broad Tech, the cycle may be turning even if the sector label reads Risk-On.
+
+### Credit: Widening / Stable / Tightening
+
+Based on the 5-day delta of the BofA US High-Yield Index Option-Adjusted Spread (FRED `BAMLH0A0HYM2`). Credit spreads typically widen 100-300 bps in the first weeks of a crash, often before equity vol fully expands.
+
+| Label | 5-day delta | What it means | Strategy implications |
+|-------|-------------|---------------|----------------------|
+| **Widening** | > +50 bps | Active credit stress | Pre-Crash Watch trigger when paired with elevated vol. Pause risk-on adds. |
+| **Stable** | -50 to +50 bps | Normal range | Default framework applies |
+| **Tightening** | < -50 bps | Risk-on / recovery | Confirms appetite — supports accumulate intent |
+
+**Credit trap:** A separate detector flags slow leaks that don't trip the 5-day delta — current OAS sitting >100 bps above its trailing 1-month low. Catches setups like 2022 H1 and 2007 H2 where spreads grind wider over weeks while equity still grinds up. Adds 1 to both bear_score and late_score.
+
+### Tape Speed: Fast / Normal
+
+Based on SPY 5-day return and VIX 5-day rate-of-change. Crashes deliver vol expansion + speed together — speed is the leading half.
+
+| Label | Trigger | What it means | Strategy implications |
+|-------|---------|---------------|----------------------|
+| **Fast** | SPY 5d return < -5% OR VIX 5d Δ > +50% | Tape regime shift toward crash territory | Pre-Crash Watch trigger when paired with elevated vol or widening credit. Pause directional adds. |
+| **Normal** | Otherwise | Typical pace | Default framework applies |
 
 ## Regime Combinations
 
