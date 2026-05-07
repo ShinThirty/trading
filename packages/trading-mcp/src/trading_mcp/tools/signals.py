@@ -293,6 +293,104 @@ async def calculate_hedge(
     return kv_table(hedge_data)
 
 
+_TAPE_WINDOW = 10
+
+
+def _earnings_in_future(earnings_date: str | None) -> bool:
+    if not earnings_date:
+        return False
+    try:
+        return date.fromisoformat(earnings_date) >= date.today()
+    except ValueError:
+        return False
+
+
+def _classify_tape(
+    closes: list[float],
+    opens: list[float],
+    highs: list[float],
+    lows: list[float],
+) -> dict:
+    """Compute 2-week price-action stats and classify the tape pattern.
+
+    Returns 2W high/low, net %, today's gap %, and a pattern tag that disambiguates
+    setups a single endpoint-vs-endpoint % can hide (e.g. rallied-then-crashed
+    looks the same as steady-decline if you only see net %).
+    """
+    if len(closes) < _TAPE_WINDOW or len(highs) < _TAPE_WINDOW or len(lows) < _TAPE_WINDOW:
+        return {}
+
+    recent_highs = highs[-_TAPE_WINDOW:]
+    recent_lows = lows[-_TAPE_WINDOW:]
+    high_2w = max(recent_highs)
+    low_2w = min(recent_lows)
+    current = closes[-1]
+    price_2w_ago = closes[-_TAPE_WINDOW]
+
+    net_pct = (current - price_2w_ago) / price_2w_ago * 100 if price_2w_ago > 0 else 0.0
+    range_pct = (high_2w - low_2w) / low_2w * 100 if low_2w > 0 else 0.0
+    dist_from_high = (current - high_2w) / high_2w * 100 if high_2w > 0 else 0.0
+    dist_from_low = (current - low_2w) / low_2w * 100 if low_2w > 0 else 0.0
+
+    gap_pct: float | None = None
+    prev_close: float | None = None
+    today_open: float | None = None
+    if len(closes) >= 2 and len(opens) >= 1:
+        prev_close = closes[-2]
+        today_open = opens[-1]
+        if prev_close > 0:
+            gap_pct = (today_open - prev_close) / prev_close * 100
+
+    pattern: str
+    note: str
+    if gap_pct is not None and abs(gap_pct) >= 5:
+        if gap_pct < 0 and dist_from_high <= -15:
+            pattern = "Rally → Gap-Down"
+            note = (
+                f"rallied to ${high_2w:.2f} then gapped {gap_pct:+.1f}% today — "
+                f"disappointment after run-up"
+            )
+        elif gap_pct > 0 and dist_from_low >= 15:
+            pattern = "Selloff → Gap-Up"
+            note = (
+                f"sold to ${low_2w:.2f} then gapped {gap_pct:+.1f}% today — "
+                f"recovery or short squeeze"
+            )
+        elif gap_pct < 0:
+            pattern = "Gap-Down"
+            note = f"gapped {gap_pct:+.1f}% today, no clear prior trend"
+        else:
+            pattern = "Gap-Up"
+            note = f"gapped {gap_pct:+.1f}% today, no clear prior trend"
+    elif range_pct < 5:
+        pattern = "Quiet"
+        note = f"{range_pct:.1f}% range, low-vol consolidation"
+    elif range_pct >= 15 and abs(net_pct) < 5:
+        pattern = "Choppy"
+        note = f"{range_pct:.1f}% range but {net_pct:+.1f}% net — whipsaw"
+    elif net_pct > 5:
+        pattern = "Steady Rally"
+        note = f"trending up {net_pct:+.1f}% over 2 weeks"
+    elif net_pct < -5:
+        pattern = "Steady Decline"
+        note = f"trending down {net_pct:+.1f}% over 2 weeks"
+    else:
+        pattern = "Drift"
+        note = f"{net_pct:+.1f}% net, no clear direction"
+
+    return {
+        "high_2w": high_2w,
+        "low_2w": low_2w,
+        "net_pct": net_pct,
+        "range_pct": range_pct,
+        "gap_pct": gap_pct,
+        "prev_close": prev_close,
+        "today_open": today_open,
+        "pattern": pattern,
+        "pattern_note": note,
+    }
+
+
 @mcp.tool()
 async def get_entry_signals(ctx: Context, symbol: str) -> str:
     """Aggregate conviction, IV, and momentum signals for a stock and detect
@@ -306,8 +404,13 @@ async def get_entry_signals(ctx: Context, symbol: str) -> str:
     - Deteriorating Rally: uptrend but revenue declining (mirror of Price Dislocation)
     - FOMO Trap: near ATH + RSI >70 + PEG >3.0
     - Capitulation Bargain: near 52W low + RSI <30 + PEG <1 + margins ok (mirror of FOMO Trap)
-    - Front-Run Catalyst: stock rallied >8% in prior 2 weeks (intent-aware)
-    - Pre-Priced Selloff: stock dropped >8% in prior 2 weeks (intent-aware)
+    - Front-Run Catalyst: stock rallied >8% in prior 2 weeks (only when earnings upcoming)
+    - Pre-Priced Selloff: stock dropped >8% in prior 2 weeks (only when earnings upcoming)
+
+    Also classifies the 2-week tape into a Tape Pattern tag (Rally → Gap-Down,
+    Selloff → Gap-Up, Steady Rally, Steady Decline, Choppy, Quiet, Gap-Up,
+    Gap-Down, Drift) so the framework can distinguish rallied-then-crashed
+    setups from steady-decline setups (both can show the same net 2W %).
 
     Scores four quantitative conviction factors (ROE, Growth, Margins, Cash Flow)
     into Bullish/Moderate/Neutral/Negative tiers. When 2+ factors score Negative,
@@ -356,13 +459,15 @@ async def get_entry_signals(ctx: Context, symbol: str) -> str:
 
     bars = hist_resp.days if hist_resp else []
     closes = [float(b["close"]) for b in bars] if bars else []
+    opens = [float(b["open"]) for b in bars] if bars else []
+    highs = [float(b["high"]) for b in bars] if bars else []
+    lows = [float(b["low"]) for b in bars] if bars else []
 
     rsi_val = None
     sma50_val = None
     sma200_val = None
     above_sma50 = None
     above_sma200 = None
-    rally_2w_pct = None
 
     if closes:
         rsi_vals = ta.rsi(closes)
@@ -378,10 +483,9 @@ async def get_entry_signals(ctx: Context, symbol: str) -> str:
         if sma200_val is not None and price:
             above_sma200 = price > sma200_val
 
-        if len(closes) >= 10:
-            price_2w_ago = closes[-10]
-            if price_2w_ago > 0:
-                rally_2w_pct = (closes[-1] - price_2w_ago) / price_2w_ago * 100
+    tape = _classify_tape(closes, opens, highs, lows)
+    rally_2w_pct = tape.get("net_pct") if tape else None
+    earnings_upcoming = _earnings_in_future(earnings_date)
 
     breakers: list[str] = []
 
@@ -427,14 +531,14 @@ async def get_entry_signals(ctx: Context, symbol: str) -> str:
             "Genuine bargain, not a value trap. High-conviction accumulate."
         )
 
-    if rally_2w_pct is not None and rally_2w_pct > 8 and earnings_date:
+    if rally_2w_pct is not None and rally_2w_pct > 8 and earnings_upcoming:
         breakers.append(
             f"Front-Run Catalyst — rallied {rally_2w_pct:.1f}% in 2 weeks into "
             f"{earnings_date} earnings. Bullish: wait for post-catalyst reaction. "
             f"Bearish: rally provides higher entry for puts/bear spreads."
         )
 
-    if rally_2w_pct is not None and rally_2w_pct < -8 and earnings_date:
+    if rally_2w_pct is not None and rally_2w_pct < -8 and earnings_upcoming:
         breakers.append(
             f"Pre-Priced Selloff — dropped {rally_2w_pct:.1f}% in 2 weeks into "
             f"{earnings_date} earnings. Bearish: wait for post-catalyst reaction "
@@ -491,8 +595,16 @@ async def get_entry_signals(ctx: Context, symbol: str) -> str:
     if sma200_val is not None:
         rel = "above" if above_sma200 else "below"
         data["SMA(200)"] = f"{sma200_val:.2f} (price {rel})"
-    if rally_2w_pct is not None:
-        data["2W Rally"] = f"{rally_2w_pct:+.1f}%"
+    if tape:
+        data["2W Hi/Lo"] = f"${tape['high_2w']:.2f} / ${tape['low_2w']:.2f}"
+        if tape.get("net_pct") is not None:
+            data["2W Net"] = f"{tape['net_pct']:+.1f}%"
+        if tape.get("gap_pct") is not None:
+            data["Today's Gap"] = (
+                f"{tape['gap_pct']:+.1f}% (${tape['prev_close']:.2f} → ${tape['today_open']:.2f})"
+            )
+        if tape.get("pattern"):
+            data["Tape Pattern"] = f"{tape['pattern']} — {tape['pattern_note']}"
 
     if breakers:
         data["Circuit Breakers"] = " | ".join(breakers)
