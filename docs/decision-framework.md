@@ -60,12 +60,15 @@ Drawdown alone is not conviction — the business quality determines whether the
 | **High** | **Enter at discount** | Own shares at lower cost basis, premium is bonus | "I want to own this stock cheaper" |
 | **High, time-specific** | **Directional leverage** | Leveraged bet on a near-term move with defined cost | "This stock is moving in the next 2-6 weeks" |
 | **Moderate** | **Defined-risk exposure** | Bullish participation with capped downside | "I like this thesis but want to limit what I can lose" |
+| **Speculative growth** | **Pre-profit hyper-growth** | Small position in a pre-profit IPO with proven unit economics | "Real revenue, GAAP losses, but unit economics that can compound" |
 | **Low / Neutral** | **Harvest premium** | Extract income from range-bound or elevated IV | "I don't want to own this, I want to sell its volatility" |
 | **Direction-agnostic** | **Bet on volatility** | Profit from large moves regardless of direction | "Something big is coming, I don't know which way" |
 | **Negative** | **Bearish** | Profit from decline or volatility on a deteriorating business | "This business is getting worse and the market hasn't priced it" |
 | **N/A (existing position)** | **Hedge** | Protect current holdings | "I own this and want downside protection" |
 
 When 2+ conviction inputs score "negative," route to the [Bearish Framework](bearish-framework.md) for detailed deterioration scoring, valuation disconnect assessment, and L2 strategy selection. A bad business at a fair price is a skip; a bad business at a delusional price is a trade.
+
+For **pre-profit IPO candidates** (real revenue, GAAP losses, narrative-heavy story), the standard conviction tiers don't apply cleanly — the Negative-margins-Negative-Cash-Flow scoring routes them to bearish, but the burn may be the *entry condition* not the bear case. Route to the [Pre-Profit Speculative-Growth Framework](pre-profit-growth-framework.md) for unit-economics gating, sizing, and re-evaluation cadence. Default verdict per the framework's bias-to-rejection: better to miss future winners than admit ambiguous-tier names that get sentiment runway but disappoint long-term.
 
 ## Step 2: Read the Signals
 
@@ -118,6 +121,7 @@ Once intent is set and signals are collected, match to the right strategy. See [
 | **Enter at discount** | CSP (30-45 DTE) | CSP (richer premium) | CSP (still works) |
 | **Directional leverage** | Long call (40-60 delta) | Bull call spread (reduce vega) | Long call (sweet spot) |
 | **Defined-risk exposure** | Bull call spread | BPS (sell rich premium) | Bull call spread (sweet spot) |
+| **Speculative growth** | Direct buy single tranche, 3-5% portfolio cap | Skip — IV too rich; wait for next 10-K | Direct buy or long call (IV Rank <40 only) |
 | **Harvest premium** | Iron condor / wheel | Iron condor (best window) | Skip, butterfly, or wheel |
 | **Bet on volatility** | Long straddle/strangle | Sell vol instead | Buy vol (sweet spot) |
 | **Bearish (L2)** | Long put (IV Rank <30%) | Wait (puts expensive) | Long put (sweet spot) |
