@@ -2,7 +2,7 @@
 
 Decision framework for the **Speculative Growth** conviction tier — pre-profit IPO candidates where unit economics may compound, but profitability is not yet proven.
 
-Derived from a 16-name historical study (`docs/research/pre-profit-growth-study.md`). Replaces the manual override previously captured in `feedback_pre_profit_speculation.md`.
+Derived from a 16-name historical study (`docs/research/pre-profit-growth-study.md`).
 
 ---
 

@@ -8,7 +8,7 @@
 
 Identify financial and qualitative signals — **observable in real-time at a defined pre-profit stage** — that separated companies that became durable hyper-growth winners from those that flamed out.
 
-Output feeds a new "Speculative growth" conviction tier in `decision-framework.md`, replacing the manual override currently captured in `feedback_pre_profit_speculation.md`.
+Output feeds the "Speculative growth" conviction tier in `decision-framework.md` and the formal `pre-profit-growth-framework.md`.
 
 The discipline: every signal we identify must have been visible to a public-market investor at the time, not derived from hindsight.
 
