@@ -6,12 +6,12 @@ from datetime import date
 from fastmcp import Context, FastMCP
 from trading_clients import indicators as ta
 from trading_clients import regime
-from trading_clients.endpoints import bls, fmp, fred
+from trading_clients.endpoints import bea, bls, fmp, fred
 from trading_clients.endpoints import tastytrade as tt
 from trading_clients.endpoints import tradier as t
 from trading_clients.table_helpers import kv_table
 
-from trading_mcp.helpers import _bls, _fmp, _fred, _tradier, _year_ago
+from trading_mcp.helpers import _bea, _bls, _fmp, _fred, _tradier, _year_ago
 
 mcp = FastMCP("macro-tools")
 
@@ -667,3 +667,178 @@ async def get_cpi_report_texture(ctx: Context) -> str:
     )
 
     return f"## Market Regime\n\n**Verdict: {verdict}**  \n*Why: {evidence}*\n\n{kv_table(data)}"
+
+
+# PCE component price indexes (level series; MoM/YoY computed from levels).
+_PCE_COMPONENTS: list[tuple[str, str]] = [
+    ("DSERRG3M086SBEA", "Services"),
+    ("DGDSRG3M086SBEA", "Goods"),
+]
+
+
+async def _bea_pce_release(bea_client) -> "bea.PceReleaseResponse | None":
+    """Two-step BEA fetch: discover the latest PCE release URL, then fetch it.
+
+    Returns None on any failure so the surrounding gather() doesn't fail the whole
+    tool just because the press release scrape broke.
+    """
+    try:
+        idx = await bea_client.get(bea.CURRENT_RELEASES, bea.EmptyRequest())
+    except Exception:
+        return None
+    if not idx.pce_release_path:
+        return None
+    try:
+        return await bea_client.get(
+            bea.PCE_RELEASE, bea.ReleasePathRequest(idx.pce_release_path)
+        )
+    except Exception:
+        return None
+
+
+@mcp.tool()
+async def get_pce_report_texture(ctx: Context) -> str:
+    """Latest BEA Personal Income and Outlays: headline + texture beneath the headline.
+
+    Aggregates the BEA Personal Income and Outlays press release narrative
+    (income drivers, goods vs services PCE breakdown, savings rate commentary)
+    with FRED PCE series for the price texture (headline, core, supercore proxy
+    — services excluding energy and housing — services price, goods price) and
+    the spending/income texture (nominal PCE, real PCE, personal income, DPI,
+    savings rate). Includes Tradier intraday quotes for rate-sensitive tape +
+    TIP for inflation expectations.
+
+    Returns headline + spending/income + components + tape + raw narrative.
+    Does not interpret — surfaces the data so judgment happens in conversation.
+
+    Requires [fred] + [tradier] sections in ~/.tradingrc.
+    """
+    fred_client = _fred(ctx)
+    tradier = _tradier(ctx)
+    bea_client = _bea(ctx)
+
+    headline_specs = [
+        ("PCEPI", 13),
+        ("PCEPILFE", 13),
+        ("IA001260M", 13),  # Supercore: services ex housing & energy
+    ]
+    spending_specs = [
+        ("PCE", 13),  # Nominal PCE
+        ("PCEC96", 13),  # Real PCE
+        ("PI", 13),  # Personal Income
+        ("DSPI", 13),  # Disposable Personal Income
+        ("PSAVERT", 3),  # Savings Rate (already %)
+    ]
+    component_specs = [(sid, 13) for sid, _ in _PCE_COMPONENTS]
+    series_specs = headline_specs + spending_specs + component_specs
+
+    fred_tasks = [
+        fred_client.get(fred.OBSERVATIONS, fred.GetObservationsRequest(sid, lim))
+        for sid, lim in series_specs
+    ]
+    tasks = [
+        _bea_pce_release(bea_client),
+        tradier.get(t.QUOTES, t.GetQuotesRequest("TLT,IEF,SHY,SPY,XLF,TIP,VIX")),
+        *fred_tasks,
+    ]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    def _ok(i: int):
+        return results[i] if not isinstance(results[i], BaseException) else None
+
+    bea_resp = _ok(0)
+    tape_resp = _ok(1)
+    obs_by_id: dict[str, list[dict]] = {}
+    for i, (sid, _) in enumerate(series_specs, start=2):
+        r = _ok(i)
+        if r is not None:
+            obs_by_id[sid] = r.observations or []
+
+    pce_pi = obs_by_id.get("PCEPI", [])
+    period = pce_pi[0]["date"] if pce_pi else "?"
+
+    out: list[str] = []
+    out.append("=== Headline ===")
+    out.append(f"Period: {period}")
+
+    def _mom_yoy_line(obs: list[dict], label: str) -> None:
+        mom = _mom_pct(obs)
+        yoy = _yoy_pct(obs)
+        prior_mom = _mom_pct(obs[1:]) if len(obs) >= 3 else None
+        if mom is None and yoy is None:
+            return
+        prior_str = f" (prior MoM {prior_mom:+.2f}%)" if prior_mom is not None else ""
+        mom_str = f"MoM {mom:+.2f}%" if mom is not None else "MoM —"
+        yoy_str = f"YoY {yoy:+.2f}%" if yoy is not None else "YoY —"
+        out.append(f"{label}: {mom_str} | {yoy_str}{prior_str}")
+
+    _mom_yoy_line(pce_pi, "PCE price index")
+    _mom_yoy_line(obs_by_id.get("PCEPILFE", []), "Core PCE (ex food/energy)")
+    _mom_yoy_line(
+        obs_by_id.get("IA001260M", []),
+        "Supercore PCE (services ex housing & energy)",
+    )
+
+    # Spending & income — shown as MoM% on dollar levels + savings rate (already %).
+    out.append("")
+    out.append("=== Spending & income (MoM% on dollar levels) ===")
+    for sid, label in [
+        ("PI", "Personal Income"),
+        ("DSPI", "Disposable Personal Income"),
+        ("PCE", "Personal Consumption Expenditures (nominal)"),
+        ("PCEC96", "Real PCE (chained 2017$)"),
+    ]:
+        obs = obs_by_id.get(sid, [])
+        mom = _mom_pct(obs)
+        cur = _latest(obs)
+        if mom is None or cur is None:
+            continue
+        out.append(f"  {label:46s} ${cur:>10,.1f}B   MoM {mom:+.2f}%")
+
+    psavert_obs = obs_by_id.get("PSAVERT", [])
+    sav_cur = _latest(psavert_obs)
+    sav_prv = _prior(psavert_obs)
+    if sav_cur is not None:
+        prior_str = f" ({sav_prv:.1f}% prior)" if sav_prv is not None else ""
+        out.append(f"  {'Personal Savings Rate':46s} {sav_cur:>10.1f}%   {prior_str}")
+
+    # Component price indexes
+    out.append("")
+    out.append("=== Components (price index, MoM/YoY) ===")
+    for sid, label in _PCE_COMPONENTS:
+        obs = obs_by_id.get(sid, [])
+        mom = _mom_pct(obs)
+        yoy = _yoy_pct(obs)
+        if mom is None and yoy is None:
+            continue
+        mom_str = f"MoM {mom:+.2f}%" if mom is not None else "MoM —"
+        yoy_str = f"YoY {yoy:+.2f}%" if yoy is not None else "YoY —"
+        out.append(f"  {label:36s} {mom_str:14s} {yoy_str}")
+
+    # Tape
+    out.append("")
+    out.append("=== Tape (intraday) ===")
+    if tape_resp and tape_resp.quotes:
+        for q in tape_resp.quotes:
+            sym = q.get("symbol", "")
+            last = q.get("last")
+            chg_pct = q.get("change_percentage")
+            chg = q.get("change")
+            if last is None:
+                continue
+            if sym == "VIX":
+                out.append(f"  {sym:6s} {last:>7.2f}  ({chg:+.2f})")
+            else:
+                out.append(f"  {sym:6s} {last:>7.2f}  ({chg_pct:+.2f}%)")
+    else:
+        out.append("  (tape unavailable)")
+
+    # Narrative
+    out.append("")
+    out.append("=== BEA press release narrative ===")
+    if bea_resp and bea_resp.text:
+        out.append(bea_resp.text)
+    else:
+        out.append("(BEA Personal Income and Outlays release unavailable)")
+
+    return "\n".join(out)

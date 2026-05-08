@@ -40,10 +40,11 @@ On a **NFP day**, call `get_jobs_report_texture` — headline + industry mix + u
 
 On a **CPI day**, call `get_cpi_report_texture` — headline + core + major components (energy/food/shelter/services/goods/supercore proxy) + subcategory detail (rent, OER, gasoline, used cars, new vehicles, medical, public transportation) + tape (incl TIP for inflation expectations) + BLS press release narrative.
 
-For other Tier-1 prints (PCE, FOMC) — no dedicated texture tool yet, so fall back to manual orchestration:
-- **PCE**: `get_economic_data` for PCEPI, PCEPILFE (limit=13)
-- **FOMC**: `get_economic_data` for DFEDTARU, DFEDTARL (limit=2)
-- Always also: `get_quote TLT,IEF,SHY,SPY,XLF,VIX`
+On a **PCE day**, call `get_pce_report_texture` — headline PCE + core + true supercore (services ex housing & energy) + spending/income texture (personal income, DPI, nominal+real PCE, savings rate) + goods/services price split + tape (incl TIP) + BEA press release narrative.
+
+For **FOMC** — no dedicated texture tool yet, so fall back to manual orchestration:
+- `get_economic_data` for DFEDTARU, DFEDTARL (limit=2)
+- `get_quote TLT,IEF,SHY,SPY,XLF,VIX`
 
 Surface the texture data — do NOT pre-bake interpretation. Note the divergences worth flagging (headline vs underneath, two surveys disagreeing, sector quality, revisions to prior months) and let the user make the judgment call together. If the print hasn't dropped yet, flag: "⏰ [Print name] at [time] ET today — defer new entries until post-print reaction" and continue to Step 2.
 

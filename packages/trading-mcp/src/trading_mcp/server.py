@@ -4,6 +4,7 @@ from typing import Any
 
 from fastmcp import FastMCP
 from trading_clients.alphavantage_client import AlphaVantageClient
+from trading_clients.bea_client import BeaClient
 from trading_clients.bls_client import BlsClient
 from trading_clients.config import load_config
 from trading_clients.edgar_client import EdgarClient
@@ -60,6 +61,7 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
     ctx["fool"] = FoolClient()
     ctx["edgar"] = EdgarClient(config.edgar)
     ctx["bls"] = BlsClient()
+    ctx["bea"] = BeaClient()
     db = open_db()
     init_pipeline_schema(db)
     init_roll_schema(db)

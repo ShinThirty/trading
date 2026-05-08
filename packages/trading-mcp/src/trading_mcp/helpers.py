@@ -6,6 +6,7 @@ from typing import Any
 
 from fastmcp import Context
 from trading_clients.alphavantage_client import AlphaVantageClient
+from trading_clients.bea_client import BeaClient
 from trading_clients.bls_client import BlsClient
 from trading_clients.edgar_client import EdgarClient
 from trading_clients.endpoints import tradier as t
@@ -95,6 +96,10 @@ def _edgar(ctx: Context) -> EdgarClient:
 
 def _bls(ctx: Context) -> BlsClient:
     return ctx.lifespan_context["bls"]
+
+
+def _bea(ctx: Context) -> BeaClient:
+    return ctx.lifespan_context["bea"]
 
 
 async def _check_market(ctx: Context, order_type: str, extended_hours: bool) -> None:
