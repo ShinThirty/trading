@@ -36,10 +36,11 @@ If all three flat/easing, note "✅ no divergence, curve normalizing" and skip. 
 
 Call `get_upcoming_economic_releases` (limit=10). If today doesn't match a **Tier-1 release** — Employment Situation (NFP), CPI, PCE, or FOMC decision — **skip this section entirely**.
 
-On a **NFP day**, call `get_jobs_report_texture` — it returns headline + industry mix + underneath (U-6, participation, hours, household-vs-establishment divergence, decimal-precision U-3) + intraday tape + the BLS press release narrative including revisions.
+On a **NFP day**, call `get_jobs_report_texture` — headline + industry mix + underneath (U-6, participation, hours, household-vs-establishment divergence, decimal-precision U-3) + intraday tape + the BLS press release narrative including revisions.
 
-For other Tier-1 prints (CPI, PCE, FOMC) — no dedicated texture tool yet, so fall back to manual orchestration:
-- **CPI**: `get_economic_data` for CPIAUCSL, CPILFESL (limit=13 for YoY)
+On a **CPI day**, call `get_cpi_report_texture` — headline + core + major components (energy/food/shelter/services/goods/supercore proxy) + subcategory detail (rent, OER, gasoline, used cars, new vehicles, medical, public transportation) + tape (incl TIP for inflation expectations) + BLS press release narrative.
+
+For other Tier-1 prints (PCE, FOMC) — no dedicated texture tool yet, so fall back to manual orchestration:
 - **PCE**: `get_economic_data` for PCEPI, PCEPILFE (limit=13)
 - **FOMC**: `get_economic_data` for DFEDTARU, DFEDTARL (limit=2)
 - Always also: `get_quote TLT,IEF,SHY,SPY,XLF,VIX`

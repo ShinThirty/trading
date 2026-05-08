@@ -54,6 +54,24 @@ class _PressReleaseHTMLParser(HTMLParser):
             self.parts.append(data)
 
 
+def _extract_narrative(html: str, start_anchor: str, end_anchor: str) -> str:
+    """Strip BLS press release HTML to the narrative text between two anchors."""
+    if not html:
+        return ""
+    parser = _PressReleaseHTMLParser()
+    parser.feed(html)
+    raw = "".join(parser.parts)
+    lines = [re.sub(r"\s+", " ", line).strip() for line in raw.split("\n")]
+    cleaned = "\n".join(line for line in lines if line)
+    start = cleaned.find(start_anchor)
+    if start >= 0:
+        cleaned = cleaned[start:]
+    end = cleaned.find(end_anchor)
+    if end > 0:
+        cleaned = cleaned[:end].rstrip()
+    return cleaned
+
+
 @dataclass
 class EmploymentSituationResponse:
     """Narrative section of the BLS Employment Situation press release.
@@ -68,23 +86,26 @@ class EmploymentSituationResponse:
 
     @classmethod
     def from_response(cls, html: str) -> "EmploymentSituationResponse":
-        if not html:
-            return cls(text="")
-        parser = _PressReleaseHTMLParser()
-        parser.feed(html)
-        raw = "".join(parser.parts)
-        lines = [re.sub(r"\s+", " ", line).strip() for line in raw.split("\n")]
-        cleaned = "\n".join(line for line in lines if line)
+        return cls(text=_extract_narrative(html, "THE EMPLOYMENT SITUATION", "HOUSEHOLD DATA"))
 
-        # Trim to just the narrative. The release leads with site-chrome and ends
-        # with a long block of data tables we don't need (FRED has the precise numbers).
-        start = cleaned.find("THE EMPLOYMENT SITUATION")
-        if start >= 0:
-            cleaned = cleaned[start:]
-        end = cleaned.find("HOUSEHOLD DATA")
-        if end > 0:
-            cleaned = cleaned[:end].rstrip()
-        return cls(text=cleaned)
+    def to_output(self) -> str:
+        return self.text or "(no content)"
+
+
+@dataclass
+class CpiReleaseResponse:
+    """Narrative section of the BLS Consumer Price Index press release.
+
+    Trimmed to the prose highlights (headline MoM/YoY, energy/shelter/food summary,
+    core CPI commentary, 12-month YoY context, categories that increased/decreased).
+    The technical methodology and data tables that follow Table A are excluded.
+    """
+
+    text: str
+
+    @classmethod
+    def from_response(cls, html: str) -> "CpiReleaseResponse":
+        return cls(text=_extract_narrative(html, "CONSUMER PRICE INDEX", "Table A."))
 
     def to_output(self) -> str:
         return self.text or "(no content)"
@@ -101,4 +122,10 @@ EMPLOYMENT_SITUATION = Endpoint(
     "/news.release/empsit.htm",
     cache_ttl=3600,
     response_model=EmploymentSituationResponse,
+)
+
+CPI_RELEASE = Endpoint(
+    "/news.release/cpi.htm",
+    cache_ttl=3600,
+    response_model=CpiReleaseResponse,
 )

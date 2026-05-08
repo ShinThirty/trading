@@ -316,6 +316,148 @@ async def get_jobs_report_texture(ctx: Context) -> str:
         out.append("(BLS press release unavailable)")
 
     return "\n".join(out)
+
+
+# CPI components — order: headline-adjacent, then major segments, then subcategories.
+# All series are seasonally-adjusted index levels; MoM/YoY computed from the levels.
+_CPI_MAJOR: list[tuple[str, str]] = [
+    ("CPIENGSL", "Energy"),
+    ("CPIUFDSL", "Food"),
+    ("CUSR0000SAH1", "Shelter"),
+    ("CUSR0000SAS", "Services"),
+    ("CUSR0000SAC", "Goods (commodities)"),
+    ("CUSR0000SASLE", "Services less energy (supercore proxy)"),
+]
+_CPI_SUBCATEGORY: list[tuple[str, str]] = [
+    ("CUSR0000SEHA", "Rent of primary residence"),
+    ("CUSR0000SEHC01", "Owners' equivalent rent"),
+    ("CUSR0000SETB01", "Gasoline"),
+    ("CUSR0000SETA02", "Used cars & trucks"),
+    ("CUSR0000SETA01", "New vehicles"),
+    ("CUSR0000SAM2", "Medical care services"),
+    ("CUSR0000SETG01", "Public transportation"),
+]
+
+
+@mcp.tool()
+async def get_cpi_report_texture(ctx: Context) -> str:
+    """Latest BLS Consumer Price Index: headline + texture beneath the headline.
+
+    Aggregates the BLS CPI press release narrative (categories that increased/
+    decreased, gasoline/shelter/food commentary) with FRED CPI series for the
+    component breakdown (headline, core, major segments — energy, food, shelter,
+    services, goods — and a services-less-energy supercore proxy) plus subcategory
+    detail (rent, OER, gasoline, used cars, new vehicles, medical care, public
+    transportation). Includes Tradier intraday quotes for rate-sensitive tape +
+    TIP for inflation expectations.
+
+    Returns headline + components + subcategories + tape + raw narrative.
+    Does not interpret — surfaces the data so judgment happens in conversation.
+
+    Requires [fred] + [tradier] sections in ~/.tradingrc.
+    """
+    fred_client = _fred(ctx)
+    tradier = _tradier(ctx)
+    bls_client = _bls(ctx)
+
+    # All CPI series are index levels; need 13 obs to compute YoY.
+    headline_specs = [("CPIAUCSL", 13), ("CPILFESL", 13)]
+    component_specs = [(sid, 13) for sid, _ in _CPI_MAJOR + _CPI_SUBCATEGORY]
+    series_specs = headline_specs + component_specs
+
+    fred_tasks = [
+        fred_client.get(fred.OBSERVATIONS, fred.GetObservationsRequest(sid, lim))
+        for sid, lim in series_specs
+    ]
+    tasks = [
+        bls_client.get(bls.CPI_RELEASE, bls.EmptyRequest()),
+        tradier.get(t.QUOTES, t.GetQuotesRequest("TLT,IEF,SHY,SPY,XLF,TIP,VIX")),
+        *fred_tasks,
+    ]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    def _ok(i: int):
+        return results[i] if not isinstance(results[i], BaseException) else None
+
+    bls_resp = _ok(0)
+    tape_resp = _ok(1)
+    obs_by_id: dict[str, list[dict]] = {}
+    for i, (sid, _) in enumerate(series_specs, start=2):
+        r = _ok(i)
+        if r is not None:
+            obs_by_id[sid] = r.observations or []
+
+    headline = obs_by_id.get("CPIAUCSL", [])
+    core = obs_by_id.get("CPILFESL", [])
+    period = headline[0]["date"] if headline else "?"
+
+    out: list[str] = []
+    out.append("=== Headline ===")
+    out.append(f"Period: {period}")
+
+    def _mom_yoy_line(obs: list[dict], label: str) -> None:
+        mom = _mom_pct(obs)
+        yoy = _yoy_pct(obs)
+        prior_mom = _mom_pct(obs[1:]) if len(obs) >= 3 else None
+        if mom is None and yoy is None:
+            return
+        prior_str = f" (prior MoM {prior_mom:+.2f}%)" if prior_mom is not None else ""
+        mom_str = f"MoM {mom:+.2f}%" if mom is not None else "MoM —"
+        yoy_str = f"YoY {yoy:+.2f}%" if yoy is not None else "YoY —"
+        out.append(f"{label}: {mom_str} | {yoy_str}{prior_str}")
+
+    _mom_yoy_line(headline, "CPI (all items)")
+    _mom_yoy_line(core, "Core CPI (ex food/energy)")
+
+    # Major components
+    out.append("")
+    out.append("=== Major components (MoM, YoY) ===")
+    for sid, label in _CPI_MAJOR:
+        obs = obs_by_id.get(sid, [])
+        mom = _mom_pct(obs)
+        yoy = _yoy_pct(obs)
+        if mom is None and yoy is None:
+            continue
+        mom_str = f"MoM {mom:+.2f}%" if mom is not None else "MoM —"
+        yoy_str = f"YoY {yoy:+.2f}%" if yoy is not None else "YoY —"
+        out.append(f"  {label:42s} {mom_str:14s} {yoy_str}")
+
+    # Subcategory detail
+    out.append("")
+    out.append("=== Subcategory detail (MoM) ===")
+    for sid, label in _CPI_SUBCATEGORY:
+        mom = _mom_pct(obs_by_id.get(sid, []))
+        if mom is None:
+            continue
+        out.append(f"  {label:36s} {mom:+.2f}%")
+
+    # Tape
+    out.append("")
+    out.append("=== Tape (intraday) ===")
+    if tape_resp and tape_resp.quotes:
+        for q in tape_resp.quotes:
+            sym = q.get("symbol", "")
+            last = q.get("last")
+            chg_pct = q.get("change_percentage")
+            chg = q.get("change")
+            if last is None:
+                continue
+            if sym == "VIX":
+                out.append(f"  {sym:6s} {last:>7.2f}  ({chg:+.2f})")
+            else:
+                out.append(f"  {sym:6s} {last:>7.2f}  ({chg_pct:+.2f}%)")
+    else:
+        out.append("  (tape unavailable)")
+
+    # Narrative
+    out.append("")
+    out.append("=== BLS press release narrative ===")
+    if bls_resp and bls_resp.text:
+        out.append(bls_resp.text)
+    else:
+        out.append("(BLS CPI press release unavailable)")
+
+    return "\n".join(out)
     """Get current market regime classification with a synthesized verdict.
 
     Aggregates Tradier (VIX quotes + history, SPY/IWM technicals, 11 SPDR
