@@ -42,9 +42,7 @@ On a **CPI day**, call `get_cpi_report_texture` — headline + core + major comp
 
 On a **PCE day**, call `get_pce_report_texture` — headline PCE + core + true supercore (services ex housing & energy) + spending/income texture (personal income, DPI, nominal+real PCE, savings rate) + goods/services price split + tape (incl TIP) + BEA press release narrative.
 
-For **FOMC** — no dedicated texture tool yet, so fall back to manual orchestration:
-- `get_economic_data` for DFEDTARU, DFEDTARL (limit=2)
-- `get_quote TLT,IEF,SHY,SPY,XLF,VIX`
+On a **FOMC day**, call `get_fomc_decision_texture` — headline (latest meeting + target range + effective fed funds) + policy rates (DFEDTARU/L, DFF, IORB, ON RRP, balance sheet with 1-month QT pace) + tape + the latest FOMC statement AND the prior meeting's statement so language deltas are inspectable in one pass.
 
 Surface the texture data — do NOT pre-bake interpretation. Note the divergences worth flagging (headline vs underneath, two surveys disagreeing, sector quality, revisions to prior months) and let the user make the judgment call together. If the print hasn't dropped yet, flag: "⏰ [Print name] at [time] ET today — defer new entries until post-print reaction" and continue to Step 2.
 

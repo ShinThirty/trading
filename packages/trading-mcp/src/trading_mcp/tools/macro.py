@@ -6,12 +6,12 @@ from datetime import date
 from fastmcp import Context, FastMCP
 from trading_clients import indicators as ta
 from trading_clients import regime
-from trading_clients.endpoints import bea, bls, fmp, fred
+from trading_clients.endpoints import bea, bls, fed, fmp, fred
 from trading_clients.endpoints import tastytrade as tt
 from trading_clients.endpoints import tradier as t
 from trading_clients.table_helpers import kv_table
 
-from trading_mcp.helpers import _bea, _bls, _fmp, _fred, _tradier, _year_ago
+from trading_mcp.helpers import _bea, _bls, _fed, _fmp, _fred, _tradier, _year_ago
 
 mcp = FastMCP("macro-tools")
 
@@ -840,5 +840,170 @@ async def get_pce_report_texture(ctx: Context) -> str:
         out.append(bea_resp.text)
     else:
         out.append("(BEA Personal Income and Outlays release unavailable)")
+
+    return "\n".join(out)
+
+
+async def _fed_statements(fed_client) -> tuple:
+    """Two-step Fed fetch: discover latest + prior FOMC statement URLs from the
+    calendar, then fetch both statements in parallel.
+
+    Returns (calendar_resp, latest_stmt_resp, prior_stmt_resp). Any None means
+    that piece failed; the surrounding tool degrades gracefully.
+    """
+    try:
+        cal = await fed_client.get(fed.FOMC_CALENDAR, fed.EmptyRequest())
+    except Exception:
+        return None, None, None
+    latest_path = cal.latest()
+    prior_path = cal.prior()
+    if not latest_path:
+        return cal, None, None
+    fetches = [fed_client.get(fed.FOMC_STATEMENT, fed.StatementPathRequest(latest_path))]
+    if prior_path:
+        fetches.append(
+            fed_client.get(fed.FOMC_STATEMENT, fed.StatementPathRequest(prior_path))
+        )
+    results = await asyncio.gather(*fetches, return_exceptions=True)
+    latest = results[0] if not isinstance(results[0], BaseException) else None
+    prior = (
+        results[1]
+        if len(results) > 1 and not isinstance(results[1], BaseException)
+        else None
+    )
+    return cal, latest, prior
+
+
+@mcp.tool()
+async def get_fomc_decision_texture(ctx: Context) -> str:
+    """Latest FOMC decision: rate context + statement language + prior statement
+    for comparison.
+
+    Aggregates the Fed FOMC statement (latest meeting + the prior meeting's
+    statement so language deltas are inspectable in a single tool call) with
+    FRED rate series for current policy context (target range, effective fed
+    funds rate, IORB, ON RRP take, balance sheet level) and Tradier intraday
+    quotes for the rate-sensitive tape.
+
+    Returns headline + policy rates + tape + latest statement + prior statement.
+    Does not interpret — surfaces the data so judgment (especially the language
+    diff that drives FOMC-day market reaction) happens in conversation.
+
+    Requires [fred] + [tradier] sections in ~/.tradingrc.
+    """
+    fred_client = _fred(ctx)
+    tradier = _tradier(ctx)
+    fed_client = _fed(ctx)
+
+    rate_specs = [
+        ("DFEDTARU", 2),
+        ("DFEDTARL", 2),
+        ("DFF", 2),
+        ("IORB", 2),
+        ("RRPONTSYD", 2),
+        ("WALCL", 30),  # need a few weeks for QT-pace context
+    ]
+
+    fred_tasks = [
+        fred_client.get(fred.OBSERVATIONS, fred.GetObservationsRequest(sid, lim))
+        for sid, lim in rate_specs
+    ]
+    results = await asyncio.gather(
+        _fed_statements(fed_client),
+        tradier.get(t.QUOTES, t.GetQuotesRequest("TLT,IEF,SHY,SPY,XLF,VIX")),
+        *fred_tasks,
+        return_exceptions=True,
+    )
+
+    def _ok(i: int):
+        return results[i] if not isinstance(results[i], BaseException) else None
+
+    fed_bundle = _ok(0)
+    cal_resp, latest_stmt, prior_stmt = (
+        fed_bundle if fed_bundle is not None else (None, None, None)
+    )
+    tape_resp = _ok(1)
+    obs_by_id: dict[str, list[dict]] = {}
+    for i, (sid, _) in enumerate(rate_specs, start=2):
+        r = _ok(i)
+        if r is not None:
+            obs_by_id[sid] = r.observations or []
+
+    upper = _latest(obs_by_id.get("DFEDTARU", []))
+    lower = _latest(obs_by_id.get("DFEDTARL", []))
+    dff = _latest(obs_by_id.get("DFF", []))
+    iorb = _latest(obs_by_id.get("IORB", []))
+    rrp = _latest(obs_by_id.get("RRPONTSYD", []))
+    walcl = obs_by_id.get("WALCL", [])
+
+    out: list[str] = []
+
+    # Headline
+    out.append("=== Headline ===")
+    latest_path = cal_resp.latest() if cal_resp else None
+    prior_path = cal_resp.prior() if cal_resp else None
+    if latest_path:
+        out.append(f"Latest FOMC meeting: {fed.extract_meeting_date(latest_path)}")
+    if upper is not None and lower is not None:
+        out.append(f"Federal Funds Target Range: {lower:.2f}% – {upper:.2f}%")
+    if dff is not None:
+        out.append(f"Effective Federal Funds Rate: {dff:.2f}%")
+
+    # Policy rates
+    out.append("")
+    out.append("=== Policy rates ===")
+    if upper is not None and lower is not None:
+        out.append(f"  Federal Funds Target Range:    {lower:.2f}% – {upper:.2f}%")
+    if dff is not None:
+        out.append(f"  Effective Federal Funds Rate:  {dff:.2f}%")
+    if iorb is not None:
+        out.append(f"  IORB:                          {iorb:.2f}%")
+    if rrp is not None:
+        out.append(f"  ON RRP take:                   ${rrp:.2f}T")
+    if walcl:
+        cur_w = _latest(walcl)
+        # WALCL is weekly; ~4 obs back ≈ 1 month for QT-pace context.
+        prior_w = float(walcl[4]["value"]) if len(walcl) > 4 else None
+        if cur_w is not None:
+            line = f"  Fed balance sheet (WALCL):     ${cur_w / 1_000_000:.2f}T"
+            if prior_w is not None:
+                delta = (cur_w - prior_w) / 1_000_000
+                line += f"  (1mo ago ${prior_w / 1_000_000:.2f}T, Δ ${delta:+.3f}T)"
+            out.append(line)
+
+    # Tape
+    out.append("")
+    out.append("=== Tape (intraday) ===")
+    if tape_resp and tape_resp.quotes:
+        for q in tape_resp.quotes:
+            sym = q.get("symbol", "")
+            last = q.get("last")
+            chg_pct = q.get("change_percentage")
+            chg = q.get("change")
+            if last is None:
+                continue
+            if sym == "VIX":
+                out.append(f"  {sym:6s} {last:>7.2f}  ({chg:+.2f})")
+            else:
+                out.append(f"  {sym:6s} {last:>7.2f}  ({chg_pct:+.2f}%)")
+    else:
+        out.append("  (tape unavailable)")
+
+    # Latest statement
+    out.append("")
+    if latest_path and latest_stmt and latest_stmt.text:
+        date_str = fed.extract_meeting_date(latest_path)
+        out.append(f"=== FOMC Statement ({date_str}) ===")
+        out.append(latest_stmt.text)
+    else:
+        out.append("=== FOMC Statement ===")
+        out.append("(latest statement unavailable)")
+
+    # Prior statement (for language diff)
+    out.append("")
+    if prior_path and prior_stmt and prior_stmt.text:
+        date_str = fed.extract_meeting_date(prior_path)
+        out.append(f"=== Prior FOMC Statement ({date_str}, for comparison) ===")
+        out.append(prior_stmt.text)
 
     return "\n".join(out)

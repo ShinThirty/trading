@@ -8,6 +8,7 @@ from trading_clients.bea_client import BeaClient
 from trading_clients.bls_client import BlsClient
 from trading_clients.config import load_config
 from trading_clients.edgar_client import EdgarClient
+from trading_clients.fed_client import FedClient
 from trading_clients.finnhub_client import FinnhubClient
 from trading_clients.fmp_client import FmpClient
 from trading_clients.fool_client import FoolClient
@@ -62,6 +63,7 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
     ctx["edgar"] = EdgarClient(config.edgar)
     ctx["bls"] = BlsClient()
     ctx["bea"] = BeaClient()
+    ctx["fed"] = FedClient()
     db = open_db()
     init_pipeline_schema(db)
     init_roll_schema(db)

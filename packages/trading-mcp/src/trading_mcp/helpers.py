@@ -10,6 +10,7 @@ from trading_clients.bea_client import BeaClient
 from trading_clients.bls_client import BlsClient
 from trading_clients.edgar_client import EdgarClient
 from trading_clients.endpoints import tradier as t
+from trading_clients.fed_client import FedClient
 from trading_clients.finnhub_client import FinnhubClient
 from trading_clients.fmp_client import FmpClient
 from trading_clients.fool_client import FoolClient
@@ -100,6 +101,10 @@ def _bls(ctx: Context) -> BlsClient:
 
 def _bea(ctx: Context) -> BeaClient:
     return ctx.lifespan_context["bea"]
+
+
+def _fed(ctx: Context) -> FedClient:
+    return ctx.lifespan_context["fed"]
 
 
 async def _check_market(ctx: Context, order_type: str, extended_hours: bool) -> None:

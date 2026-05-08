@@ -53,6 +53,7 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │       ├── edgar_client.py          # No auth, identifies via User-Agent (SEC EDGAR)
 │   │       ├── bls_client.py            # No auth, identifies via User-Agent (BLS press releases)
 │   │       ├── bea_client.py            # No auth, identifies via User-Agent (BEA press releases)
+│   │       ├── fed_client.py            # No auth, identifies via User-Agent (FOMC statements)
 │   │       └── endpoints/               # Typed request/response models + Endpoint defs
 │   │           ├── webull.py            # 11 endpoints (account, orders, instruments)
 │   │           ├── tradier.py           # 19 endpoints (options, quotes, account, orders)
@@ -65,6 +66,7 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │           ├── edgar.py             # 4 endpoints (ticker map, submissions, filing index, doc)
 │   │           ├── bls.py               # 2 endpoints (Employment Situation, CPI press releases)
 │   │           ├── bea.py               # 2 endpoints (current releases index, PCE press release)
+│   │           ├── fed.py               # 2 endpoints (FOMC calendar, FOMC statement)
 │   │           └── yahoo.py             # Response models for Yahoo Finance (via yfinance)
 │   ├── trading-mcp/                     # MCP server (composed via fastmcp mount)
 │   │   ├── pyproject.toml               # depends on: trading-clients + fastmcp + yfinance
@@ -185,6 +187,7 @@ EventBridge (cron, Mon-Fri 13:30-20:00 UTC)
 | **SEC EDGAR** | 8-K earnings press releases (Item 2.02 Exhibit 99.x) | None (User-Agent only) |
 | **BLS** | Employment Situation / CPI press release narrative | None (User-Agent only) |
 | **BEA** | Personal Income and Outlays (PCE) press release narrative | None (User-Agent only) |
+| **Federal Reserve** | FOMC statements (latest + prior for language diff) | None (User-Agent only) |
 
 ### No Webull SDK
 
