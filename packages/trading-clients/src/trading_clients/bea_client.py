@@ -26,7 +26,7 @@ class BeaClient(BaseClient):
         self._http = httpx.AsyncClient(
             timeout=20,
             headers={
-                "User-Agent": "trading-mcp/0.1 contact@example.com",
+                "User-Agent": "trading-mcp/0.1 (Lingnan Liu; xmxu00@gmail.com)",
                 "Accept-Encoding": "gzip, deflate",
             },
             follow_redirects=True,

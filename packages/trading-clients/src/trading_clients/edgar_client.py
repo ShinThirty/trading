@@ -16,7 +16,7 @@ from trading_clients.endpoint import BaseClient, Endpoint
 from trading_clients.endpoints import edgar as e
 from trading_clients.rate_limit import RateLimiter
 
-DEFAULT_USER_AGENT = "trading-mcp/0.1 contact@example.com"
+DEFAULT_USER_AGENT = "trading-mcp/0.1 (Lingnan Liu; xmxu00@gmail.com)"
 
 # EDGAR's published rate limit is 10 req/sec. We stay well under.
 RATE_LIMITS: dict[str, tuple[int, float]] = {
