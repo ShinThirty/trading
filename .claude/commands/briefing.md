@@ -32,6 +32,20 @@ Also call `get_quote USO,USL,BNO,VIX` and `get_tradier_history USO` (last 10 day
 
 If all three flat/easing, note "✅ no divergence, curve normalizing" and skip. If any firing, surface the table briefly. Don't expand unless active.
 
+## Step 1b: Macro Print Reaction (release days only)
+
+Call `get_upcoming_economic_releases` (limit=10). If today doesn't match a **Tier-1 release** — Employment Situation (NFP), CPI, PCE, or FOMC decision — **skip this section entirely**.
+
+On a **NFP day**, call `get_jobs_report_texture` — it returns headline + industry mix + underneath (U-6, participation, hours, household-vs-establishment divergence, decimal-precision U-3) + intraday tape + the BLS press release narrative including revisions.
+
+For other Tier-1 prints (CPI, PCE, FOMC) — no dedicated texture tool yet, so fall back to manual orchestration:
+- **CPI**: `get_economic_data` for CPIAUCSL, CPILFESL (limit=13 for YoY)
+- **PCE**: `get_economic_data` for PCEPI, PCEPILFE (limit=13)
+- **FOMC**: `get_economic_data` for DFEDTARU, DFEDTARL (limit=2)
+- Always also: `get_quote TLT,IEF,SHY,SPY,XLF,VIX`
+
+Surface the texture data — do NOT pre-bake interpretation. Note the divergences worth flagging (headline vs underneath, two surveys disagreeing, sector quality, revisions to prior months) and let the user make the judgment call together. If the print hasn't dropped yet, flag: "⏰ [Print name] at [time] ET today — defer new entries until post-print reaction" and continue to Step 2.
+
 ## Step 2: Position Alerts
 
 1. Ask the user if they have fresh Fidelity CSVs to include (exported from Fidelity Positions page to ~/Downloads/fidelity). Call `get_portfolio_summary` with `fidelity_folder` if provided, otherwise Webull-only.

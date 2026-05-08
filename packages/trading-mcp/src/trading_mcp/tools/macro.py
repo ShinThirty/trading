@@ -6,12 +6,12 @@ from datetime import date
 from fastmcp import Context, FastMCP
 from trading_clients import indicators as ta
 from trading_clients import regime
-from trading_clients.endpoints import fmp, fred
+from trading_clients.endpoints import bls, fmp, fred
 from trading_clients.endpoints import tastytrade as tt
 from trading_clients.endpoints import tradier as t
 from trading_clients.table_helpers import kv_table
 
-from trading_mcp.helpers import _fmp, _fred, _tradier, _year_ago
+from trading_mcp.helpers import _bls, _fmp, _fred, _tradier, _year_ago
 
 mcp = FastMCP("macro-tools")
 
@@ -77,8 +77,245 @@ async def get_sector_performance(ctx: Context, date: str, exchange: str = "NYSE"
     ).to_output()
 
 
+# Industry employment subseries from FRED. Display order matches BLS Table B-1
+# convention (goods-producing → service-providing → government parents at end).
+_INDUSTRY_SERIES: list[tuple[str, str]] = [
+    ("USMINE", "Mining & logging"),
+    ("USCONS", "Construction"),
+    ("MANEMP", "Manufacturing"),
+    ("USTRADE", "Trade, transport, utilities"),
+    ("USINFO", "Information"),
+    ("USFIRE", "Financial activities"),
+    ("USPBS", "Professional & business services"),
+    ("USEHS", "Education & health services"),
+    ("USLAH", "Leisure & hospitality"),
+    ("USGOVT", "Government"),
+    ("USGOOD", "(Total goods-producing)"),
+    ("SRVPRD", "(Total service-providing)"),
+]
+
+
+def _mom_change(obs: list[dict]) -> float | None:
+    """obs is desc-sorted (newest first). Returns latest minus prior, or None."""
+    if len(obs) < 2:
+        return None
+    try:
+        return float(obs[0]["value"]) - float(obs[1]["value"])
+    except (ValueError, KeyError):
+        return None
+
+
+def _mom_pct(obs: list[dict]) -> float | None:
+    if len(obs) < 2:
+        return None
+    try:
+        a, b = float(obs[0]["value"]), float(obs[1]["value"])
+        return (a - b) / b * 100 if b else None
+    except (ValueError, KeyError):
+        return None
+
+
+def _yoy_pct(obs: list[dict]) -> float | None:
+    if len(obs) < 13:
+        return None
+    try:
+        a, b = float(obs[0]["value"]), float(obs[12]["value"])
+        return (a - b) / b * 100 if b else None
+    except (ValueError, KeyError):
+        return None
+
+
+def _latest(obs: list[dict]) -> float | None:
+    if not obs:
+        return None
+    try:
+        return float(obs[0]["value"])
+    except (ValueError, KeyError):
+        return None
+
+
+def _prior(obs: list[dict]) -> float | None:
+    if len(obs) < 2:
+        return None
+    try:
+        return float(obs[1]["value"])
+    except (ValueError, KeyError):
+        return None
+
+
 @mcp.tool()
-async def get_market_regime(ctx: Context) -> str:
+async def get_jobs_report_texture(ctx: Context) -> str:
+    """Latest BLS Employment Situation: headline + texture beneath the headline.
+
+    Aggregates the BLS press release narrative (industry mix commentary,
+    revisions wording, household survey detail) with FRED series for the
+    underneath data (U-6, participation, hours, part-time, household-vs-
+    establishment divergence, decimal-precision unemployment, industry mix
+    by sector) and Tradier intraday quotes for the rate-sensitive tape
+    (TLT/IEF/SHY/SPY/XLF/VIX).
+
+    Returns headline + industry mix + underneath + tape + raw narrative.
+    Does not interpret — surfaces the data so judgment happens in conversation.
+
+    Requires [fred] + [tradier] sections in ~/.tradingrc.
+    """
+    fred_client = _fred(ctx)
+    tradier = _tradier(ctx)
+    bls_client = _bls(ctx)
+
+    # Series specs: (id, limit). 13 obs needed for AHE YoY; 3 elsewhere is plenty
+    # for MoM + 1-prior context.
+    headline_specs = [("PAYEMS", 3), ("UNRATE", 3), ("CES0500000003", 13)]
+    underneath_specs = [
+        ("U6RATE", 3),
+        ("CIVPART", 3),
+        ("EMRATIO", 3),
+        ("AWHAETP", 3),
+        ("LNS12032194", 3),  # Part-time for economic reasons (level)
+        ("CE16OV", 3),  # Civilian Employment level (household survey, 16+)
+        ("CLF16OV", 3),  # Civilian Labor Force level (for decimal U-3)
+        ("UNEMPLOY", 3),  # Unemployed level (for decimal U-3)
+    ]
+    industry_specs = [(sid, 3) for sid, _ in _INDUSTRY_SERIES]
+    series_specs = headline_specs + underneath_specs + industry_specs
+
+    fred_tasks = [
+        fred_client.get(fred.OBSERVATIONS, fred.GetObservationsRequest(sid, lim))
+        for sid, lim in series_specs
+    ]
+    tasks = [
+        bls_client.get(bls.EMPLOYMENT_SITUATION, bls.EmptyRequest()),
+        tradier.get(t.QUOTES, t.GetQuotesRequest("TLT,IEF,SHY,SPY,XLF,VIX")),
+        *fred_tasks,
+    ]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    def _ok(i: int):
+        return results[i] if not isinstance(results[i], BaseException) else None
+
+    bls_resp = _ok(0)
+    tape_resp = _ok(1)
+    obs_by_id: dict[str, list[dict]] = {}
+    for i, (sid, _) in enumerate(series_specs, start=2):
+        r = _ok(i)
+        if r is not None:
+            obs_by_id[sid] = r.observations or []
+
+    payems = obs_by_id.get("PAYEMS", [])
+    unrate = obs_by_id.get("UNRATE", [])
+    ahe = obs_by_id.get("CES0500000003", [])
+
+    nfp_mom = _mom_change(payems)  # already in thousands per FRED units
+    nfp_prior = _mom_change(payems[1:]) if len(payems) >= 3 else None
+    period = payems[0]["date"] if payems else "?"
+    u3_latest = _latest(unrate)
+
+    unemploy_lvl = _latest(obs_by_id.get("UNEMPLOY", []))
+    clf_lvl = _latest(obs_by_id.get("CLF16OV", []))
+    u3_decimal: float | None = (
+        unemploy_lvl / clf_lvl * 100
+        if unemploy_lvl is not None and clf_lvl is not None and clf_lvl > 0
+        else None
+    )
+
+    ahe_latest = _latest(ahe)
+    ahe_mom_pct = _mom_pct(ahe)
+    ahe_yoy_pct = _yoy_pct(ahe)
+
+    out: list[str] = []
+    out.append("=== Headline ===")
+    out.append(f"Period: {period}")
+    if nfp_mom is not None:
+        prior_str = f", prior {nfp_prior:+,.0f}K" if nfp_prior is not None else ""
+        out.append(f"NFP: {nfp_mom:+,.0f}K{prior_str}")
+    if u3_latest is not None:
+        dec_str = f" (decimal: {u3_decimal:.2f}%)" if u3_decimal is not None else ""
+        out.append(f"U-3 unemployment: {u3_latest:.1f}%{dec_str}")
+    if ahe_latest is not None:
+        mom = f", MoM {ahe_mom_pct:+.2f}%" if ahe_mom_pct is not None else ""
+        yoy = f", YoY {ahe_yoy_pct:+.2f}%" if ahe_yoy_pct is not None else ""
+        out.append(f"AHE (private): ${ahe_latest:.2f}{mom}{yoy}")
+
+    # Industry mix
+    out.append("")
+    out.append("=== Industry mix (MoM change) ===")
+    industry_rows: list[tuple[str, float]] = []
+    for sid, label in _INDUSTRY_SERIES:
+        chg = _mom_change(obs_by_id.get(sid, []))
+        if chg is not None:
+            industry_rows.append((label, chg))
+    # Sort detail rows by absolute change desc; keep parent totals at end.
+    detail = [r for r in industry_rows if not r[0].startswith("(")]
+    parents = [r for r in industry_rows if r[0].startswith("(")]
+    detail.sort(key=lambda r: abs(r[1]), reverse=True)
+    for label, chg in detail + parents:
+        pct_share = ""
+        if nfp_mom and abs(nfp_mom) > 0 and not label.startswith("("):
+            pct_share = f"  ({chg / nfp_mom * 100:+.0f}% of total NFP)"
+        out.append(f"  {label:36s} {chg:+,.0f}K{pct_share}")
+
+    # Underneath
+    out.append("")
+    out.append("=== Underneath (latest, prior in parens) ===")
+    def _fmt_pct(sid: str, label: str) -> None:
+        cur = _latest(obs_by_id.get(sid, []))
+        prv = _prior(obs_by_id.get(sid, []))
+        if cur is not None:
+            prior_str = f" ({prv:.1f}% prior)" if prv is not None else ""
+            out.append(f"  {label:36s} {cur:.1f}%{prior_str}")
+
+    def _fmt_lvl(sid: str, label: str, unit: str = "K") -> None:
+        cur = _latest(obs_by_id.get(sid, []))
+        prv = _prior(obs_by_id.get(sid, []))
+        if cur is not None:
+            prior_str = f" ({prv:,.0f}{unit} prior)" if prv is not None else ""
+            out.append(f"  {label:36s} {cur:,.0f}{unit}{prior_str}")
+
+    _fmt_pct("U6RATE", "U-6 underemployment")
+    _fmt_pct("CIVPART", "Labor force participation")
+    _fmt_pct("EMRATIO", "Employment-population ratio")
+    awh = _latest(obs_by_id.get("AWHAETP", []))
+    awh_p = _prior(obs_by_id.get("AWHAETP", []))
+    if awh is not None:
+        prior_str = f" ({awh_p:.1f} prior)" if awh_p is not None else ""
+        out.append(f"  {'Avg weekly hours (private)':36s} {awh:.1f}{prior_str}")
+    _fmt_lvl("LNS12032194", "Part-time for econ reasons")
+    # Household vs establishment divergence
+    hh_emp_chg = _mom_change(obs_by_id.get("CE16OV", []))
+    if hh_emp_chg is not None and nfp_mom is not None:
+        out.append(
+            f"  {'Household survey emp Δ':36s} {hh_emp_chg:+,.0f}K"
+            f"  (vs PAYEMS {nfp_mom:+,.0f}K — divergence "
+            f"{hh_emp_chg - nfp_mom:+,.0f}K)"
+        )
+
+    # Tape
+    out.append("")
+    out.append("=== Tape (intraday) ===")
+    if tape_resp and tape_resp.quotes:
+        for q in tape_resp.quotes:
+            sym = q.get("symbol", "")
+            last = q.get("last")
+            chg_pct = q.get("change_percentage")
+            chg = q.get("change")
+            if last is None:
+                continue
+            if sym == "VIX":
+                out.append(f"  {sym:6s} {last:>7.2f}  ({chg:+.2f})")
+            else:
+                out.append(f"  {sym:6s} {last:>7.2f}  ({chg_pct:+.2f}%)")
+    else:
+        out.append("  (tape unavailable)")
+
+    # Narrative
+    out.append("")
+    out.append("=== BLS press release narrative ===")
+    if bls_resp and bls_resp.text:
+        out.append(bls_resp.text)
+    else:
+        out.append("(BLS press release unavailable)")
+
+    return "\n".join(out)
     """Get current market regime classification with a synthesized verdict.
 
     Aggregates Tradier (VIX quotes + history, SPY/IWM technicals, 11 SPDR

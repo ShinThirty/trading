@@ -51,6 +51,7 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │       ├── tastytrade_client.py     # OAuth2 refresh token auth
 │   │       ├── fool_client.py           # No auth (Motley Fool sitemap+page scrape)
 │   │       ├── edgar_client.py          # No auth, identifies via User-Agent (SEC EDGAR)
+│   │       ├── bls_client.py            # No auth, identifies via User-Agent (BLS press releases)
 │   │       └── endpoints/               # Typed request/response models + Endpoint defs
 │   │           ├── webull.py            # 11 endpoints (account, orders, instruments)
 │   │           ├── tradier.py           # 19 endpoints (options, quotes, account, orders)
@@ -61,6 +62,7 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │           ├── tastytrade.py        # 5 endpoints (IV metrics, backtesting, watchlists, dividends)
 │   │           ├── fool.py              # 2 endpoints (monthly sitemap, transcript page)
 │   │           ├── edgar.py             # 4 endpoints (ticker map, submissions, filing index, doc)
+│   │           ├── bls.py               # 1 endpoint (Employment Situation press release)
 │   │           └── yahoo.py             # Response models for Yahoo Finance (via yfinance)
 │   ├── trading-mcp/                     # MCP server (composed via fastmcp mount)
 │   │   ├── pyproject.toml               # depends on: trading-clients + fastmcp + yfinance
@@ -179,6 +181,7 @@ EventBridge (cron, Mon-Fri 13:30-20:00 UTC)
 | **Yahoo Finance** | Stock screener, institutional ownership | None (via yfinance) |
 | **Motley Fool** | Earnings call transcripts (scraped) | None |
 | **SEC EDGAR** | 8-K earnings press releases (Item 2.02 Exhibit 99.x) | None (User-Agent only) |
+| **BLS** | Employment Situation / CPI press release narrative | None (User-Agent only) |
 
 ### No Webull SDK
 
