@@ -15,6 +15,10 @@ Run the complete post-screening decision framework for **$ARGUMENTS.symbol**. Ex
 2. Present the full output, then assess:
    - **Quantitative conviction**: Summarize the four auto-scored factors. Count how many score Negative.
    - **Circuit breakers**: If any triggered, state the action explicitly (hard stop, proceed, cap size, etc.).
+   - **Recent-earnings deep-dive prompt**: Determine the most recent earnings date (use the date from `get_entry_signals` output, or call `get_fmp_earnings_calendar` with limit=1 if not visible). If earnings reported within the past **14 days**, pause and ask:
+     > 📊 **$ARGUMENTS.symbol reported earnings on YYYY-MM-DD (N days ago).** Want me to pull the call transcript and 8-K press release for a deeper post-earnings re-analysis? This sharpens the qualitative factors (Moat, AI ROI) and surfaces guidance / segment-mix shifts the news cycle hasn't fully digested yet.
+
+     If **yes**, call `get_earnings_transcript` and `get_earnings_release` in parallel, then reference their content when assessing the qualitative factors below and explicitly note any guidance changes or segment-mix shifts that move conviction. If **no** (or earnings >14 days old), proceed with the normal qualitative assessment.
    - **Qualitative factors** (Moat and AI ROI): Provide your assessment based on what you know about the company. If you need more context, call `get_company_news` for $ARGUMENTS.symbol.
    - **If 2+ quantitative factors score Negative**: State "Conviction: Negative — routing to bearish framework" and follow the bearish assessment in docs/bearish-framework.md (deterioration scoring → valuation disconnect → bearish conviction level → L2 strategy selection).
 

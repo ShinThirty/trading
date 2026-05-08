@@ -5,8 +5,10 @@ from typing import Any
 from fastmcp import FastMCP
 from trading_clients.alphavantage_client import AlphaVantageClient
 from trading_clients.config import load_config
+from trading_clients.edgar_client import EdgarClient
 from trading_clients.finnhub_client import FinnhubClient
 from trading_clients.fmp_client import FmpClient
+from trading_clients.fool_client import FoolClient
 from trading_clients.fred_client import FredClient
 from trading_clients.reddit_client import RedditClient
 from trading_clients.tastytrade_client import TastyTradeClient
@@ -23,6 +25,7 @@ from trading_mcp.tools.calendar import mcp as calendar_mcp
 from trading_mcp.tools.cn_market import mcp as cn_market_mcp
 from trading_mcp.tools.crypto import mcp as crypto_mcp
 from trading_mcp.tools.decisions import mcp as decisions_mcp
+from trading_mcp.tools.earnings import mcp as earnings_mcp
 from trading_mcp.tools.fundamentals import mcp as fundamentals_mcp
 from trading_mcp.tools.macro import mcp as macro_mcp
 from trading_mcp.tools.news import mcp as news_mcp
@@ -53,6 +56,8 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
     if config.tastytrade:
         ctx["tastytrade"] = TastyTradeClient(config.tastytrade)
     ctx["reddit"] = RedditClient()
+    ctx["fool"] = FoolClient()
+    ctx["edgar"] = EdgarClient(config.edgar)
     db = open_db()
     init_pipeline_schema(db)
     init_roll_schema(db)
@@ -81,6 +86,7 @@ mcp.mount(screens_mcp)
 mcp.mount(crypto_mcp)
 mcp.mount(cn_market_mcp)
 mcp.mount(backtest_mcp)
+mcp.mount(earnings_mcp)
 mcp.mount(signals_mcp)
 mcp.mount(pipeline_mcp)
 mcp.mount(pipeline_catalysts_mcp)

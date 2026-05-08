@@ -6,9 +6,11 @@ from typing import Any
 
 from fastmcp import Context
 from trading_clients.alphavantage_client import AlphaVantageClient
+from trading_clients.edgar_client import EdgarClient
 from trading_clients.endpoints import tradier as t
 from trading_clients.finnhub_client import FinnhubClient
 from trading_clients.fmp_client import FmpClient
+from trading_clients.fool_client import FoolClient
 from trading_clients.fred_client import FredClient
 from trading_clients.reddit_client import RedditClient
 from trading_clients.tastytrade_client import TastyTradeClient
@@ -80,6 +82,14 @@ def _tastytrade(ctx: Context) -> TastyTradeClient:
 
 def _reddit(ctx: Context) -> RedditClient:
     return ctx.lifespan_context["reddit"]
+
+
+def _fool(ctx: Context) -> FoolClient:
+    return ctx.lifespan_context["fool"]
+
+
+def _edgar(ctx: Context) -> EdgarClient:
+    return ctx.lifespan_context["edgar"]
 
 
 async def _check_market(ctx: Context, order_type: str, extended_hours: bool) -> None:

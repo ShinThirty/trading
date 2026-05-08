@@ -49,6 +49,13 @@ class TastyTradeConfig:
 
 
 @dataclass(frozen=True)
+class EdgarConfig:
+    """Optional. user_agent should be 'Your Name your@email.com' per SEC fair-use policy."""
+
+    user_agent: str | None = None
+
+
+@dataclass(frozen=True)
 class AppConfig:
     webull: WebullConfig
     tradier: TradierConfig | None = None
@@ -57,6 +64,7 @@ class AppConfig:
     fred: FredConfig | None = None
     alphavantage: AlphaVantageConfig | None = None
     tastytrade: TastyTradeConfig | None = None
+    edgar: EdgarConfig | None = None
 
 
 def load_config(path: Path = RC_PATH) -> AppConfig:
@@ -122,6 +130,11 @@ def load_config(path: Path = RC_PATH) -> AppConfig:
             refresh_token=parser.get("tastytrade", "refresh_token"),
         )
 
+    # EDGAR (optional — defaults work for low-volume personal use)
+    edgar = None
+    if parser.has_section("edgar"):
+        edgar = EdgarConfig(user_agent=parser.get("edgar", "user_agent", fallback=None) or None)
+
     return AppConfig(
         webull=webull,
         tradier=tradier,
@@ -130,6 +143,7 @@ def load_config(path: Path = RC_PATH) -> AppConfig:
         fred=fred,
         alphavantage=alphavantage,
         tastytrade=tastytrade,
+        edgar=edgar,
     )
 
 

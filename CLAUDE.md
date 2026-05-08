@@ -49,6 +49,8 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │       ├── fred_client.py           # API key auth
 │   │       ├── alphavantage_client.py   # API key auth
 │   │       ├── tastytrade_client.py     # OAuth2 refresh token auth
+│   │       ├── fool_client.py           # No auth (Motley Fool sitemap+page scrape)
+│   │       ├── edgar_client.py          # No auth, identifies via User-Agent (SEC EDGAR)
 │   │       └── endpoints/               # Typed request/response models + Endpoint defs
 │   │           ├── webull.py            # 11 endpoints (account, orders, instruments)
 │   │           ├── tradier.py           # 19 endpoints (options, quotes, account, orders)
@@ -57,6 +59,8 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │           ├── fred.py              # 4 endpoints (economic data series)
 │   │           ├── alphavantage.py      # 2 endpoints (sentiment, movers)
 │   │           ├── tastytrade.py        # 5 endpoints (IV metrics, backtesting, watchlists, dividends)
+│   │           ├── fool.py              # 2 endpoints (monthly sitemap, transcript page)
+│   │           ├── edgar.py             # 4 endpoints (ticker map, submissions, filing index, doc)
 │   │           └── yahoo.py             # Response models for Yahoo Finance (via yfinance)
 │   ├── trading-mcp/                     # MCP server (composed via fastmcp mount)
 │   │   ├── pyproject.toml               # depends on: trading-clients + fastmcp + yfinance
@@ -84,6 +88,7 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │           ├── crypto.py            # Crypto quotes/history, BTC entry signals
 │   │           ├── cn_market.py         # China A-share quotes, financials, fund flow (AKShare)
 │   │           ├── backtest.py          # TastyTrade option strategy backtests
+│   │           ├── earnings.py          # Earnings call transcript (Fool) + press release (EDGAR 8-K)
 │   │           ├── signals.py           # Conviction, sizing, hedge, entry signals
 │   │           ├── pipeline.py          # Pipeline ticker CRUD
 │   │           ├── pipeline_catalysts.py # Pipeline catalyst CRUD
@@ -172,6 +177,8 @@ EventBridge (cron, Mon-Fri 13:30-20:00 UTC)
 | **Alpha Vantage** | News sentiment, top market movers | API key |
 | **TastyTrade** | IV rank/percentile, backtesting, watchlists, dividends | OAuth2 refresh token |
 | **Yahoo Finance** | Stock screener, institutional ownership | None (via yfinance) |
+| **Motley Fool** | Earnings call transcripts (scraped) | None |
+| **SEC EDGAR** | 8-K earnings press releases (Item 2.02 Exhibit 99.x) | None (User-Agent only) |
 
 ### No Webull SDK
 
