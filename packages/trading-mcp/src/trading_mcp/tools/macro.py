@@ -11,7 +11,16 @@ from trading_clients.endpoints import tastytrade as tt
 from trading_clients.endpoints import tradier as t
 from trading_clients.table_helpers import kv_table
 
-from trading_mcp.helpers import _bea, _bls, _fed, _fmp, _fred, _tradier, _year_ago
+from trading_mcp.helpers import (
+    _bea,
+    _bls,
+    _exc_summary,
+    _fed,
+    _fmp,
+    _fred,
+    _tradier,
+    _year_ago,
+)
 
 mcp = FastMCP("macro-tools")
 
@@ -143,6 +152,35 @@ def _prior(obs: list[dict]) -> float | None:
         return None
 
 
+def _warnings_section(warnings: list[str]) -> list[str]:
+    """Return output lines for a warnings header, or [] if no warnings."""
+    if not warnings:
+        return []
+    lines = ["⚠ Data source warnings (some fetches failed):"]
+    for w in warnings:
+        lines.append(f"  • {w}")
+    lines.append("")
+    return lines
+
+
+def _collect_fred_obs(
+    results: list,
+    series_specs: list[tuple[str, int]],
+    start_idx: int,
+    warnings: list[str],
+) -> dict[str, list[dict]]:
+    """Pull observations out of a gather() result slice, appending failures
+    to the shared warnings list. Returns successfully-fetched series only."""
+    obs_by_id: dict[str, list[dict]] = {}
+    for i, (sid, _) in enumerate(series_specs, start=start_idx):
+        r = results[i]
+        if isinstance(r, BaseException):
+            warnings.append(_exc_summary(f"FRED {sid}", r))
+        else:
+            obs_by_id[sid] = r.observations or []
+    return obs_by_id
+
+
 @mcp.tool()
 async def get_jobs_report_texture(ctx: Context) -> str:
     """Latest BLS Employment Situation: headline + texture beneath the headline.
@@ -190,16 +228,14 @@ async def get_jobs_report_texture(ctx: Context) -> str:
     ]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    def _ok(i: int):
-        return results[i] if not isinstance(results[i], BaseException) else None
-
-    bls_resp = _ok(0)
-    tape_resp = _ok(1)
-    obs_by_id: dict[str, list[dict]] = {}
-    for i, (sid, _) in enumerate(series_specs, start=2):
-        r = _ok(i)
-        if r is not None:
-            obs_by_id[sid] = r.observations or []
+    warnings: list[str] = []
+    bls_resp = results[0] if not isinstance(results[0], BaseException) else None
+    if bls_resp is None:
+        warnings.append(_exc_summary("BLS Employment Situation press release", results[0]))
+    tape_resp = results[1] if not isinstance(results[1], BaseException) else None
+    if tape_resp is None:
+        warnings.append(_exc_summary("Tradier intraday quotes", results[1]))
+    obs_by_id = _collect_fred_obs(results, series_specs, 2, warnings)
 
     payems = obs_by_id.get("PAYEMS", [])
     unrate = obs_by_id.get("UNRATE", [])
@@ -223,6 +259,7 @@ async def get_jobs_report_texture(ctx: Context) -> str:
     ahe_yoy_pct = _yoy_pct(ahe)
 
     out: list[str] = []
+    out.extend(_warnings_section(warnings))
     out.append("=== Headline ===")
     out.append(f"Period: {period}")
     if nfp_mom is not None:
@@ -376,22 +413,21 @@ async def get_cpi_report_texture(ctx: Context) -> str:
     ]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    def _ok(i: int):
-        return results[i] if not isinstance(results[i], BaseException) else None
-
-    bls_resp = _ok(0)
-    tape_resp = _ok(1)
-    obs_by_id: dict[str, list[dict]] = {}
-    for i, (sid, _) in enumerate(series_specs, start=2):
-        r = _ok(i)
-        if r is not None:
-            obs_by_id[sid] = r.observations or []
+    warnings: list[str] = []
+    bls_resp = results[0] if not isinstance(results[0], BaseException) else None
+    if bls_resp is None:
+        warnings.append(_exc_summary("BLS CPI press release", results[0]))
+    tape_resp = results[1] if not isinstance(results[1], BaseException) else None
+    if tape_resp is None:
+        warnings.append(_exc_summary("Tradier intraday quotes", results[1]))
+    obs_by_id = _collect_fred_obs(results, series_specs, 2, warnings)
 
     headline = obs_by_id.get("CPIAUCSL", [])
     core = obs_by_id.get("CPILFESL", [])
     period = headline[0]["date"] if headline else "?"
 
     out: list[str] = []
+    out.extend(_warnings_section(warnings))
     out.append("=== Headline ===")
     out.append(f"Period: {period}")
 
@@ -676,24 +712,31 @@ _PCE_COMPONENTS: list[tuple[str, str]] = [
 ]
 
 
-async def _bea_pce_release(bea_client) -> "bea.PceReleaseResponse | None":
+async def _bea_pce_release(
+    bea_client,
+) -> tuple["bea.PceReleaseResponse | None", list[str]]:
     """Two-step BEA fetch: discover the latest PCE release URL, then fetch it.
 
-    Returns None on any failure so the surrounding gather() doesn't fail the whole
-    tool just because the press release scrape broke.
+    Returns (response, warnings). On full success, warnings is []. Each step
+    that fails contributes a warning so the caller can surface it.
     """
+    warnings: list[str] = []
     try:
         idx = await bea_client.get(bea.CURRENT_RELEASES, bea.EmptyRequest())
-    except Exception:
-        return None
+    except Exception as e:
+        warnings.append(_exc_summary("BEA current-releases index", e))
+        return None, warnings
     if not idx.pce_release_path:
-        return None
+        warnings.append("BEA current-releases: no Personal Income and Outlays link found")
+        return None, warnings
     try:
-        return await bea_client.get(
+        resp = await bea_client.get(
             bea.PCE_RELEASE, bea.ReleasePathRequest(idx.pce_release_path)
         )
-    except Exception:
-        return None
+        return resp, warnings
+    except Exception as e:
+        warnings.append(_exc_summary(f"BEA PCE release {idx.pce_release_path}", e))
+        return None, warnings
 
 
 @mcp.tool()
@@ -743,21 +786,24 @@ async def get_pce_report_texture(ctx: Context) -> str:
     ]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    def _ok(i: int):
-        return results[i] if not isinstance(results[i], BaseException) else None
-
-    bea_resp = _ok(0)
-    tape_resp = _ok(1)
-    obs_by_id: dict[str, list[dict]] = {}
-    for i, (sid, _) in enumerate(series_specs, start=2):
-        r = _ok(i)
-        if r is not None:
-            obs_by_id[sid] = r.observations or []
+    warnings: list[str] = []
+    bea_bundle = results[0]
+    if isinstance(bea_bundle, BaseException):
+        warnings.append(_exc_summary("BEA Personal Income and Outlays (unexpected)", bea_bundle))
+        bea_resp = None
+    else:
+        bea_resp, bea_warnings = bea_bundle
+        warnings.extend(bea_warnings)
+    tape_resp = results[1] if not isinstance(results[1], BaseException) else None
+    if tape_resp is None:
+        warnings.append(_exc_summary("Tradier intraday quotes", results[1]))
+    obs_by_id = _collect_fred_obs(results, series_specs, 2, warnings)
 
     pce_pi = obs_by_id.get("PCEPI", [])
     period = pce_pi[0]["date"] if pce_pi else "?"
 
     out: list[str] = []
+    out.extend(_warnings_section(warnings))
     out.append("=== Headline ===")
     out.append(f"Period: {period}")
 
@@ -844,34 +890,58 @@ async def get_pce_report_texture(ctx: Context) -> str:
     return "\n".join(out)
 
 
-async def _fed_statements(fed_client) -> tuple:
+async def _fed_statements(
+    fed_client,
+) -> tuple[
+    "fed.FomcCalendarResponse | None",
+    "fed.FomcStatementResponse | None",
+    "fed.FomcStatementResponse | None",
+    list[str],
+]:
     """Two-step Fed fetch: discover latest + prior FOMC statement URLs from the
     calendar, then fetch both statements in parallel.
 
-    Returns (calendar_resp, latest_stmt_resp, prior_stmt_resp). Any None means
-    that piece failed; the surrounding tool degrades gracefully.
+    Returns (calendar_resp, latest_stmt_resp, prior_stmt_resp, warnings). Any
+    failed step contributes a warning so the caller can surface it.
     """
+    warnings: list[str] = []
     try:
         cal = await fed_client.get(fed.FOMC_CALENDAR, fed.EmptyRequest())
-    except Exception:
-        return None, None, None
+    except Exception as e:
+        warnings.append(_exc_summary("Fed FOMC calendar", e))
+        return None, None, None, warnings
     latest_path = cal.latest()
     prior_path = cal.prior()
     if not latest_path:
-        return cal, None, None
+        warnings.append("Fed FOMC calendar: no statement links found")
+        return cal, None, None, warnings
     fetches = [fed_client.get(fed.FOMC_STATEMENT, fed.StatementPathRequest(latest_path))]
     if prior_path:
         fetches.append(
             fed_client.get(fed.FOMC_STATEMENT, fed.StatementPathRequest(prior_path))
         )
     results = await asyncio.gather(*fetches, return_exceptions=True)
-    latest = results[0] if not isinstance(results[0], BaseException) else None
-    prior = (
-        results[1]
-        if len(results) > 1 and not isinstance(results[1], BaseException)
-        else None
-    )
-    return cal, latest, prior
+    latest: fed.FomcStatementResponse | None = None
+    if isinstance(results[0], BaseException):
+        warnings.append(
+            _exc_summary(f"Fed FOMC statement {fed.extract_meeting_date(latest_path)}", results[0])
+        )
+    else:
+        latest = results[0]
+    prior: fed.FomcStatementResponse | None = None
+    if len(results) > 1:
+        if isinstance(results[1], BaseException):
+            warnings.append(
+                _exc_summary(
+                    f"Fed FOMC prior statement {fed.extract_meeting_date(prior_path)}"
+                    if prior_path
+                    else "Fed FOMC prior statement",
+                    results[1],
+                )
+            )
+        else:
+            prior = results[1]
+    return cal, latest, prior, warnings
 
 
 @mcp.tool()
@@ -915,19 +985,25 @@ async def get_fomc_decision_texture(ctx: Context) -> str:
         return_exceptions=True,
     )
 
-    def _ok(i: int):
-        return results[i] if not isinstance(results[i], BaseException) else None
-
-    fed_bundle = _ok(0)
-    cal_resp, latest_stmt, prior_stmt = (
-        fed_bundle if fed_bundle is not None else (None, None, None)
-    )
-    tape_resp = _ok(1)
-    obs_by_id: dict[str, list[dict]] = {}
-    for i, (sid, _) in enumerate(rate_specs, start=2):
-        r = _ok(i)
-        if r is not None:
-            obs_by_id[sid] = r.observations or []
+    warnings: list[str] = []
+    fed_bundle = results[0]
+    cal_resp: fed.FomcCalendarResponse | None = None
+    latest_stmt: fed.FomcStatementResponse | None = None
+    prior_stmt: fed.FomcStatementResponse | None = None
+    if isinstance(fed_bundle, BaseException):
+        warnings.append(_exc_summary("Fed FOMC fetch (unexpected)", fed_bundle))
+    else:
+        cal_resp, latest_stmt, prior_stmt, fed_warnings = fed_bundle
+        warnings.extend(fed_warnings)
+    tape_raw = results[1]
+    tape_resp: t.QuotesResponse | None
+    if isinstance(tape_raw, t.QuotesResponse):
+        tape_resp = tape_raw
+    else:
+        tape_resp = None
+        if isinstance(tape_raw, BaseException):
+            warnings.append(_exc_summary("Tradier intraday quotes", tape_raw))
+    obs_by_id = _collect_fred_obs(results, rate_specs, 2, warnings)
 
     upper = _latest(obs_by_id.get("DFEDTARU", []))
     lower = _latest(obs_by_id.get("DFEDTARL", []))
@@ -937,6 +1013,7 @@ async def get_fomc_decision_texture(ctx: Context) -> str:
     walcl = obs_by_id.get("WALCL", [])
 
     out: list[str] = []
+    out.extend(_warnings_section(warnings))
 
     # Headline
     out.append("=== Headline ===")

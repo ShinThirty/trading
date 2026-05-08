@@ -11,7 +11,7 @@ from fastmcp import Context, FastMCP
 from trading_clients.endpoints import edgar as e
 from trading_clients.endpoints import fool as f
 
-from trading_mcp.helpers import _edgar, _fool
+from trading_mcp.helpers import _edgar, _exc_summary, _fool
 
 mcp = FastMCP("earnings-tools")
 
@@ -46,18 +46,41 @@ async def get_earnings_transcript(ctx: Context, symbol: str) -> str:
     ticker = symbol.upper()
     last_seen_path: str | None = None
 
+    sitemap_errors: list[str] = []
     for year, month in _month_offsets(date.today(), 3):
-        sitemap = await fool.get(f.MONTHLY_SITEMAP, f.MonthlySitemapRequest(year, month))
+        try:
+            sitemap = await fool.get(f.MONTHLY_SITEMAP, f.MonthlySitemapRequest(year, month))
+        except Exception as ex:
+            sitemap_errors.append(_exc_summary(f"Fool sitemap {year}-{month:02d}", ex))
+            continue
         path = sitemap.find_latest_transcript(ticker)
         if path:
             last_seen_path = path
             break
 
     if not last_seen_path:
+        if sitemap_errors:
+            errs = "\n  • ".join(sitemap_errors)
+            return (
+                f"⚠ Could not discover transcript URL for {ticker}. Sitemap fetch errors:\n"
+                f"  • {errs}"
+            )
         return f"No earnings transcript found for {ticker} in the last 3 months on fool.com"
 
-    transcript = await fool.get(f.TRANSCRIPT_PAGE, f.TranscriptPageRequest(last_seen_path))
-    return f"# {ticker} earnings call transcript\nSource: https://www.fool.com{last_seen_path}\n\n{transcript.to_output()}"
+    try:
+        transcript = await fool.get(f.TRANSCRIPT_PAGE, f.TranscriptPageRequest(last_seen_path))
+    except Exception as ex:
+        return (
+            f"⚠ Found transcript URL but page fetch failed: "
+            f"{_exc_summary('Fool transcript page', ex)}\n"
+            f"Discovered URL: https://www.fool.com{last_seen_path}"
+        )
+
+    return (
+        f"# {ticker} earnings call transcript\n"
+        f"Source: https://www.fool.com{last_seen_path}\n\n"
+        f"{transcript.to_output()}"
+    )
 
 
 @mcp.tool()
@@ -75,15 +98,33 @@ async def get_earnings_release(ctx: Context, symbol: str) -> str:
     edgar = _edgar(ctx)
     ticker = symbol.upper()
 
-    cik = await edgar.lookup_cik(ticker)
-    subs = await edgar.get(e.SUBMISSIONS, e.CikRequest(cik))
+    try:
+        cik = await edgar.lookup_cik(ticker)
+    except ValueError as ex:
+        # Ticker missing from EDGAR map — this message is already self-explanatory.
+        return f"⚠ {ex}"
+    except Exception as ex:
+        return f"⚠ {_exc_summary('EDGAR ticker→CIK lookup', ex)}"
+
+    try:
+        subs = await edgar.get(e.SUBMISSIONS, e.CikRequest(cik))
+    except Exception as ex:
+        return f"⚠ {_exc_summary(f'EDGAR submissions for CIK {cik}', ex)}"
+
     filing = subs.find_latest_earnings_8k()
     if not filing:
         return f"No recent 8-K with Item 2.02 (Results of Operations) for {ticker}"
 
-    index = await edgar.get(
-        e.FILING_INDEX, e.FilingIndexRequest(cik, filing.accession_no_dashes)
-    )
+    try:
+        index = await edgar.get(
+            e.FILING_INDEX, e.FilingIndexRequest(cik, filing.accession_no_dashes)
+        )
+    except Exception as ex:
+        return (
+            f"⚠ Found 8-K {filing.accession_number} ({filing.filing_date}) but "
+            f"filing index fetch failed: {_exc_summary('EDGAR filing index', ex)}"
+        )
+
     filename = index.find_press_release()
     if not filename:
         return (
@@ -91,10 +132,17 @@ async def get_earnings_release(ctx: Context, symbol: str) -> str:
             f"has no Exhibit 99.x press release"
         )
 
-    doc = await edgar.get(
-        e.FILING_DOC,
-        e.FilingDocRequest(cik, filing.accession_no_dashes, filename),
-    )
+    try:
+        doc = await edgar.get(
+            e.FILING_DOC,
+            e.FilingDocRequest(cik, filing.accession_no_dashes, filename),
+        )
+    except Exception as ex:
+        return (
+            f"⚠ Found press release exhibit {filename} but doc fetch failed: "
+            f"{_exc_summary('EDGAR filing doc', ex)}"
+        )
+
     url = (
         f"https://www.sec.gov/Archives/edgar/data/"
         f"{cik}/{filing.accession_no_dashes}/{filename}"

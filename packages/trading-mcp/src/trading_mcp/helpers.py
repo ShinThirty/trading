@@ -140,6 +140,15 @@ async def _retry(fn: Any, *args: Any, retries: int = 2, delay: float = 2, **kwar
             raise
 
 
+def _exc_summary(source: str, exc: BaseException) -> str:
+    """One-line description of a failed scrape/API call, suitable for surfacing
+    in tool output as a warning or error message. Truncates long messages and
+    drops multi-line tracebacks."""
+    raw = str(exc).strip()
+    msg = raw.splitlines()[0] if raw else ""
+    return f"{source}: {type(exc).__name__}{f': {msg[:120]}' if msg else ''}"
+
+
 async def _write_temp_file(content: str, suffix: str, prefix: str) -> str:
 
     def _sync_write() -> str:
