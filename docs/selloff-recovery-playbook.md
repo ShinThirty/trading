@@ -60,9 +60,7 @@ This is a directional leverage trade on mean-reversion. The "catalyst" is capitu
 
 ### Why Calls Work Here
 
-- **IV crush tailwind:** You buy calls while IV is still elevated from the selloff. As the market recovers, IV drops — but delta gains from the price recovery exceed vega losses from IV compression. Net effect is positive.
-- **Put skew advantage:** During selloffs, put skew inflates put prices relative to calls. Calls are relatively cheaper.
-- **Sharp recoveries:** Market bottoms tend to produce fast, violent bounces. Leveraged call exposure captures this better than shares.
+Three tailwinds: (1) **IV crush is net positive** — recovery delta gains exceed vega losses from IV compression, (2) **put skew makes calls relatively cheap** during selloffs, and (3) **sharp recoveries** favor leveraged exposure over shares.
 
 ### Strike & Expiry Selection
 
@@ -149,84 +147,32 @@ The CSPs act as a natural hedge against being early on the recovery calls. If yo
 
 ## Sector Variant: Bellwether Earnings Cascade
 
-The same selloff-recovery mechanics apply at the sector level when a bellwether stock misses earnings and drags the entire sector in sympathy. This is a smaller-scale, more frequent version of the broad market playbook — happens 2-3 times per earnings season.
+Same mechanics at sector scale when a bellwether misses and drags peers in sympathy (e.g., ServiceNow drags SaaS, Intel drags semis). Happens 2-3x per earnings season. **Vehicle is individual pipeline names, not sector ETFs** — the ETF holds the bellwether that's actually broken; you want the divergence between your quality name and the damaged bellwether.
 
-**Key difference from the broad playbook:** The vehicle is your individual pipeline names, not sector ETFs. The ETF already reflects the bellwether's miss. You're trading the divergence between your quality name and the damaged bellwether — once the market differentiates (usually 1-2 weeks), quality names diverge from the actual miss.
+### Entry sequence
 
-### When This Applies
+1. Don't act on day one — sympathy selling persists 2-3 days.
+2. Re-run `get_entry_signals` on affected pipeline names; confirm conviction intact and no new Negative factors.
+3. `get_company_news` — verify your name has no independent bad news hiding behind sector noise.
+4. Enter: CSPs if IV elevated (usually is), long calls once IV normalizes (3-5 days post-event) if deeply discounted + highest conviction, or direct buy if IV is low.
 
-- A sector bellwether misses earnings (e.g., ServiceNow drags SaaS, Intel drags semis)
-- Your pipeline names in that sector sell off in sympathy
-- Your names' fundamentals haven't changed — the selling is guilt-by-association
+### Sizing & Management
 
-### Entry Sequence
-
-1. **Bellwether misses, sector dumps.** Don't act on day one — sympathy selling can persist for 2-3 days.
-2. **Re-run `get_entry_signals`** on your pipeline names in the affected sector. Confirm conviction is intact and no new Negative factors emerged.
-3. **Check `get_company_news`** — verify your name has no independent bad news hiding behind the sector noise.
-4. **Enter on your names:**
-   - **CSPs** if IV is elevated from the cascade (usually is — sector-wide IV spikes on bellwether misses)
-   - **Long calls** once IV starts normalizing (3-5 days post-event) if the name is deeply discounted and you have highest conviction
-   - **Direct buy** if IV is low and the discount is meaningful
-
-### Why Not Sector ETFs
-
-- The ETF contains the bellwether that actually missed — it's dragging the basket down
-- You're betting on divergence (your name recovers, bellwether doesn't), not sector recovery
-- Individual name selection IS the edge — the ETF dilutes it
-
-### Sizing
-
-- Same as standard framework per-name sizing (conviction tier determines allocation)
-- Max 2 names per sector cascade event — don't overload on one sector's sympathy selling
-- If the cascade coincides with a broader market selloff, total deployment across both playbooks shares the same capital pool
-
-### Management
-
-- Take profit when your name recovers to pre-cascade levels (the sympathy discount closes)
-- If your name reports earnings within 2-3 weeks of entry, hold through — its own results are the ultimate thesis test
-- If the name doesn't diverge within 2 weeks, reassess — maybe the damage is fundamental, not sympathy
+- Standard per-name framework sizing (conviction tier determines allocation)
+- Max 2 names per cascade event
+- If overlapping with a broader selloff, both playbooks share the same capital pool
+- Take profit when your name reverts to pre-cascade levels (sympathy discount closed)
+- If your name reports within 2-3 weeks of entry, hold through — its own results are the thesis test
+- If no divergence within 2 weeks, reassess — damage may be fundamental, not sympathy
 
 ---
 
-## L3 Expansion: Selloff Leg with Spreads
+## L3 Expansion (deferred to 2027)
 
-At L2, the selloff side is limited to CSPs (selling premium). Long puts during the selloff are poor risk/reward due to peak IV pricing. With L3 approval (target 2027):
-
-**Bear put spreads during the selloff** unlock the selloff as a directional trade:
-- Selling the expensive vol on one leg offsets buying it on the other — IV cost largely nets out
-- Capital per contract drops significantly (spread width vs full put cost), allowing 2-3x the contracts for the same premium budget
-- Defined risk on both sides means the double-headwind blowup scenario (wrong on direction + IV crush) is capped
-- Can run selloff spreads on SPY/QQQ alongside the recovery calls — capturing both legs of the V-shape
-
-This would add a third leg to the playbook: bearish spreads opened during the selloff, closed at exhaustion (where the recovery calls take over).
+When L3 is approved, bear put spreads during the selloff add a third leg — defined-risk directional bet on the way down, where IV cost largely nets out across the legs. Skip until then.
 
 ---
 
 ## Post-Playbook Transition
 
-Once the recovery is underway (SPY above SMA50, VIX <20, breadth broadening):
-
-1. **Close recovery calls** at profit target or when momentum slows
-2. **Manage CSPs** per normal framework — let expire or roll per [strategy-catalog.md](strategy-catalog.md)
-3. **Return to standard pipeline workflow** — the selloff window is closed, normal framework applies
-
----
-
-## Tools Checklist
-
-```
-Setup (daily during selloff):
-1. get_market_regime                    — regime dimensions + VIX term structure
-2. get_entry_signals SPY               — RSI, SMA, momentum for recovery timing
-3. get_iv_metrics SPY,QQQ              — IV Rank for option pricing
-
-Recovery call entry:
-4. get_option_expirations SPY          — find 45-60 DTE expiry
-5. get_option_chain SPY <expiry>       — strike selection at target delta
-
-CSP entry (per conviction name):
-6. get_entry_signals <TICKER>          — confirm conviction still intact after selloff
-7. get_option_expirations <TICKER>     — find 30-45 DTE expiry
-8. get_option_chain <TICKER> <expiry>  — ATM/ITM put selection
-```
+Once recovery is underway (SPY above SMA50, VIX <20, breadth broadening): close recovery calls at target or when momentum slows; let CSPs expire or roll per [strategy-catalog.md](strategy-catalog.md). Selloff window is closed.

@@ -2,7 +2,7 @@
 description: Evaluate the structural tail-risk hedge program (Universa-style)
 ---
 
-Manage the structural tail-risk hedge program per [tail-hedge-playbook.md](../../docs/tail-hedge-playbook.md). This skill evaluates whether one of the playbook's three triggers has fired and surfaces the resulting action. **It does not open, close, or resize the hedge based on cleared signals** — that's the 4/30 anti-pattern the playbook exists to prevent.
+Manage the structural tail-risk hedge program per [tail-hedge-playbook.md](../../docs/tail-hedge-playbook.md). This skill evaluates whether one of the playbook's three triggers has fired and surfaces the resulting action. **It does not open, close, or resize the hedge based on cleared signals.**
 
 The structural program is **deep OTM (20-25%) SPY puts at 90-120 DTE, rolled on discipline, never closed because nothing is wrong**. If you're considering correction-zone protection (5-15% OTM) instead, don't — see playbook Mistake 2. Either trim positions, hold cash, or use single-name puts at the position level.
 
@@ -80,14 +80,9 @@ Fires when DTE ≤ 30 regardless of any other condition. Sell expiring + buy fre
 
 ### Universal close+redeploy workflow (any trigger)
 
-1. Confirm trigger criteria via Step 2 inputs
-2. Sell the tranche via `place_order` (full position for Trigger 1/3, partial for Trigger 2)
-3. Re-run `calculate_hedge` with current SPY + `fidelity_folder` + `crisis_multiplier=1.25`
-4. Pick new strike at 25% OTM from the *current* SPY price (not the original entry)
-5. Place buy order for new contracts
-6. Record both legs: `decision_close` (old) + `decision_add` action `WRITE_NEW` source `hedge` (new)
+Sell the tranche (full for T1/T3, partial for T2) → `calculate_hedge` with current SPY + `crisis_multiplier=1.25` → buy new contracts at 25% OTM from *current* SPY → record `decision_close` (old) + `decision_add` action `WRITE_NEW` source `hedge` (new).
 
-**No trigger fired → hold.** Cleared signals, "nothing is wrong," premium decay, drawdown anxiety — none are valid reasons to close. Decay is the design (see playbook "The hardest truth" — expect 3-7 consecutive losing years between crash payoffs).
+**No trigger fired → hold.** Cleared signals, premium decay, drawdown anxiety — none are valid close reasons. Decay is the design (3-7 consecutive losing years expected).
 
 ## Step 4: Cost tracking
 
@@ -136,9 +131,9 @@ Then defer to the playbook for the commit/skip decision. If committing: run `cal
 
 ## What this skill does NOT do
 
-- Does not open hedges based on reversal signals (regime, breadth, vol, divergences) — those drive position sizing and pipeline decisions, not hedge actions
-- Does not recommend correction-zone (5-15% OTM) puts at the portfolio level — use position trimming or cash instead
-- Does not close on cleared signals, premium decay, or drawdown anxiety — only the three triggers above
-- Does not try to time entry on IV — the structural program runs continuously regardless of IV environment (the only IV note is in Step 4: skip individual strikes priced at IV Rank >50% per playbook execution checklist)
+- Open hedges based on signals (regime, vol, divergences) — those drive sizing/pipeline, not hedge actions
+- Recommend correction-zone (5-15% OTM) puts at the portfolio level — use trimming or cash
+- Close on cleared signals or premium decay — only the three triggers
+- Time entry on IV (the only IV note: skip individual strikes at IV Rank >50%)
 
-For position-level catalyst hedges (single-stock event risk), use long puts on the specific name with 20-30 DTE per [strategy-catalog.md](../../docs/strategy-catalog.md) — not this skill.
+For single-stock catalyst hedges, use long puts per [strategy-catalog.md](../../docs/strategy-catalog.md) — not this skill.

@@ -35,46 +35,21 @@ Present the filter results as a table:
 
 ## Step 3: Score Candidates
 
-For each position that passes the filters (READY):
+For each READY position:
 
-1. Call `get_entry_signals` to get current conviction, RSI, and circuit breakers.
-2. Determine CC intent based on the position context:
-   - Thesis exit: position is oversized or thesis timeline is ending
-   - Growth with income: still bullish, want premium while holding
-   - Income generation: range-bound or slow-growth name
-3. Map conviction to coverage ratio (CC Step 3):
-
-   | Forward conviction | Coverage | Contracts |
-   |---|---|---|
-   | Exit / declining thesis | 100% | All shares |
-   | Range-bound / neutral | 75-100% | Most shares |
-   | Still bullish, want income | 50-75% | Half to three-quarters |
-   | High conviction, expect breakout | 0-25% or skip | Few or none |
-
-4. If coverage is 0% (skip), note it and move on.
+1. `get_entry_signals` for conviction, RSI, circuit breakers.
+2. Determine CC intent: thesis exit (oversized/timeline ending), growth with income (still bullish, want premium), or income generation (range-bound).
+3. Map conviction to coverage per CC Step 3 in [covered-call-overlay.md](../../docs/covered-call-overlay.md): 100% (exit) / 75-100% (neutral) / 50-75% (bullish) / 0-25% (high conviction breakout).
+4. If coverage 0%, skip.
 
 ## Step 4: Strike and Expiry Selection
 
 For each candidate with coverage > 0%:
 
-1. Call `get_option_expirations` for available expiries.
-2. Select expiry per CC Step 5:
-   - **Post-earnings window (earnings just passed)**: 30-45 DTE — best window
-   - **Earnings 3-6 weeks away**: Sell THROUGH earnings to capture IV
-   - **Earnings within 2 weeks**: Already filtered out in Step 2
-   - Prefer 30-45 DTE per user preference (no 8+ month CCs)
-
-3. Call `get_option_chain` at the selected expiry with `strike_count=8` to find strikes at the target delta:
-   - Thesis exit: strike = exit price
-   - Income generation: 15-20 delta (~10-15% OTM)
-   - Growth with income: 25-30 delta (~8-12% OTM)
-
-4. Present the best strike with:
-   - Premium (bid price)
-   - Delta
-   - % OTM
-   - Annualized yield (premium / share price, annualized by DTE)
-   - Earnings interaction
+1. `get_option_expirations`.
+2. Pick expiry: post-earnings window → 30-45 DTE (best); earnings 3-6 weeks away → sell through to capture IV; otherwise 30-45 DTE (no 8+ month CCs).
+3. `get_option_chain` at chosen expiry, `strike_count=8`. Target delta: thesis exit → exit price; income → 15-20 delta; growth+income → 25-30 delta.
+4. Present: premium (bid), delta, % OTM, annualized yield, earnings interaction.
 
 ## Step 5: Existing CC Check
 

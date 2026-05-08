@@ -47,26 +47,11 @@ Run the complete post-screening decision framework for **$ARGUMENTS.symbol**. Ex
 
 ## Step 3: Choose Strategy
 
-Based on intent + signals, recommend the specific strategy from the decision framework's intent-to-strategy matrix:
+Match intent + signals to strategy via the intent→strategy matrix in [decision-framework.md](../../docs/decision-framework.md) Step 3. Detailed mechanics live in [strategy-catalog.md](../../docs/strategy-catalog.md).
 
-| Intent | Default strategy | IV-HV > 10% shift | IV-HV < 5% shift |
-|--------|-----------------|-------------------|-------------------|
-| Accumulate | Direct buy (tranches) or hybrid | More CSP in the mix | More direct buy |
-| Enter at discount | CSP (30-45 DTE) | CSP (richer premium) | CSP (still works) |
-| Directional leverage | Long call (40-60 delta) | Prefer CSP/BPS instead | Long call (sweet spot) |
-| Defined-risk exposure | Bull put spread | BPS (sell rich premium) | Bull call spread (buy cheap) |
-| Harvest premium | Iron condor | Iron condor (best window) | Skip or butterfly |
-| Bet on volatility | Long straddle/strangle | Sell vol instead | Buy vol (sweet spot) |
-| Bearish (L2) | Long put (IV Rank <30%) | Wait (puts expensive) | Long put (sweet spot) |
-| Hedge | Protective put / collar | Collar (sell rich calls) | Protective put |
+For **Accumulate** with 100 shares >$15K, proactively compare LEAPS vs shares. For credit/debit strategies with peer pipeline names, recommend `compare_credit_efficiency` / `compare_debit_efficiency`.
 
-For **Accumulate** intent where 100 shares would cost >$15K, proactively compare LEAPS vs shares (capital required, delta exposure per dollar, break-even, theta cost/month, max loss).
-
-For credit strategies, recommend checking `compare_credit_efficiency` if multiple pipeline names share the same intent. For debit strategies, recommend `compare_debit_efficiency`.
-
-State: "**Strategy: [X]** — [one sentence rationale linking intent + IV environment]"
-
-Include specific parameters: strike target (delta or % OTM), DTE range, and any earnings interaction.
+State: "**Strategy: [X]** — [one sentence rationale linking intent + IV]" with specific parameters (strike delta or % OTM, DTE, earnings interaction).
 
 ## Step 4: Size the Position
 

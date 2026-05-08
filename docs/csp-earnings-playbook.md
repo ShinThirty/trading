@@ -62,12 +62,7 @@ A common misconception is "shortest DTE = max premium = best earnings play." The
 | **60-90 DTE** | Highest absolute | Lower annualized | Highest vega but more time exposed | Long runway | Ties up capital longer; better when IV is exceptionally rich |
 | **>90 DTE** | Highest absolute | Weak annualized | Most vega exposure | Very long runway | Treat as standard CSP, not event play |
 
-The reason 30-50 DTE wins for earnings:
-
-1. **Vega exposure is meaningful** — you actually capture the IV crush as P&L. A 0DTE post-event put has minimal vega left.
-2. **Post-event theta runway** — if the stock drifts adversely after the event but doesn't crash, you have 3-4 weeks for theta to bail you out.
-3. **Premium per day is decent** — short DTE has high annualized yield but small absolute dollars; the "max premium" heuristic conflates these.
-4. **Management room** — if 50% profit hits early, you can close. If thesis deteriorates, you have time to roll or close.
+**Why 30-50 DTE wins:** meaningful vega (you actually capture IV crush as P&L), 3-4 week post-event theta runway if the stock drifts adversely, and management room (close at 50% early or roll if thesis breaks). Short DTE has high annualized yield but small absolute dollars — the "max premium" heuristic conflates the two.
 
 ## Strike selection
 
@@ -124,81 +119,14 @@ The event CSP has a different management profile than a standard 30-DTE CSP:
 
 **Hard rule: never close a winning event CSP pre-event for "safety."** The whole reason you sold the CSP was to capture the IV crush. Closing pre-event for a 30% gain locks in the wrong half of the trade.
 
-## Cross-reference: when this overlaps with other patterns
+## Cross-reference
 
-This playbook is the *structural recommendation* for several thematic setups:
+This is the structural recommendation for: the **Expectation Reset Pattern** (depressed quality + known catalyst), **Accumulate intent with elevated IV** (per the Decision Matrix when IV-HV >15% and drawdown meaningful), and **wheel strategy entries** with assignment-as-feature.
 
-- **Expectation Reset Pattern** (memory file `feedback_expectation_reset_pattern.md`) — depressed quality name into a known catalyst. CSP is the preferred structure.
-- **Accumulate intent with elevated IV** (per [strategy-catalog.md](strategy-catalog.md) Decision Matrix) — the matrix already routes to CSP when IV-HV >15% and drawdown is meaningful.
-- **Wheel strategy on conviction names** — event CSPs are the natural entry mechanism within a wheel framework, with assignment-as-feature.
-
-This playbook does NOT apply to:
-- Premium harvesting on neutral-conviction names (use iron condors, not CSPs through earnings)
-- Bearish setups (use bear call spreads, not CSPs)
-- Highest-conviction Accumulate where the goal is to own immediately (use direct buy or hybrid with shares dominating)
+Does NOT apply to: premium harvesting on neutral-conviction names (use iron condors), bearish setups (bear call spreads), or highest-conviction Accumulate where you want shares immediately (direct buy or share-dominated hybrid).
 
 ## Worked examples
 
-### TEAM Apr 30, 2026 (illustrative — not traded)
+**TEAM Apr 2026 (qualified):** -72% drawdown, IV Rank 94%, 2W tape +2.5% (no Front-Run), "AI Casualty" narrative active. Print: +24% AH gap, IV crushed ~80% → ~35%. A 30-50 DTE CSP at -8 to -12% cushion would have captured most premium overnight.
 
-Pre-print state:
-- Drawdown -72% from highs
-- IV Rank 94%
-- 2W tape +2.5% (qualified — no Front-Run)
-- "AI Casualty" narrative active
-
-Hypothetical CSP setup that would have worked:
-- 30-50 DTE expiry covering the print
-- Strike at -8% to -12% cushion
-- Entered 7-14 days pre-print
-
-Actual print: +24% AH gap, IV crush from ~80% → ~35% next day. CSP would have captured most of the premium overnight.
-
-### NOW Apr 22, 2026 (disqualified)
-
-Pre-print state:
-- Drawdown -52% from highs ✓
-- IV Rank elevated ✓
-- 2W tape **+20%** (disqualifying — Front-Run heavily triggered)
-- Strong AI narrative
-
-Why the CSP would have failed:
-- Stock had rallied from $83 to $103 in the prior 2 weeks
-- Print was objectively strong (beat high end, raised FY) but cRPO decel (22.5% → 19% guide) hit re-inflated expectations
-- Stock crashed -17.7% next day; CSP would have moved deep ITM
-
-Lesson: the +20% pre-print rally disqualified the setup despite the longer-term drawdown looking attractive.
-
-### INTU May 28, 2026 (live application)
-
-Pre-print state (as of Apr 30):
-- Drawdown -52% from highs ✓
-- IV Rank 82% ✓
-- 2W tape -1.2% ✓
-- Bear narrative: "AI eats TurboTax"
-- Structural moats: e-file compliance, state filings, integrations
-- Tax season verdict quarter (Q3 covers Feb-Apr filing window)
-
-Planned setup:
-- $360P Jun 19 (50 DTE)
-- Premium ~$19.45 mid ($1,945 per contract)
-- Cushion -7.4% from spot $388.50
-- Entry window May 14-21 (vol expansion + fresh 2W tape signal)
-- Disqualifier monitor: if INTU rallies >8% from May 14 onward, skip the trade
-
-## Quick checklist for any candidate
-
-Before placing an event CSP, walk through this list. Any "no" should disqualify the trade.
-
-- [ ] I would genuinely want to own this stock at the strike price
-- [ ] IV Rank is >50% (ideally >70%)
-- [ ] 30-50 DTE expiry covering the event
-- [ ] Strike is at least 1 expected move OTM
-- [ ] 2W tape into the entry is flat to negative (no Front-Run trigger)
-- [ ] Bid-ask spread on the chosen strike is <10% of mid
-- [ ] Position size is within tier limits and CSP collateral cap
-- [ ] No binary tail risk in the underlying (FDA, single-product, regulatory cliff)
-- [ ] Recent industry data does not actively confirm the bear thesis
-- [ ] I'm prepared to hold through the event (not close pre-event for "safety")
-
-If all check, enter in the optimal window (event - 14d through event - 7d), then hold through the event and manage per the rules above.
+**NOW Apr 2026 (disqualified — Front-Run):** -52% drawdown ✓, IV elevated ✓, but **2W tape +20%** killed the setup. Stock had rallied $83 → $103 pre-print on AI narrative; the objectively strong print (beat high end, raised FY) still crashed -17.7% next day because cRPO deceleration hit re-inflated expectations. Lesson: the 2W tape disqualifier overrides an attractive long-term drawdown.

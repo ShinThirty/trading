@@ -1,24 +1,6 @@
 # Post-Screening Decision Framework
 
-Every trade comes down to three questions: **Which**, **When**, and **How**.
-
-- **Which** — What to trade. Driven by screening, thesis, and conviction. This happens upstream of this framework.
-- **When** — When to enter or exit. Driven by signals: drawdown, IV environment, earnings proximity, momentum, thesis timeline.
-- **How** — What structure to use. Driven by intent and signals: CSP vs direct buy, covered call vs hold, spread vs outright.
-
-The relative weight of each question shifts by intent:
-
-| Intent | Which | When | How |
-|--------|-------|------|-----|
-| Accumulate / Enter at discount | **Heaviest** | Important | Follows from signals |
-| Directional leverage | Heavy | **Critical** | Follows from IV |
-| Harvest premium | Lightest | **Heaviest** | Important |
-| Bearish | Heavy | Important | Follows from IV |
-| Covered call overlay | N/A (already own) | **Critical** | Follows from CC intent |
-
-Conviction determines intent. Intent determines which signals matter (when). Signals determine strategy (how). The thesis is the thread connecting all three — and the hardest discipline is knowing when the thesis has genuinely evolved vs when greed or fear is rewriting it.
-
----
+Conviction → intent → signals → strategy. The thesis is the thread; the hardest discipline is knowing when it has genuinely evolved vs when greed or fear is rewriting it.
 
 After screening confirms (or rejects) a thesis, run through these steps in order.
 
@@ -26,13 +8,9 @@ After screening confirms (or rejects) a thesis, run through these steps in order
 
 Conviction drives intent. Intent drives strategy. Decide intent FIRST — everything else follows.
 
-**Quick start:** Run `get_entry_signals` for all quantitative conviction inputs (ROE, Growth, Margins, Cash Flow — auto-scored into Bullish/Moderate/Neutral/Negative) plus IV and momentum signals in one call. Moat and AI ROI require qualitative judgment — use `get_company_news` and `get_income_statement` for supporting evidence.
+**Quick start:** Run `get_entry_signals` — auto-scores the four quantitative factors below into Bullish/Moderate/Neutral/Negative, plus IV and momentum signals. Moat and AI ROI require qualitative judgment (`get_company_news`, `get_income_statement`). When 2+ factors score Negative, the tool routes to the bearish framework.
 
-**Conviction inputs — what raises, lowers, or inverts conviction:**
-
-`get_entry_signals` auto-scores the quantitative factors (ROE, Growth, Margins, Cash Flow) into four tiers: Bullish, Moderate, Neutral, Negative. Moat and AI ROI require qualitative judgment — use `get_company_news` and `get_income_statement` for supporting evidence. When 2+ factors score Negative, the tool routes to the bearish framework.
-
-**Quantitative factors** (auto-scored by `get_entry_signals`):
+**Quantitative factors** (auto-scored):
 
 | Factor | Bullish | Moderate | Neutral | Negative |
 |--------|---------|----------|---------|----------|
@@ -50,9 +28,7 @@ If D/E >3x, ROE is leverage-inflated — capped at Neutral even if the raw numbe
 | **Moat** | Monopoly/deep switching costs | Commodity, crowded market, active disruption threat | Actively losing share, competitor products displacing, customer churn |
 | **AI ROI** (software/adopter names) | AI features driving revenue growth *with stable or expanding margins* | AI spending growing revenue but compressing operating margins. Immediately drop to low conviction. | Spending on unmonetized narrative (robotaxi, AI chips, etc.) with no revenue pathway — valuation rests entirely on story |
 
-The AI ROI filter distinguishes **Builders** (semis/infra — revenue booms now but carries cycle risk) from **Adopters** (software — must prove AI monetization without margin destruction).
-
-Drawdown alone is not conviction — the business quality determines whether the drawdown is an opportunity or a warning. Similarly, bad fundamentals alone are not bearish conviction — the deterioration must be *mispriced* for it to be a trade.
+Drawdown alone is not conviction — business quality determines whether a drawdown is opportunity or warning. Bad fundamentals alone are not bearish conviction — the deterioration must be *mispriced* to be a trade.
 
 | Conviction | Intent | Goal | You're saying... |
 |-----------|--------|------|-----------------|
@@ -78,23 +54,11 @@ Before any spread or roll, check liquidity via `get_iv_metrics` (Liq 3-4 = tight
 
 ### Active Macro Overhangs
 
-`get_market_regime` captures regime labels (volatility, trend, breadth, sectors) but not narrative overhangs that aren't yet in price — commodity divergences, geopolitical tail risks, framing flips, capex commitment cycles. **Always check memory for active macro themes before finalizing any recommendation.** Relevant files:
-
-- `project_spy_reversal_playbook.md` — reversal checklist + commodity divergence (USO/VIX) + Iran/Hormuz baseline
-- `project_semi_cycle_thesis.md` — AI capex phases + hyperscaler capex commitment tracker
-- `project_uninversion_watch.md` — yield curve + Fed cuts
-- `project_ai_commoditization.md` — LLM ceiling / model commoditization thesis
-
-These overhangs shift **entry timing**, not thesis viability. A bullish stock-level setup against a market ignoring oil at $150 calls for staying CSP-heavy with strikes pushed deeper OTM — the thesis is right but a systemic derisk takes everything down regardless of fundamentals. Memory entries decay; verify timestamps before relying on specific data points (a capex print or VIX reading >2 weeks old has lost most of its predictive value — re-pull current data).
+`get_market_regime` captures regime labels but not narrative overhangs not yet in price (commodity divergences, geopolitical tail risks, capex cycles). **Check memory for active macro themes before finalizing any recommendation** — see the MEMORY.md index for current `project_*` thesis files. These overhangs shift **entry timing**, not thesis viability: a systemic derisk takes everything down regardless of fundamentals. Memory entries decay; verify timestamps before relying on specific data points (a capex print or VIX reading >2 weeks old has lost most of its predictive value — re-pull current data).
 
 ### Signal Conflict Resolution
 
-When signals conflict, **fundamentals override technicals, always.** Technicals tell you how much a stock moved; fundamentals tell you why. The "why" determines conviction; technicals only refine timing within an already-approved trade.
-
-**Priority hierarchy:**
-1. **Thesis / fundamentals** (conviction inputs, news, earnings, margins) — can kill a trade entirely
-2. **IV environment** (IV rank, IV-HV) — determines strategy structure (buy vs sell premium)
-3. **Technicals** (RSI, SMA) — timing refinement within an already-approved trade
+Fundamentals override technicals, always. Technicals tell you how much a stock moved; fundamentals tell you why. IV environment determines structure (buy vs sell premium); technicals only refine timing within an already-approved trade.
 
 **Circuit breakers** (auto-detected by `get_entry_signals`):
 
@@ -137,19 +101,16 @@ For **portfolio-level tail-risk hedging** (deep OTM index puts as a structural p
 
 ## Step 4: Size the Position
 
-Base sizing on **growth-adjusted valuation** (PEG) and **portfolio concentration**.
+Run `get_entry_signals` or `get_conviction_metrics` for PEG, drawdown %, margin trend, and position size tier.
 
-Run `get_entry_signals` or `get_conviction_metrics` — both compute PEG (revenue-based), drawdown %, operating margin trend, and position size tier. The tools handle all edge cases: margin compression fallback to raw P/E, negative/zero growth, and the 80x P/E hard cap.
+**Sizing rules:**
+- Max 15% portfolio in a single name at entry
+- Reserve cash for T2 — don't deploy 100% on T1
+- Total CSP collateral ≤ 60% of cash account
+- Limit new entries to 5-7 names per month
 
-**Additional sizing rules:**
-- Never allocate >15% of portfolio to a single name at entry
-- Always reserve cash for T2 scale-in (don't deploy 100% on T1)
-- If running multiple CSPs, total collateral should not exceed 60% of cash account
-- Spreads allow more positions — reallocate freed capital across pipeline names
-- **Limit new entries to 5-7 names per month.** Run each name through Steps 1-4 before adding the next.
-
-**Size for the drawdown, not just the upside.** Before entering, ask: "If this drops 40% over 2 months, will the dollar loss force me to sell?" If yes, the position is too large. Size so that the worst-case drawdown is painful but survivable without triggering an emotional sell.
+**Size for the drawdown.** Ask: "If this drops 40% over 2 months, will the dollar loss force me to sell?" If yes, too large. The worst-case drawdown should be painful but survivable without an emotional sell.
 
 ## Step 5: Manage the Position
 
-See [management-rules.md](management-rules.md) for per-intent profit targets, exit triggers, thesis checkpoints, and selling discipline. See [bearish-framework.md](bearish-framework.md) for bearish-specific management. See [covered-call-overlay.md](covered-call-overlay.md) for CC rolls and management.
+See [management-rules.md](management-rules.md), [bearish-framework.md](bearish-framework.md), and [covered-call-overlay.md](covered-call-overlay.md).

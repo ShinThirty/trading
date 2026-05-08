@@ -81,28 +81,15 @@ Parabolic semi rallies don't end all at once — they unwind from the edges inwa
 - **Dispersion**: Calculate the spread between the best and worst performers in the sector over 1 month. Rising dispersion (leaders up 10%, laggards down 15%) = late cycle.
 - **Asymmetry at ATH**: When the mega-cap leaders are at ATH, earnings must be *exceedingly* good to sustain the rally. "Good" is already priced in. The market doesn't sell when fundamentals deteriorate — it sells when **the rate of improvement slows** (second derivative turns negative). A quarter of 25% growth at a stock priced for 40% growth is a selloff.
 
-**April 27, 2026 snapshot (Phase 3 active):**
-
-| Tier | Names | From 52W High | Today |
-|------|-------|---------------|-------|
-| At ATH | NVDA, MU, INTC | 0% to +3.5% | +3% to +6% |
-| Near ATH | TSM, AVGO, KLAC, ON, AMAT, ADI | -1% to -4% | -0.4% to -2.9% |
-| Rolling over | AMD, LRCX, MCHP, TXN, ASML, MRVL | -5% to -8% | -1.7% to -3.8% |
-| Correcting | ARM, SMTC, RMBS, WOLF, QCOM, SWKS | -9% to -33% | -2.4% to -10.8% |
-
-Three names at ATH. Everything else red. Classic Phase 3.
-
-**Notable contrarian signal:** Michael Burry (Scion Asset Management) disclosed SOXX $330P Jan 2027 puts in April 2026 — betting on a 27%+ correction from the parabolic high. His thesis: the rally is technically driven, not fundamentals-supported. Burry is historically excellent at identifying overvaluation but poor at timing — worth noting when he's bearish, but not actionable by itself.
-
-**Key verdict dates:** NVDA earnings May 20, MU earnings June 23. These two prints determine whether Phase 3 extends or Phase 4 begins.
+**To assess current phase:** classify the top 20 semi names by proximity to 52W high — at ATH (0 to +3%), near ATH (-1 to -4%), rolling over (-5 to -8%), correcting (-9%+). When only 1-3 names are at ATH while everything else is red, that's Phase 3. When the last holdout reports a "good but not great" quarter, Phase 4 begins.
 
 ## Defensive Playbook (when 2+ signals flash yellow)
 
 | Action | Detail |
 |--------|--------|
-| **Tighten CC strikes** | Roll existing CCs to closer-to-ATM strikes — accept less upside to lock in more downside protection |
-| **Pull CC expiries closer** | Roll from Dec '26/Jan '27 to shorter-dated expiries — accelerate the exit |
-| **Stop rolling CSPs** | On any Phase 1 names, let existing CSPs expire. Don't write new ones. |
-| **Accelerate LEAPS exits** | NVDA Jan '27 LEAPS — if signals fire before earnings catalyst (5/27), close for whatever profit exists rather than holding into a gap-down |
-| **Rotate into Phase 3** | Begin CSP pipeline on software/application winners (ADBE, CRM, FTNT) at fear-compressed valuations |
-| **Portfolio hedges** | Activate QQQ bear put spreads (Category A from L3 plan) |
+| **Tighten CC strikes** | Roll existing CCs to closer-to-ATM — accept less upside for more downside protection |
+| **Pull CC expiries closer** | Roll long-dated CCs to shorter-dated expiries — accelerate the exit |
+| **Stop rolling CSPs** | On Phase 1 names, let existing CSPs expire. Don't write new ones. |
+| **Accelerate LEAPS exits** | If signals fire before the earnings catalyst, close for whatever profit exists rather than hold into a gap-down |
+| **Rotate into Phase 3** | Begin CSP pipeline on software/application winners at fear-compressed valuations |
+| **Portfolio hedges** | Activate index bear put spreads (deferred until L3 approval) |

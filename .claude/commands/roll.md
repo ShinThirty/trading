@@ -20,29 +20,11 @@ Evaluate whether to roll an option position on **$ARGUMENTS.symbol** and present
 
 ## Step 2: Should This Option Still Exist?
 
-Before looking at roll economics, answer this question based on the position type:
-
-**For CCs** (from docs/covered-call-overlay.md):
-
-| Situation | Right move |
-|-----------|-----------|
-| Thesis exit, stock approaching strike | Let assign — the strike was your exit price |
-| Growth with income, stock approaching strike | Roll up and out — you want to keep the position |
-| Thesis broken, stock falling | Buy back CC, sell shares — exit the whole position |
-| Income/wheel, stock falling | Roll down for credit — reset at a lower strike |
-
-**For CSPs** (from docs/strategy-catalog.md):
-
-| Situation | Right move |
-|-----------|-----------|
-| Stock approaching strike, thesis intact, want lower entry | Roll down and out for credit |
-| Stock approaching strike, you want assignment | Let assign — this was the plan |
-| Thesis broken, stock falling | Buy back and walk away |
-| Stock well above strike, CSP at >50% profit | Buy back, write next cycle |
+Before roll economics, decide whether the position should exist at all. Apply the situation→action tables from [covered-call-overlay.md](../../docs/covered-call-overlay.md) (CCs) or [strategy-catalog.md](../../docs/strategy-catalog.md) (CSPs, "CSP Roll Mechanics" section). Consult the relevant doc for the matrix.
 
 State: "**Recommendation: [roll / let assign / buy back / exit]** — [why]"
 
-If the recommendation is NOT to roll, stop here and explain the rationale.
+If NOT roll, stop and explain.
 
 ## Step 2b: Coverage Reassessment (multi-contract positions only)
 

@@ -13,17 +13,6 @@ Companion to [decision-framework.md](decision-framework.md) for bearish and vola
 
 A stock with terrible fundamentals trading at 0.3x book is not a bearish trade — the market already knows. A stock with terrible fundamentals trading at 400x earnings on narrative is a bearish opportunity — the gap between story and reality is tradeable.
 
-```
-get_entry_signals → Conviction: Negative (2+ factors)?
-  → No → Continue with main framework (bullish/neutral intents)
-  → Yes → Bearish Framework:
-      → Score deterioration depth (need 3+ signals)
-      → Score valuation disconnect (need 1+)
-      → High bearish conviction → Long puts
-      → Moderate bearish conviction → Straddle/strangle
-      → Low bearish conviction → SKIP (no edge)
-```
-
 ---
 
 ## Step 1: Bearish Conviction Assessment
@@ -102,22 +91,13 @@ These conditions **block or modify** a bearish trade:
 | Moderate | <30% | No catalyst | **Long strangle** — wider strikes, cheaper entry |
 | Moderate | >30% | Any | **Wait** or skip. (L3: iron condor with bearish lean) |
 
-### Long Put Mechanics
+### Long put mechanics
 
-- **Delta:** -0.30 to -0.40 (moderate OTM — balances cost vs probability)
-- **Expiry:** 45-60 DTE, or 2-4 weeks past the next catalyst
-- **Strike selection by conviction:**
-  - High conviction: closer to ATM (-0.40 delta) for higher probability
-  - Moderate conviction: further OTM (-0.25 to -0.30) for cheaper entry
-- **Never buy puts inside 14 DTE** — theta acceleration destroys value before the thesis plays out
+Delta -0.30 to -0.40 (high conviction → closer to ATM at -0.40, moderate → further OTM at -0.25 to -0.30). Expiry 45-60 DTE, or 2-4 weeks past the next catalyst. Never buy inside 14 DTE — theta destroys value before the thesis plays out.
 
-### Straddle / Strangle Mechanics
+### Straddle / strangle mechanics
 
-- **Use when:** Bearish conviction is moderate — you believe a big move is coming but acknowledge the stock could rip higher on narrative
-- **Straddle:** ATM strikes, same expiry. Higher cost, higher probability of profit.
-- **Strangle:** 1 strike width OTM on each side. Lower cost, needs bigger move.
-- **Expiry:** 2-4 weeks past expected catalyst (earnings, product launch, debt maturity)
-- **IV Rank must be <30%** — you're buying volatility, so buy it cheap
+Use when conviction is moderate — you expect a big move but acknowledge the stock could rip higher on narrative. Straddle = ATM strikes (higher cost, higher probability); strangle = 1 strike width OTM each side (lower cost, needs bigger move). Expiry 2-4 weeks past expected catalyst. **IV Rank must be <30%** — you're buying volatility, so buy it cheap.
 
 ---
 
@@ -179,9 +159,4 @@ Check every 2 weeks (or at each earnings report):
 
 ## L3 Expansion (2027+)
 
-When L3 options are approved, add these strategies to the decision matrix:
-
-- **Bear put spread** — defined-risk directional bearish at lower cost than outright puts. Becomes the default high-conviction strategy when IV Rank is 30-70%.
-- **Bear call spread** — credit strategy that benefits from high IV Rank (>70%). Replaces "wait" in the current matrix.
-- **Put backspread** — crash bet (sell 1 put, buy 2 lower puts). For tail-risk / blowup thesis where you expect a violent move, not a slow bleed. See strategy-catalog.md for Valley of Death warning.
-- **Iron condor (bearish lean)** — skewed short strikes for range-bound deterioration. Moderate conviction alternative to straddle when IV is rich.
+When L3 is approved, add to the decision matrix: bear put spread (default high conviction at IV Rank 30-70%), bear call spread (credit strategy at IV Rank >70%, replaces "wait"), put backspread (crash bet — see strategy-catalog.md Valley of Death warning), and bearish-lean iron condor (moderate conviction alternative to straddle when IV is rich).

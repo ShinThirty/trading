@@ -146,30 +146,11 @@ Use `calculate_hedge` with these parameters for tail-risk hedging:
 | `fidelity_folder` | `~/Downloads/fidelity` (if applicable) | **Required if you hold equity in Fidelity.** Without this, sizing only covers Webull NLV |
 | `crisis_multiplier` | `1.25` | Amplifies trailing beta to account for correlation spikes during crashes (tech betas inflate ~25% in real selloffs) |
 
-The tool **rounds contracts UP** in tail-risk mode (`delta_adjusted=False`) — undersizing is the costly direction.
+The tool **rounds contracts UP** in tail-risk mode — undersizing is the costly direction.
 
-**Why crisis_multiplier matters:** Trailing 90-day beta is what the market looks like during normal conditions. During crashes, correlations spike toward 1.0 and high-beta names amplify. A trailing beta of 1.61 typically behaves like ~2.0 in a real selloff. Without the multiplier, a "50% notional hedge" actually covers ~37% of true exposure when it matters most.
+**Why both `crisis_multiplier` and `fidelity_folder` are required:** Trailing 90-day beta understates crash beta (correlations spike to ~1.0; high-beta names amplify ~25%); the multiplier corrects for that. The Fidelity CSV is needed because Webull-only sizing misses any equity held there. Skipping either combination typically undersizes the hedge by 20-30%. Don't estimate manually — the tool needs the full picture.
 
-**Why fidelity_folder matters:** The tool reads Webull positions via API. If you also hold Fidelity equity, those positions and their NLV are invisible without the CSV folder. Sizing against partial NLV undersizes the hedge.
-
-**Reference call** (current portfolio shape, May 2026):
-
-```
-calculate_hedge(
-  hedge_index="SPY",
-  hedge_ratio=0.5,
-  strike=540,
-  expiration="2026-08-21",
-  fidelity_folder="~/Downloads/fidelity",
-  crisis_multiplier=1.25
-)
-```
-
-Returns 19 contracts at $4,503 (0.29% of $1.56M portfolio). Trailing beta 1.36 → crisis-adjusted 1.70. Without `fidelity_folder` and `crisis_multiplier`, the same call returns 14 contracts — a 26% undersize.
-
-Note: including Fidelity actually *lowers* the trailing beta (1.61 → 1.36) because the Fidelity equity (ISRG, PGR, V, RDDT, RMBS) is more defensive than the Webull tech book. But it raises total NLV ($1.25M → $1.56M), so contract count still goes UP. The point: don't try to estimate either factor manually — the tool needs the full picture to size correctly.
-
-**Annual budget target: 0.5-1.5% portfolio drag.** Above 2% means you're either hedging too frequently, hedging at the wrong IV window, or correction-hedging in disguise.
+**Annual budget target: 0.5-1.5% portfolio drag.** Above 2% means hedging too frequently, at the wrong IV window, or correction-hedging in disguise.
 
 ## The discipline rules (the non-negotiable part)
 
@@ -203,53 +184,19 @@ In the 25% → 17% range, the contract is no longer doing the job it was bought 
 
 ### Three rebalancing triggers (all data-driven, never gut feel)
 
-#### Trigger 1: Maintenance roll (default for non-crash drift)
+The `/hedge` skill operationalizes these — this section is the rationale.
 
-When SPY has dropped enough that your put is no longer in the tail zone but is far from a major payoff. Restore the 25% OTM profile by rolling to a fresh deeper strike at the new SPY.
+**Trigger 1: Maintenance roll** — put delta drifted to -0.20 to -0.40 (was -0.05; indicates ~10-15% SPY drop) AND one of: VIX retraced ≥50% from spike high, catalyst resolved, or P&L 100-300% and stalling. Restores the 25% OTM profile. Do NOT roll if delta still tighter than -0.15, VIX still climbing or above 30, SPY making new lows daily (T2 may be coming), or P&L only 50-100% (premature).
 
-**Check via tools:**
-1. `get_quote` your put contract with `greeks=True` → read current delta
-2. `get_quote VIX` and `get_tradier_history VIX` → current vs spike high
-3. `get_portfolio_summary` → current put P&L %
+**Trigger 2: Major payoff harvest** — VIX >50, SPY down 20%+, puts deep ITM. Mechanical tranches: +400% close 50%, +900% close another 25%, +1900%+ close remaining. Don't top-tick.
 
-**Trigger fires when:**
-- Put delta is in **-0.20 to -0.40** range (was -0.05 at entry, indicates ~10-15% SPY drop), AND
-- One of: VIX retraced ≥50% from spike high, OR known catalyst resolved, OR put P&L is in 100-300% range and stalling
-
-**Do NOT roll if:**
-- Put delta still tighter than -0.15 (move hasn't materialized — give it room)
-- VIX still climbing or holding above 30 (move not done)
-- SPY making new lows daily (use Trigger 3 instead — bigger payoff coming)
-- Put P&L only 50-100% (premature — let convexity work)
-
-#### Trigger 2: Major payoff harvest (5x+ in tranches during a real crash)
-
-When the move is large and fast — VIX above 50, SPY down 20%+, puts deep ITM. Use `get_portfolio_summary` to read live P&L %. Don't try to top-tick — execute mechanically.
-
-| P&L threshold | Action |
-|---|---|
-| **+400% (5x)** | Close 50% of contracts |
-| **+900% (10x)** | Close another 25% of original |
-| **+1900% (20x)+** | Close remaining (let small residue ride only if crash is grinding lower with fresh leg setups) |
-
-#### Trigger 3: Routine 30-DTE roll (calendar-driven)
-
-Sell expiring + buy fresh at the new 25% OTM strike. Re-run `calculate_hedge` for current sizing. No special conditions.
+**Trigger 3: Routine 30-DTE roll** — calendar-driven, no special conditions.
 
 ### Universal workflow (any trigger)
 
-The mechanic is the same — **close + immediate redeploy in the same session**. Never close and wait.
+**Close + immediate redeploy in the same session.** Never close and wait. Sell the tranche → `calculate_hedge` with current SPY → buy new at 25% OTM from *current* SPY → record `decision_close` + `decision_add` action `WRITE_NEW`.
 
-1. Confirm trigger via the tool checks above
-2. Sell the tranche via `place_order` (full position for Trigger 1/3, partial for Trigger 2)
-3. Re-run `calculate_hedge` with current SPY + `fidelity_folder` + `crisis_multiplier=1.25` to size the new contract
-4. Pick the new strike at 25% OTM from the *current* SPY price (not the original entry price)
-5. Place buy order for the new contracts
-6. Record both legs: `decision_close` (old) + `decision_add` with action `WRITE_NEW` (new)
-
-The proceeds from the close typically buy **more contracts** at the new deeper strike than you started with — the new strike's premium is lower, and SPY-has-dropped means the same dollar notional covers a deeper hedge. You end up with fresher DTE + restored convexity + larger notional coverage at no net new capital outlay.
-
-This is how the program **makes money** in a crash year and **survives** in a slow-grind year — compounding rebalance cycles as conditions change.
+Proceeds typically buy **more contracts** at the deeper strike (lower premium + SPY drop means same dollar notional covers a deeper hedge). Result: fresher DTE + restored convexity + larger notional coverage at no net new capital. This is how the program **makes money** in a crash year and **survives** in a slow-grind year.
 
 ### The honest test
 
@@ -262,8 +209,6 @@ Real Path 2 decisions are based on what the puts ARE (delta, IV state, distance 
 
 ## Other valid closes (no rebalancing)
 
-The only reasons to touch the position outside the three rebalancing triggers:
-
 | Reason | Action |
 |---|---|
 | **Portfolio delta materially reduced** (sold 30%+ of long book) | Downsize at next maintenance roll — don't dump mid-cycle |
@@ -271,9 +216,7 @@ The only reasons to touch the position outside the three rebalancing triggers:
 
 ## What is NEVER a valid close
 
-- "VIX dropped" / "regime cleared" / "no signals firing" — this is the 4/30 anti-pattern
-- "Premium decay is killing me" — that's the program's cost, baked in
-- "I'm bored holding this" — gambler's fallacy in reverse
+"VIX dropped" / "regime cleared" / "no signals firing" (the 4/30 anti-pattern), "premium decay is killing me" (it's the program's cost), or "I'm bored holding this" (gambler's fallacy in reverse).
 
 ## Execution checklist
 
@@ -305,68 +248,35 @@ In a real crash year (2008, 2020), one cycle's payoff (50-100x premium) covers y
 
 ## Realistic performance expectations
 
-**Most tail-hedge programs fail not from bad math but from operator fatigue during benign streaks.** Document this section and re-read it during quiet periods so future-you doesn't quit in year 4 of a 5-year benign stretch and miss the year 6 crash.
+**Most tail-hedge programs fail not from bad math but from operator fatigue during benign streaks.** Re-read this section during quiet periods so future-you doesn't quit in year 4 of a 5-year benign stretch and miss the year 6 crash.
 
 ### Expected outcome distribution (rough base rates)
 
 | Year type | Frequency | Hedge P&L | Examples |
 |---|---|---|---|
-| **Pure bull, no spikes** | ~50% of years | -0.8 to -1.0% drag | 2017, 2019, 2021, 2023, 2024 |
-| **Bull with one wobble** | ~25% of years | -0.3 to +0.5% | 2016 |
-| **Sharp correction recovered** | ~15% of years | +1 to +3% | 2018 Q1, Aug 2024 |
-| **Sharp + slow recovery** | ~7% of years | +3 to +8% | 2018 Q4, 2022 H1 |
-| **Real crash** | ~3% of years | +10 to +30% | 2008, March 2020, 2000-02 |
+| **Pure bull, no spikes** | ~50% | -0.8 to -1.0% drag | 2017, 2019, 2021, 2023, 2024 |
+| **Bull with one wobble** | ~25% | -0.3 to +0.5% | 2016 |
+| **Sharp correction recovered** | ~15% | +1 to +3% | 2018 Q1, Aug 2024 |
+| **Sharp + slow recovery** | ~7% | +3 to +8% | 2018 Q4, 2022 H1 |
+| **Real crash** | ~3% | +10 to +30% | 2008, March 2020, 2000-02 |
 
-Over a decade, expected total return ≈ **break-even to slightly positive**, with massive variance concentrated in 1-2 crash events.
+Over a decade: expected total return ≈ break-even to slightly positive, variance concentrated in 1-2 crash events.
 
-### Three payoff sources
+### Payoff sources and failure modes
 
-1. **Maintenance roll captures** (sharp 10-15% moves with vol spike) — most common; 3-5x premium expansion via vega, locked in by Trigger 1
-2. **Major harvest tranches** (real crash, 20%+ drawdowns) — rare but huge; 5x/10x/20x sequential closes
-3. **Compounding harvest → redeploy cycles** (multi-leg crashes like 2008) — proceeds redeployed at deeper strikes catch the next leg
+**Three payoff sources:** (1) maintenance-roll captures on sharp 10-15% moves with vol spike (3-5x via vega; most common), (2) major harvest tranches in real crashes (5x/10x/20x), (3) compounding harvest→redeploy cycles in multi-leg crashes (2008-style).
 
-### Three failure modes (be honest about these)
+**Three failure modes:** slow grinding bear (decay outpaces drift, 2022 H1), choppy/sideways (scares resolve before triggers fire, 2015-16), and strong bull (pure drag — the program working as designed).
 
-| Mode | What happens | Why |
-|---|---|---|
-| **Slow grinding bear** (2022 H1) | -20% over 9 months, VIX never above 35. Rolls capture little. | Decay outpaces slow drift |
-| **Choppy/sideways** (2015-16) | Multiple wobbles but no sustained moves. | Each scare resolves before triggers fire |
-| **Strong bull** (most years) | Pure drag. | Program working as designed — paying for protection that didn't trigger |
+### Why we run it anyway
 
-### Why we run it anyway — the strategic case
+The hedge **doesn't make money** — the rest of the portfolio makes more money *because the hedge exists*. Pay ~80 bps of expected return to compress the left tail by 25+ percentage points; right tail untouched. Net benefit at beta 1.36: hedge cost ~0.83%/yr vs forgone return from de-risking instead ~2.9%/yr → **~2.0%/yr of expected return retained** by sustaining high-conviction exposure without the de-risking tax.
 
-**The hedge skews the risk/reward distribution favorably by turning down the rewards a bit.** You pay ~80 bps of expected return to compress the left tail by 25+ percentage points, while leaving the right tail untouched.
-
-Equivalent reframings:
-- The hedge itself doesn't make money — the *rest* of the portfolio makes more money because the hedge exists
-- It's a leverage enabler — lets you carry higher equity beta under the same risk budget
-- It's a positive skewness shift — concave utility curves (pain of -50% >> joy of +50%) make this trade especially valuable
-
-Comparing the three risk-management approaches at this portfolio's shape (beta 1.36):
-
-| Approach | Equity beta | Expected return (8% market) | Tail risk |
-|---|---|---|---|
-| **Full exposure + hedge** (this playbook) | 1.36 | **10.9%** | Protected |
-| Reduce exposure (no hedge) | ~1.0 (sell 25-30% of high-beta names) | 8.0% | Equivalent protection but no upside |
-| Full exposure, no hedge | 1.36 | 10.9% | Forced selling at -30% wipes years of compounding |
-| Toggle hedges tactically | varies | 8-9% | The 4/30 anti-pattern; locks in drag without convex payoff |
-
-Net economics of running the program:
-- Hedge cost: ~0.83%/year (drag from premium)
-- Forgone return from de-risking instead: ~2.9%/year (1.36 × 8% minus 1.0 × 8%)
-- **Net benefit of running the hedge: ~2.0%/year of expected return that you keep**
-
-That's the real number. Not the hedge's own P&L, but the portfolio P&L that the hedge enables — sustained exposure to the high-vol growth sectors (tech, semis, AI capex) where conviction is highest, without paying the de-risking tax.
-
-### The harvest-as-buying-power second order
-
-The often-missed payoff: **harvest proceeds during a crash become cash to deploy at the bottom.** March 2020 lows weren't just a recovery — they were a generational entry point. A program paying $80K of harvest at SPY -25% becomes $80K of buying power for stocks at -30% off, when most operators are paralyzed or selling.
-
-Without the hedge, you'd be deploying *existing cash* at the bottom (if you have any). With the hedge, you're deploying *crash-generated cash* — money that wouldn't exist otherwise.
+**Second-order payoff:** harvest proceeds during a crash become cash to deploy at the bottom. March 2020 lows were a generational entry point; a program paying $80K of harvest at SPY -25% is $80K of buying power when most operators are paralyzed.
 
 ### The hardest truth
 
-Expect **3-7 consecutive losing years** before a crash arrives. That's the test most operators fail. The 4/30 close on the SPY 690P was a 10-day version of the same psychology — closing because nothing was wrong yet. **Nothing being wrong is the entire premise.**
+Expect **3-7 consecutive losing years** before a crash arrives. That's the test most operators fail. **Nothing being wrong is the entire premise.**
 
 ## When this playbook DOES NOT apply
 

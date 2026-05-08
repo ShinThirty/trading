@@ -33,7 +33,7 @@ Execute the structured biweekly trading review. Work through each section in ord
 
 4. Call `get_iv_metrics` on covered positions to check if IV Rank favors writing new CCs.
 
-5. **Wheel accounts** (Webull Roth + Fidelity HSA — CCL and any future wheel names):
+5. **Wheel accounts** (Webull Roth + Fidelity HSA):
    - Open CSPs: distance to strike, % profit, buy back at 50%?
    - Held shares (if assigned): write CC? At what strike?
    - Open CCs: approaching strike? Let assign or roll?

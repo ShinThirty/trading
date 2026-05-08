@@ -57,53 +57,13 @@ The entry method depends on drawdown depth and IV environment:
 | **20-30%** | Highest | **Direct buy** (tranches) | **CSP** | **CSP** (best premium math) |
 | **20-30%** | High | **Small direct buy** (starter) | **CSP** | **CSP** |
 
-### Long Call Parameters (>30% drawdown, IV Rank <30%)
+### Strategy parameters
 
-This is the directional leverage variant. The "catalyst" is the calendar — selling pressure lifts at year-end.
+**Long calls** (>30% drawdown + IV Rank <30%): 0.40-0.50 delta, late-January to mid-February expiry, entry early-mid December. The known timeline is what makes directional leverage appropriate — tax selling ends on December 31. Period.
 
-| Parameter | Target | Rationale |
-|-----------|--------|-----------|
-| Delta | 0.40-0.50 | Balanced leverage and probability |
-| Expiry | Late January to mid-February | Spans the recovery window with buffer |
-| Entry | Early-mid December | During peak selling, before recovery |
+**CSPs** (selloff-adjusted strikes per [strategy-catalog.md](strategy-catalog.md)): >30% drawdown → ATM to 5% OTM (you want assignment); 20-30% drawdown → 5-10% OTM. January monthly expiry — spans the selling period and captures the bounce.
 
-The known timeline is what makes directional leverage appropriate here — you're not guessing when the catalyst fires. Tax selling ends on December 31. Period.
-
-### CSP Parameters
-
-Standard framework rules from [strategy-catalog.md](strategy-catalog.md), with selloff-adjusted strikes:
-
-| Drawdown | Strike Target | Rationale |
-|----------|--------------|-----------|
-| >30% | ATM to 5% OTM | You want assignment at these prices |
-| 20-30% | 5-10% OTM | Balanced — assignment gives additional discount |
-
-Expiry: January monthly (3rd Friday). Spans the selling period and captures the bounce. If assigned, you own shares at a discount heading into the recovery.
-
-### Direct Buy Parameters
-
-Scale-in tranches per [strategy-catalog.md](strategy-catalog.md):
-- T1 in early December (starter position)
-- T2 in mid-late December if price drops further or thesis confirmed
-- Reserve: always keep T2 capital available — selling can deepen before it lifts
-
----
-
-## Screening Workflow
-
-```
-November (weekly):
-1. Review pipeline for YTD losers >20%
-2. get_entry_signals <TICKER>         — re-confirm conviction, check for new Negative factors
-3. get_company_news <TICKER>          — any fundamental catalyst for the decline?
-4. get_iv_metrics <TICKER>            — IV environment for strategy selection
-
-December (entry):
-5. get_option_expirations <TICKER>    — find January expiry
-6. get_option_chain <TICKER> <expiry> — strike selection
-7. For long calls: target 0.40-0.50 delta, Jan/Feb expiry
-8. For CSPs: target per drawdown table above, January expiry
-```
+**Direct buy** (scale-in): T1 starter early December, T2 mid-late December if price drops further or thesis confirms. Always reserve T2 capital — selling can deepen before it lifts.
 
 ---
 
@@ -159,6 +119,4 @@ Standard [management-rules.md](management-rules.md) applies. The tax-loss entry 
 
 ## Historical Context
 
-The January effect is one of the most studied market anomalies. It has weakened over decades as more participants trade it, but the underlying mechanic (forced selling with a deadline) persists because tax incentives don't change. The edge is smaller than it was in the 1980s, but it's real — especially on names with genuine fundamental support that are being sold purely for tax reasons.
-
-The best opportunities come in years with high market dispersion — when some names are up big (creating tax gains to offset) while others are down big (creating the candidates). Years where everything moves together produce fewer candidates.
+The January effect has weakened over decades as more participants trade it, but the mechanic (forced selling with a calendar deadline) persists because tax incentives don't change. Best opportunities come in years with high market dispersion — winners create tax gains to offset, losers become the candidates. Years where everything moves together produce fewer setups.
