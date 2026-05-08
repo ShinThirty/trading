@@ -1,15 +1,13 @@
 {
   "mcpServers": {
-    "google-workspace": {
+    "trading-mcp": {
       "type": "stdio",
-      "command": "uvx",
+      "command": "uv",
       "args": [
-        "workspace-mcp@latest",
-        "--tools",
-        "sheets",
-        "drive",
-        "docs",
-        "calendar"
+        "run",
+        "--package",
+        "trading-mcp",
+        "trading-mcp"
       ],
       "env": {}
     }
