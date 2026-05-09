@@ -59,19 +59,34 @@ Execute the structured biweekly trading review. Work through each section in ord
    - **New release since last review?** If so, call `get_beige_book release=prior` and explicitly read the language delta. Fed staff make small but deliberate shifts ("modest growth" → "slight" → "flat" → "declining"). A tone shift in the National Summary often pre-prints the next FOMC's stance.
    - **Same release as last review?** Skip the prior-release call. The Beige Book is qualitative context — re-reading the same paragraphs adds no new information. Note period token + move on.
 
-3. **DIX/GEX overlay (experimental).** Call `get_dix_gex` — surfaces dark-pool accumulation (DIX) + dealer gamma posture (GEX) with the 2x2 regime cell, divergence flag (10-day SPX vs DIX), 10-day micro trend, and 1m/3m/6m/1y percentile context. Treat as texture, not a verdict — overlay onto the regime call:
+3. **Treasury QRA read (release windows only).** The Quarterly Refunding Announcement publishes 4x/year — Wednesday 8:30 AM in early Feb / May / Aug / Nov. Same cadence-vs-review math as the Beige Book: most biweekly reviews will land on a stale QRA. **Two checks:**
+   - **New QRA since last review?** Call `get_qra_texture`. The tool returns latest + prior Policy Statements in one call so language deltas are inspectable. Read in this order:
+     - **Auction sizes table** — bill-vs-coupon mix shift is the trade. Coupon increases absorb duration on dealer balance sheets and pressure the long end (Aug 2023 canonical); bill-skew releases duration and supports risk assets (Yellen 2023-24 canonical).
+     - **Forward guidance language** — diff "anticipates maintaining auction sizes for at least the next several quarters" (status quo) vs "anticipates increasing" (duration absorption ahead). The phrase change is more important than the size change in any single quarter.
+     - **Buyback program updates** — frequency, size, and curve focus (off-the-run liquidity buybacks vs cash-management buybacks have different signaling).
+     - **TIPS issuance** — separate paragraph; relevant only if you're trading the breakeven complex.
+   - Cross-reference the yield curve table the tool prints (DTB3/DGS2/5/10/30/T10Y2Y) with any rate-sensitive positions. A QRA-day move >5bp at the long end vs a flat front is the typical "duration repricing" tell.
+   - **Same QRA as last review?** Skip the call. The statement is immutable and the texture-tool output adds nothing new mid-quarter. Note next QRA date + move on.
+
+4. **DIX/GEX overlay (experimental).** Call `get_dix_gex` — surfaces dark-pool accumulation (DIX) + dealer gamma posture (GEX) with the 2x2 regime cell, divergence flag (10-day SPX vs DIX), 10-day micro trend, and 1m/3m/6m/1y percentile context. Treat as texture, not a verdict — overlay onto the regime call:
    - **Divergence flag present?** This is the highest-signal pattern (distribution into strength or accumulation into weakness). Cross-reference with `get_market_regime` Tape/Sentiment dimensions.
    - **Regime cell** informs structure preferences for the next 2 weeks: DIX-high/GEX-positive favors CSPs+IC; DIX-low/GEX-negative favors hedges over new long-delta. Use this to gate CC writing aggressiveness and CSP strike distance.
    - Note in retro whether the cell call matched the next 2 weeks of price action — track utility over a few cycles before deciding to keep or drop.
 
-4. Call `get_btc_entry_signals` — present the composite score and recommended DCA rate:
+5. **TSMC monthly revenue.** Call `get_tsmc_monthly_revenue months=13`. TSMC publishes consolidated monthly revenue around the 10th of each month — a clean leading indicator for the global semi cycle (NVDA / AMD / AVGO / MRVL / ASML / AMAT all foundry-downstream). Biweekly cadence usually catches a fresh print between cycles. Read in this order:
+   - **Freshness line** — if `⏰ awaiting print` (latest row older than prior calendar month), note that and continue; the tool still surfaces the prior 12 months' trajectory.
+   - **Latest YoY + MoM** — surprise vs the prior 3-month run-rate is the signal. Positive YoY surprise ahead of NVDA / AMD reports is bullish for the semi tape; YoY decel >5pp is a warning for short-dated long-semi exposure.
+   - **12-month trajectory** — phase pattern (acceleration vs roll-over) matters more than any single print. Cross-check against the active semi cycle thesis in memory (Phase 1c / Phase 3 timing).
+   - Cross-reference any active semi positions and pipeline names from Section 1 / Section 3. This is the single highest-frequency leading indicator we have for that sleeve and should explicitly inform Step 6's semi-cycle assessment.
+
+6. Call `get_btc_entry_signals` — present the composite score and recommended DCA rate:
    - 0.25x Strongly Unfavorable
    - 0.5x Unfavorable
    - 1x Mixed
    - 1.5x Favorable
    - 2x Strongly Favorable
 
-5. Assess:
+7. Assess:
    - Semi cycle thesis: any capex guidance changes? Phase timing still on track?
    - Sector rotation: who's leading, who's lagging?
    - Any macro shifts that affect CC expiry timing or coverage ratios?

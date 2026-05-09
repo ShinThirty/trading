@@ -25,6 +25,7 @@ from trading_clients.sentiment_client import SentimentClient
 from trading_clients.squeeze_metrics_client import SqueezeMetricsClient
 from trading_clients.tastytrade_client import TastyTradeClient
 from trading_clients.tradier_client import TradierClient
+from trading_clients.treasury_client import TreasuryClient
 from trading_clients.tsmc_client import TsmcClient
 from trading_clients.webull_client import WebullClient
 
@@ -129,6 +130,10 @@ def _kalshi(ctx: Context) -> KalshiClient:
 
 def _tsmc(ctx: Context) -> TsmcClient:
     return ctx.lifespan_context["tsmc"]
+
+
+def _treasury(ctx: Context) -> TreasuryClient:
+    return ctx.lifespan_context["treasury"]
 
 
 def _beige_book(ctx: Context) -> BeigeBookClient:

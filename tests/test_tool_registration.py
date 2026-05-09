@@ -168,6 +168,9 @@ EXPECTED_TOOLS: dict[str, set[str]] = {
     "trading_mcp.tools.squeeze_metrics": {
         "get_dix_gex",
     },
+    "trading_mcp.tools.treasury": {
+        "get_qra_texture",
+    },
     "trading_mcp.tools.tsmc": {
         "get_tsmc_monthly_revenue",
     },

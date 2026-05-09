@@ -23,6 +23,7 @@ from trading_clients.sentiment_client import SentimentClient
 from trading_clients.squeeze_metrics_client import SqueezeMetricsClient
 from trading_clients.tastytrade_client import TastyTradeClient
 from trading_clients.tradier_client import TradierClient
+from trading_clients.treasury_client import TreasuryClient
 from trading_clients.tsmc_client import TsmcClient
 from trading_clients.webull_client import WebullClient
 
@@ -53,6 +54,7 @@ from trading_mcp.tools.rolls import mcp as rolls_mcp
 from trading_mcp.tools.screens import mcp as screens_mcp
 from trading_mcp.tools.signals import mcp as signals_mcp
 from trading_mcp.tools.squeeze_metrics import mcp as squeeze_metrics_mcp
+from trading_mcp.tools.treasury import mcp as treasury_mcp
 from trading_mcp.tools.tsmc import mcp as tsmc_mcp
 
 
@@ -82,6 +84,7 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
     ctx["polymarket"] = PolymarketClient()
     ctx["kalshi"] = KalshiClient()
     ctx["tsmc"] = TsmcClient()
+    ctx["treasury"] = TreasuryClient()
     ctx["beige_book"] = BeigeBookClient()
     ctx["squeeze_metrics"] = SqueezeMetricsClient()
     ctx["naaim"] = NaaimClient()
@@ -123,6 +126,7 @@ mcp.mount(cn_market_mcp)
 mcp.mount(cftc_mcp)
 mcp.mount(prediction_markets_mcp)
 mcp.mount(tsmc_mcp)
+mcp.mount(treasury_mcp)
 mcp.mount(beige_book_mcp)
 mcp.mount(squeeze_metrics_mcp)
 mcp.mount(naaim_mcp)
