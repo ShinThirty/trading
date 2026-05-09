@@ -84,6 +84,9 @@ EXPECTED_TOOLS: dict[str, set[str]] = {
         "get_gdp_report_texture",
         "get_fomc_decision_texture",
     },
+    "trading_mcp.tools.naaim": {
+        "get_naaim_history",
+    },
     "trading_mcp.tools.news": {
         "get_company_news",
         "get_market_news",
