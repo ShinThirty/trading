@@ -33,15 +33,53 @@ class SeriesIdRequest(ParamsRequest):
 
 
 @dataclass
-class GetReleasesRequest(ParamsRequest):
-    limit: int = 20
+class GetReleaseDatesRequest(ParamsRequest):
+    release_id: int
+    realtime_start: str | None = None
+    realtime_end: str | None = None
 
     def to_params(self) -> dict[str, str]:
-        return {
-            "limit": str(self.limit),
+        params = {
+            "release_id": str(self.release_id),
             "include_release_dates_with_no_data": "true",
             "sort_order": "asc",
         }
+        if self.realtime_start:
+            params["realtime_start"] = self.realtime_start
+        if self.realtime_end:
+            params["realtime_end"] = self.realtime_end
+        return params
+
+
+# Curated FRED release IDs surfaced to the briefing skill, tagged by what the
+# print measures rather than a judgment of impact.
+# FOMC is intentionally excluded — FRED release_id 101 ("FOMC Press Release") is
+# a daily-update feed, not a meeting calendar. Use FOMC_CALENDAR (fed.gov scrape)
+# and get_fomc_decision_texture for FOMC days instead.
+# Daily/weekly market noise (SOFR, Coinbase, Dow Jones, etc.) is also excluded.
+MACRO_RELEASES: dict[int, tuple[str, str]] = {
+    # Labor
+    50: ("Labor", "Employment Situation (NFP)"),
+    192: ("Labor", "JOLTS"),
+    194: ("Labor", "ADP Employment"),
+    180: ("Labor", "Initial Jobless Claims"),
+    # Inflation
+    10: ("Inflation", "CPI"),
+    54: ("Inflation", "Personal Income and Outlays (PCE)"),
+    46: ("Inflation", "PPI"),
+    # Activity
+    9: ("Activity", "Retail Sales"),
+    13: ("Activity", "Industrial Production"),
+    95: ("Activity", "Durable Goods"),
+    # Housing
+    27: ("Housing", "Housing Starts/Permits"),
+    97: ("Housing", "New Home Sales"),
+    291: ("Housing", "Existing Home Sales"),
+    # Trade
+    51: ("Trade", "International Trade"),
+    # Growth
+    53: ("Growth", "GDP"),
+}
 
 
 @dataclass
@@ -96,17 +134,15 @@ class SeriesInfoResponse:
 
 
 @dataclass
-class ReleasesResponse:
-    releases: list[dict]
+class ReleaseDatesResponse:
+    dates: list[str]
 
     @classmethod
-    def from_response(cls, data: list[dict]) -> "ReleasesResponse":
-        return cls(releases=data or [])
+    def from_response(cls, data: list[dict]) -> "ReleaseDatesResponse":
+        return cls(dates=[d.get("date", "") for d in (data or []) if d.get("date")])
 
     def to_output(self) -> str:
-        if not self.releases:
-            return "(no releases)"
-        return ", ".join(f"{r.get('date', '')} {r.get('release_name', '')}" for r in self.releases)
+        return ", ".join(self.dates) if self.dates else "(no dates)"
 
 
 @dataclass
@@ -150,10 +186,10 @@ SERIES_INFO = Endpoint(
     extract=lambda d: d.get("seriess", [{}])[0],
 )
 
-RELEASES = Endpoint(
-    "/releases/dates",
+RELEASE_DATES = Endpoint(
+    "/release/dates",
     cache_ttl=3600,
-    response_model=ReleasesResponse,
+    response_model=ReleaseDatesResponse,
     extract=lambda d: d.get("release_dates", []),
 )
 

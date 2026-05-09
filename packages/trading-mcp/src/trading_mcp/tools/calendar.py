@@ -1,11 +1,14 @@
 """Scheduled events: earnings, dividends, economic data releases."""
 
-from fastmcp import Context, FastMCP
-from trading_clients.endpoints import finnhub as fh
-from trading_clients.endpoints import fmp, fred
-from trading_clients.endpoints import tastytrade as tt
+from datetime import date, timedelta
 
-from trading_mcp.helpers import _finnhub, _fmp, _fred
+from fastmcp import Context, FastMCP
+from trading_clients.endpoints import fed, fmp, fred
+from trading_clients.endpoints import finnhub as fh
+from trading_clients.endpoints import tastytrade as tt
+from trading_clients.table_helpers import list_table
+
+from trading_mcp.helpers import _fed, _finnhub, _fmp, _fred
 
 mcp = FastMCP("calendar-tools")
 
@@ -70,10 +73,41 @@ async def get_dividend_history(ctx: Context, symbol: str) -> str:
 
 
 @mcp.tool()
-async def get_upcoming_economic_releases(ctx: Context, limit: int = 20) -> str:
-    """Get upcoming FRED data release dates: when CPI, GDP, jobs report will be published.
+async def get_upcoming_economic_releases(ctx: Context, days_ahead: int = 14) -> str:
+    """Get upcoming macro releases tagged by category: Labor (NFP, JOLTS, ADP,
+    Jobless Claims), Inflation (CPI, PCE, PPI), Activity (Retail Sales, IP,
+    Durable Goods), Housing (Starts, New Sales, Existing Sales), Trade, Growth (GDP),
+    Policy (FOMC decision day).
 
-    limit: number of upcoming releases to return (default 20).
+    FOMC dates are sourced from fed.gov's calendar (decision day = day 2 of each
+    two-day meeting). Daily noise (SOFR, Coinbase, etc.) is filtered out.
+
+    days_ahead: forward window in days (default 14).
     Requires [fred] section in ~/.tradingrc.
     """
-    return (await _fred(ctx).get(fred.RELEASES, fred.GetReleasesRequest(limit))).to_output()
+    today = date.today()
+    today_iso = today.isoformat()
+    end_iso = (today + timedelta(days=days_ahead)).isoformat()
+    fred_client = _fred(ctx)
+    rows: list[tuple[str, str, str]] = []
+    for release_id, (category, name) in fred.MACRO_RELEASES.items():
+        resp = await fred_client.get(
+            fred.RELEASE_DATES,
+            fred.GetReleaseDatesRequest(
+                release_id=release_id,
+                realtime_start=today_iso,
+                realtime_end=end_iso,
+            ),
+        )
+        for d in resp.dates:
+            rows.append((d, category, name))
+    fomc = await _fed(ctx).get(fed.FOMC_CALENDAR, fed.EmptyRequest())
+    for d in fomc.meeting_dates:
+        if today_iso <= d <= end_iso:
+            rows.append((d, "Policy", "FOMC Decision"))
+    if not rows:
+        return "(no upcoming macro releases in window)"
+    rows.sort(key=lambda r: (r[0], r[1]))
+    return list_table(
+        [{"Date": d, "Category": cat, "Release": name} for d, cat, name in rows]
+    )

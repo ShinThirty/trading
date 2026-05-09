@@ -49,6 +49,39 @@ _STMT_LINK_RE = re.compile(
 )
 _STMT_DATE_RE = re.compile(r"monetary(\d{4})(\d{2})(\d{2})a\.htm")
 
+# Year section header on /monetarypolicy/fomccalendars.htm — e.g.
+# "<a id="42828"></a>2026 FOMC Meetings". Captures the year.
+_YEAR_HEADER_RE = re.compile(r"(\d{4})\s+FOMC\s+Meetings", re.IGNORECASE)
+# Footnote / metadata that appears after the date list in each year section
+# (e.g. "* Meeting associated with..." or "Note: A two-day meeting is
+# scheduled for January 25-26, 2028."). Strip these before scanning so the
+# footnote dates aren't misattributed to the current year.
+_YEAR_FOOTNOTE_RE = re.compile(r"\*\s*Meeting\s+associated|Note:\s*A\s+two-day", re.IGNORECASE)
+_MONTH_NAMES = (
+    "January|February|March|April|May|June|July|"
+    "August|September|October|November|December"
+)
+_MONTH_ABBR = "Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec"
+# Same-month meeting: "January 27-28" or "December 8-9*" — captures month
+# and the SECOND day (the decision/statement day).
+_MEETING_RE = re.compile(
+    rf"\b({_MONTH_NAMES})\s+\d{{1,2}}[-–](\d{{1,2}})\*?",
+    re.IGNORECASE,
+)
+# Cross-month meeting: "Jan/Feb 31-1" or "Apr/May 30-1*" — captures the
+# SECOND month and SECOND day (decision day in the later month).
+_MEETING_CROSS_RE = re.compile(
+    rf"\b(?:{_MONTH_ABBR})/({_MONTH_ABBR})\s+\d{{1,2}}[-–](\d{{1,2}})\*?",
+    re.IGNORECASE,
+)
+_MONTHS = {
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+    "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+    "january": 1, "february": 2, "march": 3, "april": 4, "june": 6,
+    "july": 7, "august": 8, "september": 9, "october": 10,
+    "november": 11, "december": 12,
+}
+
 
 def extract_meeting_date(path: str) -> str:
     """Parse YYYY-MM-DD out of a statement URL path."""
@@ -58,12 +91,50 @@ def extract_meeting_date(path: str) -> str:
     return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
 
 
+def parse_scheduled_meetings(html: str) -> list[str]:
+    """Extract scheduled FOMC meeting decision dates from the calendar page.
+
+    Returns YYYY-MM-DD strings using the SECOND day of each two-day meeting
+    (when the statement is released and the press conference happens). Includes
+    both past and future scheduled meetings — caller filters by date.
+    """
+    if not html:
+        return []
+    # Strip tags so the year header and "Month Day-Day" text sit adjacent.
+    text = re.sub(r"<[^>]+>", " ", html)
+    text = re.sub(r"\s+", " ", text)
+    # Split into per-year chunks. We walk year headers and slice between them.
+    headers = list(_YEAR_HEADER_RE.finditer(text))
+    dates: list[str] = []
+    for i, hdr in enumerate(headers):
+        year = int(hdr.group(1))
+        chunk_end = headers[i + 1].start() if i + 1 < len(headers) else len(text)
+        chunk = text[hdr.end() : chunk_end]
+        # Trim trailing footnotes ("* Meeting associated with...", "Note: A
+        # two-day meeting is scheduled for January 25-26, 2028.") so dates
+        # mentioned there aren't attributed to this year.
+        fn = _YEAR_FOOTNOTE_RE.search(chunk)
+        if fn:
+            chunk = chunk[: fn.start()]
+        for m in _MEETING_RE.finditer(chunk):
+            month = _MONTHS[m.group(1).lower()]
+            day = int(m.group(2))
+            dates.append(f"{year:04d}-{month:02d}-{day:02d}")
+        for m in _MEETING_CROSS_RE.finditer(chunk):
+            month = _MONTHS[m.group(1).lower()]
+            day = int(m.group(2))
+            dates.append(f"{year:04d}-{month:02d}-{day:02d}")
+    # De-dup while preserving order, then sort ascending.
+    return sorted(set(dates))
+
+
 @dataclass
 class FomcCalendarResponse:
-    """All FOMC statement URLs found on the calendar page, in document order
-    (which is newest-first on fed.gov)."""
+    """FOMC statement URLs (past meetings only, sorted newest-first) plus
+    scheduled meeting decision dates (past + future, chronological)."""
 
     statement_paths: list[str] = field(default_factory=list)
+    meeting_dates: list[str] = field(default_factory=list)
 
     @classmethod
     def from_response(cls, html: str) -> "FomcCalendarResponse":
@@ -81,7 +152,7 @@ class FomcCalendarResponse:
         # newest first. _STMT_DATE_RE is guaranteed to match (the link regex requires
         # 8 digits) so the key is always defined.
         paths.sort(key=lambda p: extract_meeting_date(p), reverse=True)
-        return cls(statement_paths=paths)
+        return cls(statement_paths=paths, meeting_dates=parse_scheduled_meetings(html))
 
     def latest(self) -> str | None:
         return self.statement_paths[0] if self.statement_paths else None

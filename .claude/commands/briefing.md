@@ -34,7 +34,7 @@ If all three flat/easing, note "✅ no divergence, curve normalizing" and skip. 
 
 ## Step 1b: Macro Print Reaction (release days only)
 
-Call `get_upcoming_economic_releases` (limit=10). If today doesn't match a **Tier-1 release** — Employment Situation (NFP), CPI, PCE, or FOMC decision — **skip this section entirely**.
+Call `get_upcoming_economic_releases`. The four prints with dedicated texture tools — exact `Release` column labels — are **`Employment Situation (NFP)`**, **`CPI`**, **`Personal Income and Outlays (PCE)`**, and **`FOMC Decision`**. Only these trigger Step 1b. If today's date matches none of them, **skip this section entirely** (but keep the tool output for Step 4's Watch list).
 
 On a **NFP day**, call `get_jobs_report_texture` — headline + industry mix + underneath (U-6, participation, hours, household-vs-establishment divergence, decimal-precision U-3) + intraday tape + the BLS press release narrative including revisions.
 
@@ -99,7 +99,7 @@ Present a short table: ticker, intent, IV Rank, next catalyst, action needed.
 Present a concise action items list:
 - **Urgent** (today): options expiring, rolls due, assignments
 - **This week**: approaching positions, pipeline entries ready for entry
-- **Watch**: regime shifts, upcoming earnings, IV changes
+- **Watch**: regime shifts, upcoming earnings, IV changes, **upcoming NFP/CPI/PCE/FOMC within 7 days** (from Step 1b's `get_upcoming_economic_releases` output) — defer new entries the day before
 
 No more than 10 items total. If nothing is actionable, say so — "all clear" is a valid briefing.
 
