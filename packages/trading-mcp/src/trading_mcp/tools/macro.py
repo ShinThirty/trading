@@ -494,6 +494,10 @@ async def get_cpi_report_texture(ctx: Context) -> str:
         out.append("(BLS CPI press release unavailable)")
 
     return "\n".join(out)
+
+
+@mcp.tool()
+async def get_market_regime(ctx: Context) -> str:
     """Get current market regime classification with a synthesized verdict.
 
     Aggregates Tradier (VIX quotes + history, SPY/IWM technicals, 11 SPDR
