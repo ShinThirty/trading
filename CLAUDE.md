@@ -58,6 +58,7 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │       ├── polymarket_client.py     # No auth (Polymarket gamma-api event/market data)
 │   │       ├── kalshi_client.py         # No auth (Kalshi elections-api event/market data)
 │   │       ├── tsmc_client.py           # No auth, identifies via User-Agent (TSMC IR monthly revenue)
+│   │       ├── beige_book_client.py     # No auth, identifies via User-Agent (Fed Beige Book)
 │   │       ├── sentiment_client.py      # Playwright-based scraper (CBOE p/c, AAII, NAAIM)
 │   │       └── endpoints/               # Typed request/response models + Endpoint defs
 │   │           ├── webull.py            # 11 endpoints (account, orders, instruments)
@@ -76,6 +77,7 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │           ├── polymarket.py        # 2 endpoints (event by slug, list events by tag) + shared models
 │   │           ├── kalshi.py            # 1 endpoint (event by ticker with nested markets)
 │   │           ├── tsmc.py              # 1 endpoint (consolidated monthly revenue by year)
+│   │           ├── beige_book.py        # 2 endpoints (release index, National Summary by period)
 │   │           ├── prediction_market.py # Shared PredictionEvent / PredictionOutcome types
 │   │           ├── sentiment.py         # 3 endpoints (CBOE equity p/c, AAII, NAAIM)
 │   │           └── yahoo.py             # Response models for Yahoo Finance (via yfinance)
@@ -107,6 +109,7 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │           ├── cftc.py              # CFTC COT positioning (single contract + extremes scan)
 │   │           ├── prediction_markets.py # Polymarket + Kalshi by-key fetcher and cross-source compare
 │   │           ├── tsmc.py              # TSMC monthly revenue (semi cycle leading indicator)
+│   │           ├── beige_book.py        # Fed Beige Book National Summary + 12 district highlights
 │   │           ├── backtest.py          # TastyTrade option strategy backtests
 │   │           ├── earnings.py          # Earnings call transcript (Fool) + press release (EDGAR 8-K)
 │   │           ├── signals.py           # Conviction, sizing, hedge, entry signals
@@ -201,7 +204,7 @@ EventBridge (cron, Mon-Fri 13:30-20:00 UTC)
 | **SEC EDGAR** | 8-K earnings press releases (Item 2.02 Exhibit 99.x) | None (User-Agent only) |
 | **BLS** | Employment Situation / CPI press release narrative | None (User-Agent only) |
 | **BEA** | Personal Income and Outlays (PCE) press release narrative | None (User-Agent only) |
-| **Federal Reserve** | FOMC statements (latest + prior for language diff) | None (User-Agent only) |
+| **Federal Reserve** | FOMC statements (latest + prior for language diff); Beige Book National Summary + 12 district highlights (8x/year, ~2 weeks pre-FOMC) | None (User-Agent only) |
 | **CFTC** | Commitments of Traders (COT) — speculator positioning across SPX, NDX, VIX, 10Y, Gold, WTI | None (Socrata JSON) |
 | **Polymarket** | Prediction-market implied probabilities (FOMC, elections, macro) — by event slug | None (gamma-api JSON) |
 | **Kalshi** | Prediction-market implied probabilities (CFTC-regulated US exchange) — by event ticker | None (elections-api JSON) |

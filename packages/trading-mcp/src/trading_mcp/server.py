@@ -5,6 +5,7 @@ from typing import Any
 from fastmcp import FastMCP
 from trading_clients.alphavantage_client import AlphaVantageClient
 from trading_clients.bea_client import BeaClient
+from trading_clients.beige_book_client import BeigeBookClient
 from trading_clients.bls_client import BlsClient
 from trading_clients.cftc_client import CftcClient
 from trading_clients.config import load_config
@@ -29,6 +30,7 @@ from trading_mcp.db.pipeline import init_schema as init_pipeline_schema
 from trading_mcp.db.rolls import init_schema as init_roll_schema
 from trading_mcp.tools.account import mcp as account_mcp
 from trading_mcp.tools.backtest import mcp as backtest_mcp
+from trading_mcp.tools.beige_book import mcp as beige_book_mcp
 from trading_mcp.tools.calendar import mcp as calendar_mcp
 from trading_mcp.tools.cftc import mcp as cftc_mcp
 from trading_mcp.tools.cn_market import mcp as cn_market_mcp
@@ -76,6 +78,7 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
     ctx["polymarket"] = PolymarketClient()
     ctx["kalshi"] = KalshiClient()
     ctx["tsmc"] = TsmcClient()
+    ctx["beige_book"] = BeigeBookClient()
     # Sentiment is optional — Playwright may fail to launch if the chromium
     # binary isn't installed. Server should keep running without it.
     sentiment = SentimentClient()
@@ -114,6 +117,7 @@ mcp.mount(cn_market_mcp)
 mcp.mount(cftc_mcp)
 mcp.mount(prediction_markets_mcp)
 mcp.mount(tsmc_mcp)
+mcp.mount(beige_book_mcp)
 mcp.mount(backtest_mcp)
 mcp.mount(earnings_mcp)
 mcp.mount(signals_mcp)

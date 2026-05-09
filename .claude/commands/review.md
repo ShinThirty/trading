@@ -55,14 +55,18 @@ Execute the structured biweekly trading review. Work through each section in ord
 
 1. Call `get_market_regime` — verdict + all dimensions (Vol/Trend/Breadth/Macro/Sectors/Credit/Tape/Sentiment/Positioning/Policy) + ⚠ flags. Also call `get_cot_extremes` for crowded positioning across SPX/NDX/VIX/10Y/Gold/WTI. If FOMC within 4 weeks, call `get_prediction_market` for what's priced.
 
-2. Call `get_btc_entry_signals` — present the composite score and recommended DCA rate:
+2. **Beige Book read.** Call `get_beige_book` (defaults to latest release). Surface period label + which Reserve Bank prepared it + cutoff date. Read the National Summary (Overall Activity / Labor Markets / Prices) and scan the 12 district highlights for divergence (e.g. Dallas energy strength vs San Francisco tech contraction). The Beige Book publishes 8x/year ~2 weeks before each FOMC — so the same release usually carries across 1-2 biweekly reviews. **Two checks:**
+   - **New release since last review?** If so, call `get_beige_book release=prior` and explicitly read the language delta. Fed staff make small but deliberate shifts ("modest growth" → "slight" → "flat" → "declining"). A tone shift in the National Summary often pre-prints the next FOMC's stance.
+   - **Same release as last review?** Skip the prior-release call. The Beige Book is qualitative context — re-reading the same paragraphs adds no new information. Note period token + move on.
+
+3. Call `get_btc_entry_signals` — present the composite score and recommended DCA rate:
    - 0.25x Strongly Unfavorable
    - 0.5x Unfavorable
    - 1x Mixed
    - 1.5x Favorable
    - 2x Strongly Favorable
 
-3. Assess:
+4. Assess:
    - Semi cycle thesis: any capex guidance changes? Phase timing still on track?
    - Sector rotation: who's leading, who's lagging?
    - Any macro shifts that affect CC expiry timing or coverage ratios?

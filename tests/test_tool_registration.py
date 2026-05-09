@@ -24,6 +24,9 @@ EXPECTED_TOOLS: dict[str, set[str]] = {
     "trading_mcp.tools.backtest": {
         "backtest_strategy",
     },
+    "trading_mcp.tools.beige_book": {
+        "get_beige_book",
+    },
     "trading_mcp.tools.calendar": {
         "get_earnings_calendar",
         "get_fmp_earnings_calendar",

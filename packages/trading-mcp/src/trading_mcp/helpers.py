@@ -7,6 +7,7 @@ from typing import Any
 from fastmcp import Context
 from trading_clients.alphavantage_client import AlphaVantageClient
 from trading_clients.bea_client import BeaClient
+from trading_clients.beige_book_client import BeigeBookClient
 from trading_clients.bls_client import BlsClient
 from trading_clients.cftc_client import CftcClient
 from trading_clients.edgar_client import EdgarClient
@@ -126,6 +127,10 @@ def _kalshi(ctx: Context) -> KalshiClient:
 
 def _tsmc(ctx: Context) -> TsmcClient:
     return ctx.lifespan_context["tsmc"]
+
+
+def _beige_book(ctx: Context) -> BeigeBookClient:
+    return ctx.lifespan_context["beige_book"]
 
 
 def _sentiment(ctx: Context) -> SentimentClient | None:
