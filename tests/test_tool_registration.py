@@ -159,6 +159,9 @@ EXPECTED_TOOLS: dict[str, set[str]] = {
         "calculate_hedge",
         "get_entry_signals",
     },
+    "trading_mcp.tools.tsmc": {
+        "get_tsmc_monthly_revenue",
+    },
 }
 
 

@@ -20,6 +20,7 @@ from trading_clients.reddit_client import RedditClient
 from trading_clients.sentiment_client import SentimentClient
 from trading_clients.tastytrade_client import TastyTradeClient
 from trading_clients.tradier_client import TradierClient
+from trading_clients.tsmc_client import TsmcClient
 from trading_clients.webull_client import WebullClient
 
 from trading_mcp.db import open_db
@@ -46,6 +47,7 @@ from trading_mcp.tools.quotes import mcp as quotes_mcp
 from trading_mcp.tools.rolls import mcp as rolls_mcp
 from trading_mcp.tools.screens import mcp as screens_mcp
 from trading_mcp.tools.signals import mcp as signals_mcp
+from trading_mcp.tools.tsmc import mcp as tsmc_mcp
 
 
 @asynccontextmanager
@@ -73,6 +75,7 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
     ctx["cftc"] = CftcClient()
     ctx["polymarket"] = PolymarketClient()
     ctx["kalshi"] = KalshiClient()
+    ctx["tsmc"] = TsmcClient()
     # Sentiment is optional — Playwright may fail to launch if the chromium
     # binary isn't installed. Server should keep running without it.
     sentiment = SentimentClient()
@@ -110,6 +113,7 @@ mcp.mount(crypto_mcp)
 mcp.mount(cn_market_mcp)
 mcp.mount(cftc_mcp)
 mcp.mount(prediction_markets_mcp)
+mcp.mount(tsmc_mcp)
 mcp.mount(backtest_mcp)
 mcp.mount(earnings_mcp)
 mcp.mount(signals_mcp)

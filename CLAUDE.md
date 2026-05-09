@@ -57,6 +57,7 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │       ├── cftc_client.py           # No auth (CFTC publicreporting Socrata JSON)
 │   │       ├── polymarket_client.py     # No auth (Polymarket gamma-api event/market data)
 │   │       ├── kalshi_client.py         # No auth (Kalshi elections-api event/market data)
+│   │       ├── tsmc_client.py           # No auth, identifies via User-Agent (TSMC IR monthly revenue)
 │   │       ├── sentiment_client.py      # Playwright-based scraper (CBOE p/c, AAII, NAAIM)
 │   │       └── endpoints/               # Typed request/response models + Endpoint defs
 │   │           ├── webull.py            # 11 endpoints (account, orders, instruments)
@@ -74,6 +75,7 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │           ├── cftc.py              # 3 endpoints (TFF / Disaggregated / Legacy COT reports)
 │   │           ├── polymarket.py        # 2 endpoints (event by slug, list events by tag) + shared models
 │   │           ├── kalshi.py            # 1 endpoint (event by ticker with nested markets)
+│   │           ├── tsmc.py              # 1 endpoint (consolidated monthly revenue by year)
 │   │           ├── prediction_market.py # Shared PredictionEvent / PredictionOutcome types
 │   │           ├── sentiment.py         # 3 endpoints (CBOE equity p/c, AAII, NAAIM)
 │   │           └── yahoo.py             # Response models for Yahoo Finance (via yfinance)
@@ -104,6 +106,7 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │           ├── cn_market.py         # China A-share quotes, financials, fund flow (AKShare)
 │   │           ├── cftc.py              # CFTC COT positioning (single contract + extremes scan)
 │   │           ├── prediction_markets.py # Polymarket + Kalshi by-key fetcher and cross-source compare
+│   │           ├── tsmc.py              # TSMC monthly revenue (semi cycle leading indicator)
 │   │           ├── backtest.py          # TastyTrade option strategy backtests
 │   │           ├── earnings.py          # Earnings call transcript (Fool) + press release (EDGAR 8-K)
 │   │           ├── signals.py           # Conviction, sizing, hedge, entry signals
@@ -202,6 +205,7 @@ EventBridge (cron, Mon-Fri 13:30-20:00 UTC)
 | **CFTC** | Commitments of Traders (COT) — speculator positioning across SPX, NDX, VIX, 10Y, Gold, WTI | None (Socrata JSON) |
 | **Polymarket** | Prediction-market implied probabilities (FOMC, elections, macro) — by event slug | None (gamma-api JSON) |
 | **Kalshi** | Prediction-market implied probabilities (CFTC-regulated US exchange) — by event ticker | None (elections-api JSON) |
+| **TSMC** | Consolidated monthly revenue (NT$M) — leading indicator for the global semi cycle, released ~10th of each month | None (User-Agent only) |
 | **CBOE** | Equity put/call ratio (daily) | None (Playwright, realistic browser context) |
 | **AAII** | Investor sentiment survey bull/neutral/bear (weekly) | None (Playwright, realistic browser context) |
 | **NAAIM** | Active manager equity exposure index (weekly) | None (Playwright, realistic browser context) |

@@ -22,6 +22,7 @@ from trading_clients.reddit_client import RedditClient
 from trading_clients.sentiment_client import SentimentClient
 from trading_clients.tastytrade_client import TastyTradeClient
 from trading_clients.tradier_client import TradierClient
+from trading_clients.tsmc_client import TsmcClient
 from trading_clients.webull_client import WebullClient
 
 
@@ -121,6 +122,10 @@ def _polymarket(ctx: Context) -> PolymarketClient:
 
 def _kalshi(ctx: Context) -> KalshiClient:
     return ctx.lifespan_context["kalshi"]
+
+
+def _tsmc(ctx: Context) -> TsmcClient:
+    return ctx.lifespan_context["tsmc"]
 
 
 def _sentiment(ctx: Context) -> SentimentClient | None:

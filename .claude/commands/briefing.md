@@ -53,6 +53,16 @@ On a **FOMC day**, call `get_fomc_decision_texture` AND `get_prediction_market s
 
 Surface the texture data — do NOT pre-bake interpretation. Note the divergences worth flagging (headline vs underneath, two surveys disagreeing, sector quality, revisions to prior months) and let the user make the judgment call together. If the print hasn't dropped yet, flag: "⏰ [Print name] at [time] ET today — defer new entries until post-print reaction" and continue to Step 2.
 
+## Step 1c: TSMC Monthly Revenue (release window only)
+
+TSMC publishes consolidated monthly revenue around the 10th of each month — a clean leading indicator for the global semi cycle (NVDA / AMD / AVGO / MRVL / ASML / AMAT all foundry-downstream). Trigger window: **today is between the 5th and 15th of the calendar month**. Outside that window, skip this section.
+
+In window, call `get_tsmc_monthly_revenue months=13`. Read the freshness line:
+- **✅ fresh print** (latest row = prior calendar month) → surface latest YoY + MoM and flag against the 12-month trajectory: a positive YoY surprise vs the prior 3-month run-rate is bullish for the semi tape (especially NVDA / AMD ahead of their reports); a negative surprise or YoY decel >5pp is a warning for any short-dated long-semi exposure.
+- **⏰ awaiting print** (latest row is older) → flag "⏰ TSMC monthly revenue release pending (typically ~10th ET morning) — defer new semi-tape entries until post-print" and continue.
+
+Do NOT pre-bake an interpretation. Surface the table; let the user judge whether a single print marks acceleration vs noise. Cross-reference active semi positions and pipeline names from Step 2 / Step 3.
+
 ## Step 2: Position Alerts
 
 1. Ask the user if they have fresh Fidelity CSVs to include (exported from Fidelity Positions page to ~/Downloads/fidelity). Call `get_portfolio_summary` with `fidelity_folder` if provided, otherwise Webull-only.
