@@ -32,6 +32,11 @@ Also call `get_quote USO,USL,BNO,VIX` and `get_tradier_history USO` (last 10 day
 
 If all three flat/easing, note "✅ no divergence, curve normalizing" and skip. If any firing, surface the table briefly. Don't expand unless active.
 
+4. **Speculator positioning (only when #1 or #2 is firing)**: Call `get_cot_positioning contract=WTI`. Read the 52w z-score:
+   - **Crowded Long** (z > +1.5): late-cycle rally — supply tightness already in price, positioning stretched. Fade strength.
+   - **Crowded Short** (z < -1.5): squeeze fuel — physical tightness + short positioning is an explosive setup.
+   - **Mixed/Neutral**: divergence is what price says, no positioning amplification.
+
 ## Step 1b: Macro Print Reaction (release days only)
 
 Call `get_upcoming_economic_releases`. The five prints with dedicated texture tools — exact `Release` column labels — are **`Employment Situation (NFP)`**, **`CPI`**, **`Personal Income and Outlays (PCE)`**, **`GDP`**, and **`FOMC Decision`**. Only these trigger Step 1b. If today's date matches none of them, **skip this section entirely** (but keep the tool output for Step 4's Watch list).
@@ -44,7 +49,7 @@ On a **PCE day**, call `get_pce_report_texture` — headline PCE + core + true s
 
 On a **GDP day** (advance / second / third estimate), call `get_gdp_report_texture` — headline (real GDP %chg SAAR + nominal + deflator + final sales to private domestic purchasers as the "core" GDP measure) + composition (pp contributions for PCE / investment / inventory swing / net exports / government, summing to real GDP %chg) + components (real %chg SAAR for PCE, GPDI with residential/nonresidential/equipment, exports, imports, government federal vs state & local) + tape (incl TIP) + BEA press release narrative. The inventory and net-trade contributions are the most common sources of "headline-misleads" GDP prints — eyeball those before the headline.
 
-On a **FOMC day**, call `get_fomc_decision_texture` — headline (latest meeting + target range + effective fed funds) + policy rates (DFEDTARU/L, DFF, IORB, ON RRP, balance sheet with 1-month QT pace) + tape + the latest FOMC statement AND the prior meeting's statement so language deltas are inspectable in one pass.
+On a **FOMC day**, call `get_fomc_decision_texture` AND `get_prediction_market source=polymarket key=<next-fomc-event-slug>` in parallel. Texture gives the actual decision + statement language delta; Polymarket gives the full pre-decision outcome distribution (slug surfaced by Step 1's regime Policy dimension). Read the surprise: actual outcome vs what was priced. A 5bp gap between consensus and delivery moves the tape harder than the absolute decision.
 
 Surface the texture data — do NOT pre-bake interpretation. Note the divergences worth flagging (headline vs underneath, two surveys disagreeing, sector quality, revisions to prior months) and let the user make the judgment call together. If the print hasn't dropped yet, flag: "⏰ [Print name] at [time] ET today — defer new entries until post-print reaction" and continue to Step 2.
 
