@@ -504,6 +504,51 @@ def detect_credit_trap(
     return None
 
 
+def classify_extended(
+    rsi: float | None,
+    sector_closes: dict[str, list[float]],
+    spy_closes: list[float],
+    rsi_threshold: float = 70.0,
+    dispersion_threshold: float = 25.0,
+    spy_5d_threshold: float = 3.0,
+    sector_lookback: int = 30,
+) -> tuple[bool, str]:
+    """Detect 'Extended' Expansion sub-state.
+
+    Companion to classify_tape_speed: that catches *crash* speed
+    (-5% SPY in 5d); this catches *grinding-up* speed where mean-reversion
+    risk is rising while the verdict still reads Expansion.
+
+    Three signals; flag activates when 2+ fire:
+    - RSI > 70 (overbought)
+    - Sector dispersion > 25pp top-vs-bottom over 30d (crowded leadership)
+    - SPY 5d return > +3% (parabolic tape)
+
+    Returns (is_extended, detail_string listing fired signals).
+    """
+    fired: list[str] = []
+
+    if rsi is not None and rsi > rsi_threshold:
+        fired.append(f"RSI {rsi:.0f}")
+
+    sector_returns = [
+        r
+        for r in (_pct_return(c, sector_lookback) for c in sector_closes.values())
+        if r is not None
+    ]
+    if len(sector_returns) >= 6:
+        dispersion = max(sector_returns) - min(sector_returns)
+        if dispersion > dispersion_threshold:
+            fired.append(f"sector spread {dispersion:.0f}pp")
+
+    spy_5d = _pct_return(spy_closes, 5)
+    if spy_5d is not None and spy_5d > spy_5d_threshold:
+        fired.append(f"SPY 5d {spy_5d:+.1f}%")
+
+    is_extended = len(fired) >= 2
+    return is_extended, ", ".join(fired)
+
+
 def classify_tape_speed(
     spy_closes: list[float],
     vix_closes: list[float],

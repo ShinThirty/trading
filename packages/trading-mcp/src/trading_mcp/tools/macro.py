@@ -294,6 +294,7 @@ async def get_jobs_report_texture(ctx: Context) -> str:
     # Underneath
     out.append("")
     out.append("=== Underneath (latest, prior in parens) ===")
+
     def _fmt_pct(sid: str, label: str) -> None:
         cur = _latest(obs_by_id.get(sid, []))
         prv = _prior(obs_by_id.get(sid, []))
@@ -522,6 +523,9 @@ async def get_market_regime(ctx: Context) -> str:
     - Volatility, Trend, Breadth, Macro, Sectors (existing)
     - Credit: Widening / Stable / Tightening (HY OAS 5-day delta)
     - Tape Speed: Fast / Normal (SPY 5d return + VIX 5d %change)
+    - ⚠ Extended (verdict=Expansion only): fires when 2+ of RSI>70,
+      sector dispersion>25pp 30d, SPY 5d>+3% — mean-reversion warning,
+      not a verdict change
 
     Requires [fred] and [tradier] sections in ~/.tradingrc.
     TastyTrade is optional enrichment.
@@ -598,12 +602,14 @@ async def get_market_regime(ctx: Context) -> str:
 
     spy_closes = closes.get("SPY", [])
     spy_volumes = volumes.get("SPY", [])
+    spy_rsi: float | None = None
     if spy_closes:
         price = spy_closes[-1]
         rsi_vals = ta.rsi(spy_closes)
         sma50_vals = ta.sma(spy_closes, 50)
         sma200_vals = ta.sma(spy_closes, 200)
-        label, detail = regime.classify_trend(price, rsi_vals[-1], sma50_vals[-1], sma200_vals[-1])
+        spy_rsi = rsi_vals[-1]
+        label, detail = regime.classify_trend(price, spy_rsi, sma50_vals[-1], sma200_vals[-1])
         labels["trend"] = label
         data["Trend"] = f"{label} ({detail})"
 
@@ -706,6 +712,11 @@ async def get_market_regime(ctx: Context) -> str:
         warnings,
     )
 
+    if verdict == "Expansion" and spy_closes:
+        is_extended, ext_detail = regime.classify_extended(spy_rsi, sector_closes, spy_closes)
+        if is_extended:
+            data["⚠ Extended"] = f"{ext_detail} — size down new entries"
+
     return f"## Market Regime\n\n**Verdict: {verdict}**  \n*Why: {evidence}*\n\n{kv_table(data)}"
 
 
@@ -734,9 +745,7 @@ async def _bea_pce_release(
         warnings.append("BEA current-releases: no Personal Income and Outlays link found")
         return None, warnings
     try:
-        resp = await bea_client.get(
-            bea.PCE_RELEASE, bea.ReleasePathRequest(idx.pce_release_path)
-        )
+        resp = await bea_client.get(bea.PCE_RELEASE, bea.ReleasePathRequest(idx.pce_release_path))
         return resp, warnings
     except Exception as e:
         warnings.append(_exc_summary(f"BEA PCE release {idx.pce_release_path}", e))
@@ -945,9 +954,7 @@ async def _bea_gdp_release(
         warnings.append("BEA current-releases: no GDP release link found")
         return None, warnings
     try:
-        resp = await bea_client.get(
-            bea.GDP_RELEASE, bea.ReleasePathRequest(idx.gdp_release_path)
-        )
+        resp = await bea_client.get(bea.GDP_RELEASE, bea.ReleasePathRequest(idx.gdp_release_path))
         return resp, warnings
     except Exception as e:
         warnings.append(_exc_summary(f"BEA GDP release {idx.gdp_release_path}", e))
@@ -1111,9 +1118,7 @@ async def _fed_statements(
         return cal, None, None, warnings
     fetches = [fed_client.get(fed.FOMC_STATEMENT, fed.StatementPathRequest(latest_path))]
     if prior_path:
-        fetches.append(
-            fed_client.get(fed.FOMC_STATEMENT, fed.StatementPathRequest(prior_path))
-        )
+        fetches.append(fed_client.get(fed.FOMC_STATEMENT, fed.StatementPathRequest(prior_path)))
     results = await asyncio.gather(*fetches, return_exceptions=True)
     latest: fed.FomcStatementResponse | None = None
     if isinstance(results[0], BaseException):
