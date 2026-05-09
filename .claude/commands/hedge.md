@@ -30,7 +30,7 @@ Call in parallel:
 - `get_tradier_history VIX` (60+ days, to read recent spike high)
 - `get_tradier_history SPY` (60+ days, to read drawdown from recent high)
 - `get_quote` on each put contract with `greeks=True` — read current delta
-- `get_market_regime` — verdict (when available) + dimensional labels for context
+- `get_market_regime` — verdict + dimensional labels (incl Sentiment/Positioning/Policy extremes) for informational context only
 
 Compute:
 

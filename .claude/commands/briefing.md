@@ -10,7 +10,7 @@ Call `decision_list` to check for any PENDING decisions from prior briefings or 
 
 ## Step 1: Market Regime
 
-Call `get_market_regime`. Present the 5 regime labels (volatility, trend, breadth, macro, sectors) in a single row table. Below the table, note any regime shifts that affect strategy preferences (e.g., "Elevated vol = widen CSP strikes" or "Risk-Off = hedge window").
+Call `get_market_regime`. Surface the verdict + dimensional labels (Volatility, Trend, Breadth, Macro, Sectors, Credit, Tape Speed, Sentiment, Positioning, Policy) and any ⚠ Extended / ⚠ Sentiment flags. Note shifts that affect strategy (e.g., "Crowded Long = fade strength", "Cut Bias priced = benchmark rate-sensitive bets vs consensus").
 
 ### Commodity Divergence Check
 

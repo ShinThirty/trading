@@ -38,7 +38,7 @@ Run the complete post-screening decision framework for **$ARGUMENTS.symbol**. Ex
 
 ## Step 2: Read the Signals
 
-1. Call `get_market_regime` to get the macro context (volatility, trend, macro, sectors).
+1. Call `get_market_regime` for full macro context (Vol/Trend/Breadth/Macro/Sectors/Credit/Tape/Sentiment/Positioning/Policy + ⚠ Extended/Sentiment). For commodity-linked names, also call `get_cot_positioning` on the relevant contract. For event-driven names (FOMC-sensitive, election, FDA, M&A), call `get_prediction_market` for what's priced.
 
 2. Cross-reference the market regime with the stock-level signals from Step 1. Note:
    - IV environment: Is IV Rank high (>50%, sell premium) or low (<30%, buy premium)?

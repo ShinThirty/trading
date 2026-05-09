@@ -53,7 +53,7 @@ Execute the structured biweekly trading review. Work through each section in ord
 
 ## 4. MACRO & THESIS CHECK
 
-1. Call `get_market_regime` — present all four dimensions (volatility, trend, macro, sectors).
+1. Call `get_market_regime` — verdict + all dimensions (Vol/Trend/Breadth/Macro/Sectors/Credit/Tape/Sentiment/Positioning/Policy) + ⚠ flags. Also call `get_cot_extremes` for crowded positioning across SPX/NDX/VIX/10Y/Gold/WTI. If FOMC within 4 weeks, call `get_prediction_market` for what's priced.
 
 2. Call `get_btc_entry_signals` — present the composite score and recommended DCA rate:
    - 0.25x Strongly Unfavorable
