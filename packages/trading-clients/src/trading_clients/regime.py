@@ -659,6 +659,73 @@ def classify_sentiment(
     return label, f"{', '.join(parts)} ({coverage})"
 
 
+def classify_positioning(
+    contract_zs: dict[str, float | None],
+    extreme_threshold: float = 1.5,
+) -> tuple[str, str]:
+    """Classify CFTC COT speculator positioning across a curated contract set.
+
+    Each entry is the latest 52-week z-score on net spec positioning for a
+    contract (SPX, NDX, VIX, 10Y, Gold, WTI). Extremes are contrarian signals:
+    crowded long = vulnerable to a flush; crowded short = squeeze risk.
+
+    Threshold: |z| >= 1.5 counts as an extreme.
+
+    Five-tier output:
+    - Crowded Long: 2+ contracts at z >= 2.0 (strong bearish-forward signal)
+    - Stretched Long: 1+ extremes, all long-tilted
+    - Crowded Short: 2+ contracts at z <= -2.0 (strong bullish-forward signal)
+    - Stretched Short: 1+ extremes, all short-tilted
+    - Mixed: long AND short extremes simultaneously
+    - Neutral: no extremes (or insufficient data)
+
+    Returns (label, detail_string).
+    """
+    available = {k: v for k, v in contract_zs.items() if v is not None}
+    if not available:
+        return "Unknown", "no COT data"
+
+    long_extreme: list[tuple[str, float]] = []
+    short_extreme: list[tuple[str, float]] = []
+    for k, z in available.items():
+        if z >= extreme_threshold:
+            long_extreme.append((k, z))
+        elif z <= -extreme_threshold:
+            short_extreme.append((k, z))
+
+    crowded_long = sum(1 for _, z in long_extreme if z >= 2.0)
+    crowded_short = sum(1 for _, z in short_extreme if z <= -2.0)
+
+    detail_parts: list[str] = []
+    if long_extreme:
+        detail_parts.append("long: " + ", ".join(f"{k} {z:+.2f}" for k, z in long_extreme))
+    if short_extreme:
+        detail_parts.append("short: " + ", ".join(f"{k} {z:+.2f}" for k, z in short_extreme))
+    detail = (
+        "; ".join(detail_parts)
+        if detail_parts
+        else (
+            f"all neutral ({len(available)}/6 contracts, max |z| "
+            f"{max(abs(z) for z in available.values()):.2f})"
+        )
+    )
+
+    if long_extreme and short_extreme:
+        label = "Mixed"
+    elif crowded_long >= 2:
+        label = "Crowded Long"
+    elif long_extreme:
+        label = "Stretched Long"
+    elif crowded_short >= 2:
+        label = "Crowded Short"
+    elif short_extreme:
+        label = "Stretched Short"
+    else:
+        label = "Neutral"
+
+    return label, detail
+
+
 def synthesize_verdict(
     volatility: str | None,
     trend: str | None,

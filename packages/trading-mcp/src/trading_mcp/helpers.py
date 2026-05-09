@@ -8,6 +8,7 @@ from fastmcp import Context
 from trading_clients.alphavantage_client import AlphaVantageClient
 from trading_clients.bea_client import BeaClient
 from trading_clients.bls_client import BlsClient
+from trading_clients.cftc_client import CftcClient
 from trading_clients.edgar_client import EdgarClient
 from trading_clients.endpoints import tradier as t
 from trading_clients.fed_client import FedClient
@@ -106,6 +107,10 @@ def _bea(ctx: Context) -> BeaClient:
 
 def _fed(ctx: Context) -> FedClient:
     return ctx.lifespan_context["fed"]
+
+
+def _cftc(ctx: Context) -> CftcClient:
+    return ctx.lifespan_context["cftc"]
 
 
 def _sentiment(ctx: Context) -> SentimentClient | None:

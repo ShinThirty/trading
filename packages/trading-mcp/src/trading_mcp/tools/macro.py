@@ -6,7 +6,7 @@ from datetime import date
 from fastmcp import Context, FastMCP
 from trading_clients import indicators as ta
 from trading_clients import regime
-from trading_clients.endpoints import bea, bls, fed, fmp, fred, sentiment
+from trading_clients.endpoints import bea, bls, cftc, fed, fmp, fred, sentiment
 from trading_clients.endpoints import tastytrade as tt
 from trading_clients.endpoints import tradier as t
 from trading_clients.table_helpers import kv_table
@@ -14,6 +14,7 @@ from trading_clients.table_helpers import kv_table
 from trading_mcp.helpers import (
     _bea,
     _bls,
+    _cftc,
     _exc_summary,
     _fed,
     _fmp,
@@ -527,6 +528,9 @@ async def get_market_regime(ctx: Context) -> str:
     - Sentiment: Capitulation / Fearful / Neutral / Stretched / Greedy
       (CBOE equity p/c + NAAIM exposure + AAII bull-bear, contrarian polarity).
       Optional — only present when Playwright launched successfully.
+    - Positioning: Crowded/Stretched Long / Mixed / Crowded/Stretched Short / Neutral
+      (CFTC COT 52w z-score across SPX, NDX, VIX, 10Y, Gold, WTI; contrarian
+      polarity — crowded long = bearish-forward, crowded short = squeeze risk).
     - ⚠ Extended (verdict=Expansion only): fires when 2+ of RSI>70,
       sector dispersion>25pp 30d, SPY 5d>+3% — mean-reversion warning,
       not a verdict change
@@ -540,6 +544,7 @@ async def get_market_regime(ctx: Context) -> str:
     tradier = _tradier(ctx)
     tt_client = ctx.lifespan_context.get("tastytrade")
     sentiment_client = _sentiment(ctx)
+    cftc_client = _cftc(ctx)
 
     start = _year_ago(date.today()).isoformat()
     tasks: list = [
@@ -569,6 +574,12 @@ async def get_market_regime(ctx: Context) -> str:
         tasks.append(sentiment_client.get(sentiment.AAII_SENTIMENT, sentiment.EmptyRequest()))
         naaim_idx = len(tasks)
         tasks.append(sentiment_client.get(sentiment.NAAIM_EXPOSURE, sentiment.EmptyRequest()))
+
+    cftc_keys = list(cftc.CONTRACTS.keys())
+    cftc_offset = len(tasks)
+    for key in cftc_keys:
+        report_key, pattern, _ = cftc.CONTRACTS[key]
+        tasks.append(cftc_client.get(cftc.REPORTS[report_key], cftc.GetCotRequest(pattern)))
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -603,6 +614,7 @@ async def get_market_regime(ctx: Context) -> str:
         "credit": None,
         "speed": None,
         "sentiment": None,
+        "positioning": None,
     }
 
     vix_val: float | None = None
@@ -718,6 +730,23 @@ async def get_market_regime(ctx: Context) -> str:
                 else "capitulation tilt, bullish for forward returns"
             )
             data["⚠ Sentiment"] = f"{label} sentiment — strong contrarian signal ({note})"
+
+    # Positioning (CFTC COT — 6 contracts)
+    contract_zs: dict[str, float | None] = {}
+    for i, key in enumerate(cftc_keys):
+        cot_resp = _ok(cftc_offset + i)
+        contract_zs[key] = cot_resp.z_score if cot_resp is not None else None
+    if any(z is not None for z in contract_zs.values()):
+        label, detail = regime.classify_positioning(contract_zs)
+        labels["positioning"] = label
+        data["Positioning"] = f"{label} ({detail})"
+        if label in ("Crowded Long", "Crowded Short"):
+            note = (
+                "specs heavily long, bearish-forward fade signal"
+                if label == "Crowded Long"
+                else "specs heavily short, squeeze risk / bullish-forward"
+            )
+            data["⚠ Positioning"] = f"{label} — strong contrarian signal ({note})"
 
     tt_resp = _ok(tt_idx) if tt_idx is not None else None
     if tt_resp and tt_resp.items:

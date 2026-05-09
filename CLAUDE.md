@@ -54,6 +54,7 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │       ├── bls_client.py            # No auth, identifies via User-Agent (BLS press releases)
 │   │       ├── bea_client.py            # No auth, identifies via User-Agent (BEA press releases)
 │   │       ├── fed_client.py            # No auth, identifies via User-Agent (FOMC statements)
+│   │       ├── cftc_client.py           # No auth (CFTC publicreporting Socrata JSON)
 │   │       ├── sentiment_client.py      # Playwright-based scraper (CBOE p/c, AAII, NAAIM)
 │   │       └── endpoints/               # Typed request/response models + Endpoint defs
 │   │           ├── webull.py            # 11 endpoints (account, orders, instruments)
@@ -68,6 +69,7 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │           ├── bls.py               # 2 endpoints (Employment Situation, CPI press releases)
 │   │           ├── bea.py               # 2 endpoints (current releases index, PCE press release)
 │   │           ├── fed.py               # 2 endpoints (FOMC calendar, FOMC statement)
+│   │           ├── cftc.py              # 3 endpoints (TFF / Disaggregated / Legacy COT reports)
 │   │           ├── sentiment.py         # 3 endpoints (CBOE equity p/c, AAII, NAAIM)
 │   │           └── yahoo.py             # Response models for Yahoo Finance (via yfinance)
 │   ├── trading-mcp/                     # MCP server (composed via fastmcp mount)
@@ -95,6 +97,7 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │           ├── screens.py           # Yahoo screens, top movers, watchlists, short stats
 │   │           ├── crypto.py            # Crypto quotes/history, BTC entry signals
 │   │           ├── cn_market.py         # China A-share quotes, financials, fund flow (AKShare)
+│   │           ├── cftc.py              # CFTC COT positioning (single contract + extremes scan)
 │   │           ├── backtest.py          # TastyTrade option strategy backtests
 │   │           ├── earnings.py          # Earnings call transcript (Fool) + press release (EDGAR 8-K)
 │   │           ├── signals.py           # Conviction, sizing, hedge, entry signals
@@ -190,6 +193,7 @@ EventBridge (cron, Mon-Fri 13:30-20:00 UTC)
 | **BLS** | Employment Situation / CPI press release narrative | None (User-Agent only) |
 | **BEA** | Personal Income and Outlays (PCE) press release narrative | None (User-Agent only) |
 | **Federal Reserve** | FOMC statements (latest + prior for language diff) | None (User-Agent only) |
+| **CFTC** | Commitments of Traders (COT) — speculator positioning across SPX, NDX, VIX, 10Y, Gold, WTI | None (Socrata JSON) |
 | **CBOE** | Equity put/call ratio (daily) | None (Playwright, realistic browser context) |
 | **AAII** | Investor sentiment survey bull/neutral/bear (weekly) | None (Playwright, realistic browser context) |
 | **NAAIM** | Active manager equity exposure index (weekly) | None (Playwright, realistic browser context) |
