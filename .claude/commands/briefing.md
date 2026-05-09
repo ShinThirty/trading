@@ -63,6 +63,27 @@ In window, call `get_tsmc_monthly_revenue months=13`. Read the freshness line:
 
 Do NOT pre-bake an interpretation. Surface the table; let the user judge whether a single print marks acceleration vs noise. Cross-reference active semi positions and pipeline names from Step 2 / Step 3.
 
+## Step 1d: DIX / GEX Triggers (conditional)
+
+Call `get_dix_gex` daily — SqueezeMetrics' dark-pool flow (DIX) + dealer gamma (GEX). Most days nothing actionable changes; **surface this section ONLY if at least one trigger below fires**, otherwise skip entirely. Do NOT surface "no triggers" / "all clear" — silence is the signal.
+
+Triggers (read from tool output):
+
+1. **GEX sign flip vs prior trading day** (compare last two rows of 10-day trend table)
+   - Positive → negative: surface "🔴 GEX flipped negative ($prior → $current). Realized vol now amplifies flow — sell-offs and squeezes both more violent. Hedges become reactive, not preemptive."
+   - Negative → positive: surface "🟢 GEX flipped positive ($prior → $current). Vol-suppression returns — short-vol structures more attractive again."
+
+2. **GEX 1m percentile ≥95 or ≤5** (read "1m" row, "GEX %ile" column from percentile context table)
+   - ≥95: surface "🟢 GEX 1m %ile [N] — extreme dealer suppression. Cheap-hedge window if under-hedged; CC premium thin (low write attractiveness)."
+   - ≤5: surface "🔴 GEX 1m %ile [N] — extreme dealer amplification. Avoid new long-delta; prefer defined-risk structures."
+
+3. **DIX single-day move ≥0.03 in absolute value** (compare last two rows of 10-day trend table)
+   - Surface "⚠ DIX moved [signed delta] in one session ([prior] → [current]). 1m %ile now [N]th — [distribution into strength / accumulation into weakness / large institutional flow shift] potentially active."
+
+4. **Divergence flag fires** (tool prints "⚠ Bullish/Bearish divergence" line if active — surface verbatim)
+
+If multiple triggers fire (often correlated), surface all relevant lines. Cross-reference firing triggers with Step 1's regime call (Vol/Tape/Sentiment dimensions) and any vol-sensitive positions in Step 2 — the interaction matters more than the trigger in isolation. Full overlay (regime cell, percentile table, source caveats) lives in the biweekly review; daily is alert-only.
+
 ## Step 2: Position Alerts
 
 1. Ask the user if they have fresh Fidelity CSVs to include (exported from Fidelity Positions page to ~/Downloads/fidelity). Call `get_portfolio_summary` with `fidelity_folder` if provided, otherwise Webull-only.
