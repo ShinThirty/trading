@@ -21,6 +21,7 @@ from trading_clients.kalshi_client import KalshiClient
 from trading_clients.polymarket_client import PolymarketClient
 from trading_clients.reddit_client import RedditClient
 from trading_clients.sentiment_client import SentimentClient
+from trading_clients.squeeze_metrics_client import SqueezeMetricsClient
 from trading_clients.tastytrade_client import TastyTradeClient
 from trading_clients.tradier_client import TradierClient
 from trading_clients.tsmc_client import TsmcClient
@@ -131,6 +132,10 @@ def _tsmc(ctx: Context) -> TsmcClient:
 
 def _beige_book(ctx: Context) -> BeigeBookClient:
     return ctx.lifespan_context["beige_book"]
+
+
+def _squeeze_metrics(ctx: Context) -> SqueezeMetricsClient:
+    return ctx.lifespan_context["squeeze_metrics"]
 
 
 def _sentiment(ctx: Context) -> SentimentClient | None:

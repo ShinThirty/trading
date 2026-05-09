@@ -19,6 +19,7 @@ from trading_clients.kalshi_client import KalshiClient
 from trading_clients.polymarket_client import PolymarketClient
 from trading_clients.reddit_client import RedditClient
 from trading_clients.sentiment_client import SentimentClient
+from trading_clients.squeeze_metrics_client import SqueezeMetricsClient
 from trading_clients.tastytrade_client import TastyTradeClient
 from trading_clients.tradier_client import TradierClient
 from trading_clients.tsmc_client import TsmcClient
@@ -49,6 +50,7 @@ from trading_mcp.tools.quotes import mcp as quotes_mcp
 from trading_mcp.tools.rolls import mcp as rolls_mcp
 from trading_mcp.tools.screens import mcp as screens_mcp
 from trading_mcp.tools.signals import mcp as signals_mcp
+from trading_mcp.tools.squeeze_metrics import mcp as squeeze_metrics_mcp
 from trading_mcp.tools.tsmc import mcp as tsmc_mcp
 
 
@@ -79,6 +81,7 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
     ctx["kalshi"] = KalshiClient()
     ctx["tsmc"] = TsmcClient()
     ctx["beige_book"] = BeigeBookClient()
+    ctx["squeeze_metrics"] = SqueezeMetricsClient()
     # Sentiment is optional — Playwright may fail to launch if the chromium
     # binary isn't installed. Server should keep running without it.
     sentiment = SentimentClient()
@@ -118,6 +121,7 @@ mcp.mount(cftc_mcp)
 mcp.mount(prediction_markets_mcp)
 mcp.mount(tsmc_mcp)
 mcp.mount(beige_book_mcp)
+mcp.mount(squeeze_metrics_mcp)
 mcp.mount(backtest_mcp)
 mcp.mount(earnings_mcp)
 mcp.mount(signals_mcp)
