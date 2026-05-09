@@ -6,7 +6,7 @@ from datetime import date
 from fastmcp import Context, FastMCP
 from trading_clients import indicators as ta
 from trading_clients import regime
-from trading_clients.endpoints import bea, bls, fed, fmp, fred
+from trading_clients.endpoints import bea, bls, fed, fmp, fred, sentiment
 from trading_clients.endpoints import tastytrade as tt
 from trading_clients.endpoints import tradier as t
 from trading_clients.table_helpers import kv_table
@@ -18,6 +18,7 @@ from trading_mcp.helpers import (
     _fed,
     _fmp,
     _fred,
+    _sentiment,
     _tradier,
     _year_ago,
 )
@@ -523,16 +524,22 @@ async def get_market_regime(ctx: Context) -> str:
     - Volatility, Trend, Breadth, Macro, Sectors (existing)
     - Credit: Widening / Stable / Tightening (HY OAS 5-day delta)
     - Tape Speed: Fast / Normal (SPY 5d return + VIX 5d %change)
+    - Sentiment: Capitulation / Fearful / Neutral / Stretched / Greedy
+      (CBOE equity p/c + NAAIM exposure + AAII bull-bear, contrarian polarity).
+      Optional — only present when Playwright launched successfully.
     - ⚠ Extended (verdict=Expansion only): fires when 2+ of RSI>70,
       sector dispersion>25pp 30d, SPY 5d>+3% — mean-reversion warning,
       not a verdict change
+    - ⚠ Sentiment: fires when sentiment hits Greedy or Capitulation —
+      strong contrarian signal worth flagging next to the verdict
 
     Requires [fred] and [tradier] sections in ~/.tradingrc.
-    TastyTrade is optional enrichment.
+    TastyTrade and sentiment are optional enrichment.
     """
     fred_client = _fred(ctx)
     tradier = _tradier(ctx)
     tt_client = ctx.lifespan_context.get("tastytrade")
+    sentiment_client = _sentiment(ctx)
 
     start = _year_ago(date.today()).isoformat()
     tasks: list = [
@@ -551,6 +558,17 @@ async def get_market_regime(ctx: Context) -> str:
     if tt_client:
         tt_idx = len(tasks)
         tasks.append(tt_client.get(tt.MARKET_METRICS, tt.MarketMetricsRequest("SPY")))
+
+    cboe_idx: int | None = None
+    aaii_idx: int | None = None
+    naaim_idx: int | None = None
+    if sentiment_client is not None:
+        cboe_idx = len(tasks)
+        tasks.append(sentiment_client.get(sentiment.CBOE_EQUITY_PC, sentiment.EmptyRequest()))
+        aaii_idx = len(tasks)
+        tasks.append(sentiment_client.get(sentiment.AAII_SENTIMENT, sentiment.EmptyRequest()))
+        naaim_idx = len(tasks)
+        tasks.append(sentiment_client.get(sentiment.NAAIM_EXPOSURE, sentiment.EmptyRequest()))
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -584,6 +602,7 @@ async def get_market_regime(ctx: Context) -> str:
         "sectors": None,
         "credit": None,
         "speed": None,
+        "sentiment": None,
     }
 
     vix_val: float | None = None
@@ -680,6 +699,25 @@ async def get_market_regime(ctx: Context) -> str:
         label, detail = regime.classify_tape_speed(spy_closes, vix_closes)
         labels["speed"] = label
         data["Tape Speed"] = f"{label} ({detail})"
+
+    # Sentiment (optional — Playwright may not be available)
+    cboe_resp = _ok(cboe_idx) if cboe_idx is not None else None
+    aaii_resp = _ok(aaii_idx) if aaii_idx is not None else None
+    naaim_resp = _ok(naaim_idx) if naaim_idx is not None else None
+    cboe_pc = cboe_resp.value if cboe_resp is not None else None
+    naaim_val = naaim_resp.value if naaim_resp is not None else None
+    aaii_spread_val = aaii_resp.spread if aaii_resp is not None else None
+    if any(v is not None for v in (cboe_pc, naaim_val, aaii_spread_val)):
+        label, detail = regime.classify_sentiment(cboe_pc, naaim_val, aaii_spread_val)
+        labels["sentiment"] = label
+        data["Sentiment"] = f"{label} ({detail})"
+        if label in ("Greedy", "Capitulation"):
+            note = (
+                "crowded long, bearish for forward returns"
+                if label == "Greedy"
+                else "capitulation tilt, bullish for forward returns"
+            )
+            data["⚠ Sentiment"] = f"{label} sentiment — strong contrarian signal ({note})"
 
     tt_resp = _ok(tt_idx) if tt_idx is not None else None
     if tt_resp and tt_resp.items:

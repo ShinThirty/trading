@@ -9,6 +9,7 @@ dependencies = [
     "yfinance>=1.2",
     "youtube-transcript-api>=1.2.4",
     "akshare>=1.18.56",
+    "playwright>=1.48",
 ]
 
 [project.scripts]

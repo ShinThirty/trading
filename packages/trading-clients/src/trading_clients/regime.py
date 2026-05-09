@@ -589,6 +589,76 @@ def classify_tape_speed(
     return label, ", ".join(parts)
 
 
+def classify_sentiment(
+    cboe_equity_pc: float | None,
+    naaim_exposure: float | None,
+    aaii_spread: float | None,
+) -> tuple[str, str]:
+    """Classify retail/active-manager sentiment as a contrarian signal.
+
+    Three sources, each with an extreme threshold in both directions:
+
+    - CBOE equity p/c (daily): >0.85 = puts dominate (fear), <0.55 = calls
+      dominate (greed). Typical mid-cycle reading is 0.6-0.8.
+    - NAAIM exposure (weekly): <40 = active managers defensive, >85 = leveraged
+      long. Range is -200 to +200; most readings sit 30-90.
+    - AAII bull-bear spread (weekly): <-10 = bears outnumber bulls (capitulation
+      tilt), >+15 = crowded long. Long-term mean is roughly 0.
+
+    Five-tier output, contrarian polarity (extreme greed = bearish for forward
+    returns, extreme fear = bullish):
+    - Capitulation: all 3 fearful extremes — strongest bullish contrarian
+    - Fearful: 2+ fearful extremes
+    - Stretched: 2+ greedy extremes
+    - Greedy: all 3 greedy extremes — strongest bearish contrarian
+    - Neutral: otherwise (or insufficient data)
+
+    Returns (label, detail_string).
+    """
+    fearful = 0
+    greedy = 0
+    parts: list[str] = []
+
+    if cboe_equity_pc is not None:
+        if cboe_equity_pc > 0.85:
+            fearful += 1
+        elif cboe_equity_pc < 0.55:
+            greedy += 1
+        parts.append(f"p/c {cboe_equity_pc:.2f}")
+
+    if naaim_exposure is not None:
+        if naaim_exposure < 40:
+            fearful += 1
+        elif naaim_exposure > 85:
+            greedy += 1
+        parts.append(f"NAAIM {naaim_exposure:.0f}")
+
+    if aaii_spread is not None:
+        if aaii_spread < -10:
+            fearful += 1
+        elif aaii_spread > 15:
+            greedy += 1
+        parts.append(f"AAII {aaii_spread:+.1f}")
+
+    available = sum(1 for v in (cboe_equity_pc, naaim_exposure, aaii_spread) if v is not None)
+    if available == 0:
+        return "Unknown", "no sentiment sources available"
+
+    if fearful == 3:
+        label = "Capitulation"
+    elif fearful >= 2:
+        label = "Fearful"
+    elif greedy == 3:
+        label = "Greedy"
+    elif greedy >= 2:
+        label = "Stretched"
+    else:
+        label = "Neutral"
+
+    coverage = f"{available}/3 sources"
+    return label, f"{', '.join(parts)} ({coverage})"
+
+
 def synthesize_verdict(
     volatility: str | None,
     trend: str | None,

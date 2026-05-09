@@ -14,6 +14,7 @@ from trading_clients.fmp_client import FmpClient
 from trading_clients.fool_client import FoolClient
 from trading_clients.fred_client import FredClient
 from trading_clients.reddit_client import RedditClient
+from trading_clients.sentiment_client import SentimentClient
 from trading_clients.tastytrade_client import TastyTradeClient
 from trading_clients.tradier_client import TradierClient
 from trading_clients.webull_client import WebullClient
@@ -64,6 +65,14 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
     ctx["bls"] = BlsClient()
     ctx["bea"] = BeaClient()
     ctx["fed"] = FedClient()
+    # Sentiment is optional — Playwright may fail to launch if the chromium
+    # binary isn't installed. Server should keep running without it.
+    sentiment = SentimentClient()
+    try:
+        await sentiment.startup()
+        ctx["sentiment"] = sentiment
+    except Exception:
+        await sentiment.close()
     db = open_db()
     init_pipeline_schema(db)
     init_roll_schema(db)

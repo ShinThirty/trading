@@ -49,9 +49,7 @@ class ReleasePathRequest(PathRequest, ParamsRequest):
 # ═══════════════════════════════════════════════════════════════
 
 
-_PCE_LINK_RE = re.compile(
-    r'href="(/news/\d{4}/personal-income-and-outlays-[a-z]+-\d{4})"'
-)
+_PCE_LINK_RE = re.compile(r'href="(/news/\d{4}/personal-income-and-outlays-[a-z]+-\d{4})"')
 # GDP URL shape (current BEA convention, observed 2026):
 #   /news/2026/gdp-advance-estimate-1st-quarter-2026
 #   /news/2026/gdp-second-estimate-1st-quarter-2026

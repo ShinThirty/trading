@@ -44,9 +44,7 @@ class StatementPathRequest(PathRequest, ParamsRequest):
 # ═══════════════════════════════════════════════════════════════
 
 
-_STMT_LINK_RE = re.compile(
-    r'href="(/newsevents/pressreleases/monetary\d{8}a\.htm)"'
-)
+_STMT_LINK_RE = re.compile(r'href="(/newsevents/pressreleases/monetary\d{8}a\.htm)"')
 _STMT_DATE_RE = re.compile(r"monetary(\d{4})(\d{2})(\d{2})a\.htm")
 
 # Year section header on /monetarypolicy/fomccalendars.htm — e.g.
@@ -58,8 +56,7 @@ _YEAR_HEADER_RE = re.compile(r"(\d{4})\s+FOMC\s+Meetings", re.IGNORECASE)
 # footnote dates aren't misattributed to the current year.
 _YEAR_FOOTNOTE_RE = re.compile(r"\*\s*Meeting\s+associated|Note:\s*A\s+two-day", re.IGNORECASE)
 _MONTH_NAMES = (
-    "January|February|March|April|May|June|July|"
-    "August|September|October|November|December"
+    "January|February|March|April|May|June|July|August|September|October|November|December"
 )
 _MONTH_ABBR = "Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec"
 # Same-month meeting: "January 27-28" or "December 8-9*" — captures month
@@ -75,11 +72,29 @@ _MEETING_CROSS_RE = re.compile(
     re.IGNORECASE,
 )
 _MONTHS = {
-    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
-    "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
-    "january": 1, "february": 2, "march": 3, "april": 4, "june": 6,
-    "july": 7, "august": 8, "september": 9, "october": 10,
-    "november": 11, "december": 12,
+    "jan": 1,
+    "feb": 2,
+    "mar": 3,
+    "apr": 4,
+    "may": 5,
+    "jun": 6,
+    "jul": 7,
+    "aug": 8,
+    "sep": 9,
+    "oct": 10,
+    "nov": 11,
+    "dec": 12,
+    "january": 1,
+    "february": 2,
+    "march": 3,
+    "april": 4,
+    "june": 6,
+    "july": 7,
+    "august": 8,
+    "september": 9,
+    "october": 10,
+    "november": 11,
+    "december": 12,
 }
 
 

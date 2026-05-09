@@ -54,6 +54,7 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │       ├── bls_client.py            # No auth, identifies via User-Agent (BLS press releases)
 │   │       ├── bea_client.py            # No auth, identifies via User-Agent (BEA press releases)
 │   │       ├── fed_client.py            # No auth, identifies via User-Agent (FOMC statements)
+│   │       ├── sentiment_client.py      # Playwright-based scraper (CBOE p/c, AAII, NAAIM)
 │   │       └── endpoints/               # Typed request/response models + Endpoint defs
 │   │           ├── webull.py            # 11 endpoints (account, orders, instruments)
 │   │           ├── tradier.py           # 19 endpoints (options, quotes, account, orders)
@@ -67,6 +68,7 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │           ├── bls.py               # 2 endpoints (Employment Situation, CPI press releases)
 │   │           ├── bea.py               # 2 endpoints (current releases index, PCE press release)
 │   │           ├── fed.py               # 2 endpoints (FOMC calendar, FOMC statement)
+│   │           ├── sentiment.py         # 3 endpoints (CBOE equity p/c, AAII, NAAIM)
 │   │           └── yahoo.py             # Response models for Yahoo Finance (via yfinance)
 │   ├── trading-mcp/                     # MCP server (composed via fastmcp mount)
 │   │   ├── pyproject.toml               # depends on: trading-clients + fastmcp + yfinance
@@ -188,6 +190,9 @@ EventBridge (cron, Mon-Fri 13:30-20:00 UTC)
 | **BLS** | Employment Situation / CPI press release narrative | None (User-Agent only) |
 | **BEA** | Personal Income and Outlays (PCE) press release narrative | None (User-Agent only) |
 | **Federal Reserve** | FOMC statements (latest + prior for language diff) | None (User-Agent only) |
+| **CBOE** | Equity put/call ratio (daily) | None (Playwright, realistic browser context) |
+| **AAII** | Investor sentiment survey bull/neutral/bear (weekly) | None (Playwright, realistic browser context) |
+| **NAAIM** | Active manager equity exposure index (weekly) | None (Playwright, realistic browser context) |
 
 ### No Webull SDK
 

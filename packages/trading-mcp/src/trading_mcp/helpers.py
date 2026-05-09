@@ -16,6 +16,7 @@ from trading_clients.fmp_client import FmpClient
 from trading_clients.fool_client import FoolClient
 from trading_clients.fred_client import FredClient
 from trading_clients.reddit_client import RedditClient
+from trading_clients.sentiment_client import SentimentClient
 from trading_clients.tastytrade_client import TastyTradeClient
 from trading_clients.tradier_client import TradierClient
 from trading_clients.webull_client import WebullClient
@@ -105,6 +106,13 @@ def _bea(ctx: Context) -> BeaClient:
 
 def _fed(ctx: Context) -> FedClient:
     return ctx.lifespan_context["fed"]
+
+
+def _sentiment(ctx: Context) -> SentimentClient | None:
+    """Optional client. Returns None if Playwright failed to start at lifespan
+    init (e.g. browser binary missing) — callers should treat the sentiment
+    dimension as unavailable rather than erroring."""
+    return ctx.lifespan_context.get("sentiment")
 
 
 async def _check_market(ctx: Context, order_type: str, extended_hours: bool) -> None:

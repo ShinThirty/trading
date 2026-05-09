@@ -108,6 +108,4 @@ async def get_upcoming_economic_releases(ctx: Context, days_ahead: int = 14) -> 
     if not rows:
         return "(no upcoming macro releases in window)"
     rows.sort(key=lambda r: (r[0], r[1]))
-    return list_table(
-        [{"Date": d, "Category": cat, "Release": name} for d, cat, name in rows]
-    )
+    return list_table([{"Date": d, "Category": cat, "Release": name} for d, cat, name in rows])

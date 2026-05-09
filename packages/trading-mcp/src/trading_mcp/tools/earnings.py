@@ -143,10 +143,7 @@ async def get_earnings_release(ctx: Context, symbol: str) -> str:
             f"{_exc_summary('EDGAR filing doc', ex)}"
         )
 
-    url = (
-        f"https://www.sec.gov/Archives/edgar/data/"
-        f"{cik}/{filing.accession_no_dashes}/{filename}"
-    )
+    url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{filing.accession_no_dashes}/{filename}"
     return (
         f"# {ticker} earnings press release ({filing.filing_date})\n"
         f"8-K accession: {filing.accession_number}\n"
