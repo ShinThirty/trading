@@ -1,10 +1,14 @@
-"""Sentiment endpoint definitions: CBOE equity p/c, AAII bull/bear, NAAIM exposure.
+"""Sentiment endpoint definitions: CBOE equity p/c, AAII bull/bear.
 
-All three are fetched via SentimentClient (Playwright). Each endpoint declares
-its base URL (since the three sources span three hosts) and parses the rendered
-body inner_text returned by the client.
+Both are fetched via SentimentClient (Playwright). Each endpoint declares its
+base URL (since the two sources span two hosts) and parses the rendered body
+inner_text returned by the client.
 
-Parser inputs are all body inner_text (visible text after JS render), which is
+NAAIM exposure used to live here too but moved to a dedicated NaaimClient that
+pulls the since-inception XLSX (httpx, no Playwright) — gives the same latest
+reading plus full history for z-score / percentile.
+
+Parser inputs are body inner_text (visible text after JS render), which is
 more stable than raw HTML — selectors don't break when sites tweak class names,
 and table cells come out as tab-separated values.
 """
@@ -119,39 +123,6 @@ class AaiiSentimentResponse:
         )
 
 
-@dataclass
-class NaaimExposureResponse:
-    """Latest NAAIM Exposure Index (active manager equity exposure, weekly).
-
-    The exposure index can range from -200 (fully short, leveraged) to +200
-    (fully long, leveraged); typical readings are 0-100.
-    """
-
-    value: float | None
-
-    @classmethod
-    def from_response(cls, body_text: str) -> "NaaimExposureResponse":
-        # First numeric (allowing negative + decimal) after "Exposure Index"
-        # anchor. NAAIM page structure: a hero block with the latest reading
-        # followed by historical commentary.
-        m = re.search(
-            r"Exposure Index[^0-9-]{0,500}(-?[0-9]+\.[0-9]+)",
-            body_text,
-            re.IGNORECASE,
-        )
-        if not m:
-            return cls(value=None)
-        try:
-            return cls(value=float(m.group(1)))
-        except ValueError:
-            return cls(value=None)
-
-    def to_output(self) -> str:
-        if self.value is None:
-            return "(NAAIM exposure unavailable)"
-        return f"NAAIM exposure: {self.value:.1f}"
-
-
 # ═══════════════════════════════════════════════════════════════
 # Endpoint Definitions
 # ═══════════════════════════════════════════════════════════════
@@ -173,12 +144,4 @@ AAII_SENTIMENT = Endpoint(
     cache_ttl=3600,
     response_model=AaiiSentimentResponse,
     base_url="https://www.aaii.com",
-)
-
-# NAAIM publishes Wednesday/Thursday. Same TTL rationale.
-NAAIM_EXPOSURE = Endpoint(
-    "/programs/naaim-exposure-index/",
-    cache_ttl=3600,
-    response_model=NaaimExposureResponse,
-    base_url="https://www.naaim.org",
 )

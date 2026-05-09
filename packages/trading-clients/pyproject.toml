@@ -5,6 +5,7 @@ description = "Shared API clients for Webull, Tradier, Finnhub, FMP, FRED, and A
 requires-python = ">=3.12"
 dependencies = [
     "httpx[http2]",
+    "openpyxl",
 ]
 
 [build-system]

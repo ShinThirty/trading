@@ -19,6 +19,7 @@ from trading_mcp.helpers import (
     _fed,
     _fmp,
     _fred,
+    _naaim,
     _polymarket,
     _sentiment,
     _tradier,
@@ -528,7 +529,9 @@ async def get_market_regime(ctx: Context) -> str:
     - Tape Speed: Fast / Normal (SPY 5d return + VIX 5d %change)
     - Sentiment: Capitulation / Fearful / Neutral / Stretched / Greedy
       (CBOE equity p/c + NAAIM exposure + AAII bull-bear, contrarian polarity).
-      Optional — only present when Playwright launched successfully.
+      NAAIM is always available (httpx XLSX); CBOE p/c and AAII require
+      Playwright — if it didn't launch, the dimension still scores from
+      whichever inputs are available.
     - Positioning: Crowded/Stretched Long / Mixed / Crowded/Stretched Short / Neutral
       (CFTC COT 52w z-score across SPX, NDX, VIX, 10Y, Gold, WTI; contrarian
       polarity — crowded long = bearish-forward, crowded short = squeeze risk).
@@ -551,6 +554,7 @@ async def get_market_regime(ctx: Context) -> str:
     sentiment_client = _sentiment(ctx)
     cftc_client = _cftc(ctx)
     polymarket_client = _polymarket(ctx)
+    naaim_client = _naaim(ctx)
 
     start = _year_ago(date.today()).isoformat()
     tasks: list = [
@@ -572,14 +576,14 @@ async def get_market_regime(ctx: Context) -> str:
 
     cboe_idx: int | None = None
     aaii_idx: int | None = None
-    naaim_idx: int | None = None
     if sentiment_client is not None:
         cboe_idx = len(tasks)
         tasks.append(sentiment_client.get(sentiment.CBOE_EQUITY_PC, sentiment.EmptyRequest()))
         aaii_idx = len(tasks)
         tasks.append(sentiment_client.get(sentiment.AAII_SENTIMENT, sentiment.EmptyRequest()))
-        naaim_idx = len(tasks)
-        tasks.append(sentiment_client.get(sentiment.NAAIM_EXPOSURE, sentiment.EmptyRequest()))
+
+    naaim_idx = len(tasks)
+    tasks.append(naaim_client.get_history())
 
     cftc_keys = list(cftc.CONTRACTS.keys())
     cftc_offset = len(tasks)
@@ -727,12 +731,13 @@ async def get_market_regime(ctx: Context) -> str:
         labels["speed"] = label
         data["Tape Speed"] = f"{label} ({detail})"
 
-    # Sentiment (optional — Playwright may not be available)
+    # Sentiment — CBOE and AAII via Playwright (optional); NAAIM via XLSX
+    # client (always available, independent of Playwright).
     cboe_resp = _ok(cboe_idx) if cboe_idx is not None else None
     aaii_resp = _ok(aaii_idx) if aaii_idx is not None else None
-    naaim_resp = _ok(naaim_idx) if naaim_idx is not None else None
+    naaim_resp = _ok(naaim_idx)
     cboe_pc = cboe_resp.value if cboe_resp is not None else None
-    naaim_val = naaim_resp.value if naaim_resp is not None else None
+    naaim_val = naaim_resp.latest_exposure if naaim_resp is not None else None
     aaii_spread_val = aaii_resp.spread if aaii_resp is not None else None
     if any(v is not None for v in (cboe_pc, naaim_val, aaii_spread_val)):
         label, detail = regime.classify_sentiment(cboe_pc, naaim_val, aaii_spread_val)

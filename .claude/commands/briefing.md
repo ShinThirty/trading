@@ -84,6 +84,22 @@ Triggers (read from tool output):
 
 If multiple triggers fire (often correlated), surface all relevant lines. Cross-reference firing triggers with Step 1's regime call (Vol/Tape/Sentiment dimensions) and any vol-sensitive positions in Step 2 — the interaction matters more than the trigger in isolation. Full overlay (regime cell, percentile table, source caveats) lives in the biweekly review; daily is alert-only.
 
+## Step 1e: NAAIM Crowding Trigger (conditional)
+
+Call `get_naaim_history` daily — active-manager equity exposure with 52w z-score. NAAIM is a slow-moving weekly gauge (Wednesday afternoon update); most days it sits inside its band and the value is stale. **Surface this section ONLY if |z-score| ≥ 1.5**, otherwise skip entirely. Do NOT surface "no trigger" / "neutral".
+
+Triggers (read z-score and exposure from tool output):
+
+1. **z ≥ 2.0**: surface "🔴 NAAIM GREEDY (z = +X.XX, exposure XX.X — crowded long, contrarian bearish). Active managers near max-long; positioning stretched. Pairs with any AAII spread > +20 or CBOE p/c < 0.55 to confirm crowding."
+
+2. **z ≥ 1.5** (and < 2.0): surface "🟡 NAAIM stretched long (z = +X.XX, exposure XX.X). Crowding building — not yet extreme. Cross-check with COT SPX/NDX z-scores from Step 1."
+
+3. **z ≤ -2.0**: surface "🔴 NAAIM CAPITULATION (z = -X.XX, exposure XX.X — max defensive, contrarian bullish/squeeze setup). Active managers fully de-risked; counter-trend rallies become explosive."
+
+4. **z ≤ -1.5** (and > -2.0): surface "🟡 NAAIM stretched defensive (z = -X.XX, exposure XX.X). Positioning capitulating — not yet extreme. Watch for squeeze fuel building."
+
+NAAIM is weekly so the same trigger may fire several days in a row until the print updates or the value drifts back inside the band — that persistence is itself informative ("still crowded"). Cross-reference with Step 1's Sentiment dimension and any vol-sensitive positions in Step 2. Full surfacing (WoW change, 8-week trend, multi-window context) lives in the biweekly review.
+
 ## Step 2: Position Alerts
 
 1. Ask the user if they have fresh Fidelity CSVs to include (exported from Fidelity Positions page to ~/Downloads/fidelity). Call `get_portfolio_summary` with `fidelity_folder` if provided, otherwise Webull-only.

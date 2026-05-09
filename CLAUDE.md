@@ -60,6 +60,7 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │       ├── tsmc_client.py           # No auth, identifies via User-Agent (TSMC IR monthly revenue)
 │   │       ├── beige_book_client.py     # No auth, identifies via User-Agent (Fed Beige Book)
 │   │       ├── squeeze_metrics_client.py # No auth (SqueezeMetrics public DIX/GEX CSV)
+│   │       ├── naaim_client.py          # No auth (NAAIM since-inception XLSX history)
 │   │       ├── sentiment_client.py      # Playwright-based scraper (CBOE p/c, AAII, NAAIM)
 │   │       └── endpoints/               # Typed request/response models + Endpoint defs
 │   │           ├── webull.py            # 11 endpoints (account, orders, instruments)
@@ -80,6 +81,7 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │           ├── tsmc.py              # 1 endpoint (consolidated monthly revenue by year)
 │   │           ├── beige_book.py        # 2 endpoints (release index, National Summary by period)
 │   │           ├── squeeze_metrics.py   # 1 endpoint (DIX/GEX daily history CSV)
+│   │           ├── naaim.py             # NaaimHistoryResponse (XLSX-parsed weekly history with z-score)
 │   │           ├── prediction_market.py # Shared PredictionEvent / PredictionOutcome types
 │   │           ├── sentiment.py         # 3 endpoints (CBOE equity p/c, AAII, NAAIM)
 │   │           └── yahoo.py             # Response models for Yahoo Finance (via yfinance)
@@ -113,6 +115,7 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │           ├── tsmc.py              # TSMC monthly revenue (semi cycle leading indicator)
 │   │           ├── beige_book.py        # Fed Beige Book National Summary + 12 district highlights
 │   │           ├── squeeze_metrics.py   # SqueezeMetrics DIX (dark-pool flow) + GEX (dealer gamma)
+│   │           ├── naaim.py             # NAAIM Exposure Index history with 52w z-score / percentile
 │   │           ├── backtest.py          # TastyTrade option strategy backtests
 │   │           ├── earnings.py          # Earnings call transcript (Fool) + press release (EDGAR 8-K)
 │   │           ├── signals.py           # Conviction, sizing, hedge, entry signals
@@ -215,7 +218,7 @@ EventBridge (cron, Mon-Fri 13:30-20:00 UTC)
 | **SqueezeMetrics** | DIX (dark-pool dollar-weighted short ratio of S&P 500 components) + GEX (dealer net gamma in $) — daily history CSV powering the public /monitor/dix chart | None (User-Agent only) |
 | **CBOE** | Equity put/call ratio (daily) | None (Playwright, realistic browser context) |
 | **AAII** | Investor sentiment survey bull/neutral/bear (weekly) | None (Playwright, realistic browser context) |
-| **NAAIM** | Active manager equity exposure index (weekly) | None (Playwright, realistic browser context) |
+| **NAAIM** | Active manager equity exposure index — full since-inception history with 52w z-score / percentile (latest entry replaces the prior Playwright scrape) | None (httpx + polite User-Agent; XLSX) |
 
 ### No Webull SDK
 

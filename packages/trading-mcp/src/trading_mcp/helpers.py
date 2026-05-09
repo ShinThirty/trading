@@ -18,6 +18,7 @@ from trading_clients.fmp_client import FmpClient
 from trading_clients.fool_client import FoolClient
 from trading_clients.fred_client import FredClient
 from trading_clients.kalshi_client import KalshiClient
+from trading_clients.naaim_client import NaaimClient
 from trading_clients.polymarket_client import PolymarketClient
 from trading_clients.reddit_client import RedditClient
 from trading_clients.sentiment_client import SentimentClient
@@ -136,6 +137,10 @@ def _beige_book(ctx: Context) -> BeigeBookClient:
 
 def _squeeze_metrics(ctx: Context) -> SqueezeMetricsClient:
     return ctx.lifespan_context["squeeze_metrics"]
+
+
+def _naaim(ctx: Context) -> NaaimClient:
+    return ctx.lifespan_context["naaim"]
 
 
 def _sentiment(ctx: Context) -> SentimentClient | None:

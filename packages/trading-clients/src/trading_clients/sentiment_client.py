@@ -1,14 +1,16 @@
-"""Sentiment client — Playwright-backed scraper for CBOE p/c, AAII, NAAIM.
+"""Sentiment client — Playwright-backed scraper for CBOE p/c and AAII.
 
-These three sentiment sources can't be reached with httpx alone:
+Both sources require a real-browser context:
   - CBOE pages are Next.js client-rendered; static HTML carries no value.
   - AAII returns 403 Incapsula to non-browser User-Agents.
-  - NAAIM works with httpx, but goes through here for symmetry.
 
 A single chromium browser is launched at MCP server startup and reused across
 scrapes. We use one persistent context configured to look like real Chrome on
 Linux (realistic UA, viewport, locale, NY timezone, accept headers) — without
 this, AAII's WAF blocks. No stealth plugin needed.
+
+NAAIM exposure used to live here but now lives in NaaimClient (httpx + XLSX);
+that gives the latest reading plus full history at no extra cost.
 
 The client is optional: if Playwright fails to start (browser binary missing,
 sandbox issue), the MCP server skips it and the regime tool falls back to its
