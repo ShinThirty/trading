@@ -34,13 +34,15 @@ If all three flat/easing, note "✅ no divergence, curve normalizing" and skip. 
 
 ## Step 1b: Macro Print Reaction (release days only)
 
-Call `get_upcoming_economic_releases`. The four prints with dedicated texture tools — exact `Release` column labels — are **`Employment Situation (NFP)`**, **`CPI`**, **`Personal Income and Outlays (PCE)`**, and **`FOMC Decision`**. Only these trigger Step 1b. If today's date matches none of them, **skip this section entirely** (but keep the tool output for Step 4's Watch list).
+Call `get_upcoming_economic_releases`. The five prints with dedicated texture tools — exact `Release` column labels — are **`Employment Situation (NFP)`**, **`CPI`**, **`Personal Income and Outlays (PCE)`**, **`GDP`**, and **`FOMC Decision`**. Only these trigger Step 1b. If today's date matches none of them, **skip this section entirely** (but keep the tool output for Step 4's Watch list).
 
 On a **NFP day**, call `get_jobs_report_texture` — headline + industry mix + underneath (U-6, participation, hours, household-vs-establishment divergence, decimal-precision U-3) + intraday tape + the BLS press release narrative including revisions.
 
 On a **CPI day**, call `get_cpi_report_texture` — headline + core + major components (energy/food/shelter/services/goods/supercore proxy) + subcategory detail (rent, OER, gasoline, used cars, new vehicles, medical, public transportation) + tape (incl TIP for inflation expectations) + BLS press release narrative.
 
 On a **PCE day**, call `get_pce_report_texture` — headline PCE + core + true supercore (services ex housing & energy) + spending/income texture (personal income, DPI, nominal+real PCE, savings rate) + goods/services price split + tape (incl TIP) + BEA press release narrative.
+
+On a **GDP day** (advance / second / third estimate), call `get_gdp_report_texture` — headline (real GDP %chg SAAR + nominal + deflator + final sales to private domestic purchasers as the "core" GDP measure) + composition (pp contributions for PCE / investment / inventory swing / net exports / government, summing to real GDP %chg) + components (real %chg SAAR for PCE, GPDI with residential/nonresidential/equipment, exports, imports, government federal vs state & local) + tape (incl TIP) + BEA press release narrative. The inventory and net-trade contributions are the most common sources of "headline-misleads" GDP prints — eyeball those before the headline.
 
 On a **FOMC day**, call `get_fomc_decision_texture` — headline (latest meeting + target range + effective fed funds) + policy rates (DFEDTARU/L, DFF, IORB, ON RRP, balance sheet with 1-month QT pace) + tape + the latest FOMC statement AND the prior meeting's statement so language deltas are inspectable in one pass.
 
@@ -99,7 +101,7 @@ Present a short table: ticker, intent, IV Rank, next catalyst, action needed.
 Present a concise action items list:
 - **Urgent** (today): options expiring, rolls due, assignments
 - **This week**: approaching positions, pipeline entries ready for entry
-- **Watch**: regime shifts, upcoming earnings, IV changes, **upcoming NFP/CPI/PCE/FOMC within 7 days** (from Step 1b's `get_upcoming_economic_releases` output) — defer new entries the day before
+- **Watch**: regime shifts, upcoming earnings, IV changes, **upcoming NFP/CPI/PCE/GDP/FOMC within 7 days** (from Step 1b's `get_upcoming_economic_releases` output) — defer new entries the day before
 
 No more than 10 items total. If nothing is actionable, say so — "all clear" is a valid briefing.
 

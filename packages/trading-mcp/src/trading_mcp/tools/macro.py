@@ -718,7 +718,7 @@ _PCE_COMPONENTS: list[tuple[str, str]] = [
 
 async def _bea_pce_release(
     bea_client,
-) -> tuple["bea.PceReleaseResponse | None", list[str]]:
+) -> tuple["bea.BeaReleaseResponse | None", list[str]]:
     """Two-step BEA fetch: discover the latest PCE release URL, then fetch it.
 
     Returns (response, warnings). On full success, warnings is []. Each step
@@ -890,6 +890,196 @@ async def get_pce_report_texture(ctx: Context) -> str:
         out.append(bea_resp.text)
     else:
         out.append("(BEA Personal Income and Outlays release unavailable)")
+
+    return "\n".join(out)
+
+
+# GDP texture series — all pre-computed by BEA as quarterly % change at SAAR
+# (the canonical GDP-day units), so no manual annualization needed.
+_GDP_HEADLINE: list[tuple[str, str]] = [
+    ("A191RL1Q225SBEA", "Real GDP"),
+    ("A191RP1Q027SBEA", "Nominal GDP"),
+    ("A191RI1Q225SBEA", "GDP price deflator"),
+    ("PB0000031Q225SBEA", "Final sales to private domestic purchasers (real)"),
+]
+# Contributions to real GDP %chg (pp at SAAR). These should sum to real GDP %chg
+# within rounding — that decomposition is the point.
+_GDP_CONTRIBUTIONS: list[tuple[str, str]] = [
+    ("DPCERY2Q224SBEA", "Personal Consumption"),
+    ("A006RY2Q224SBEA", "Gross Private Domestic Investment"),
+    ("A014RY2Q224SBEA", "  of which: Change in private inventories"),
+    ("A019RY2Q224SBEA", "Net Exports"),
+    ("A822RY2Q224SBEA", "Government Consumption & Investment"),
+]
+# Major aggregates and sub-components, real %chg SAAR. Mirrors the BEA Table 1
+# breakdown: parents first, then notable sub-detail.
+_GDP_COMPONENTS: list[tuple[str, str]] = [
+    ("DPCERL1Q225SBEA", "Personal Consumption (real)"),
+    ("A006RL1Q225SBEA", "Gross Private Domestic Investment (real)"),
+    ("A011RL1Q225SBEA", "  Residential fixed investment"),
+    ("A008RL1Q225SBEA", "  Nonresidential fixed investment"),
+    ("Y033RL1Q225SBEA", "    of which: Equipment"),
+    ("A020RL1Q158SBEA", "Exports (real)"),
+    ("A021RL1Q158SBEA", "Imports (real)"),
+    ("A822RL1Q225SBEA", "Government Consumption & Investment (real)"),
+    ("A823RL1Q225SBEA", "  Federal"),
+    ("A829RL1Q225SBEA", "  State & Local"),
+]
+
+
+async def _bea_gdp_release(
+    bea_client,
+) -> tuple["bea.BeaReleaseResponse | None", list[str]]:
+    """Two-step BEA fetch: discover the latest GDP release URL, then fetch it.
+
+    Returns (response, warnings). On full success, warnings is []. Each step
+    that fails contributes a warning so the caller can surface it.
+    """
+    warnings: list[str] = []
+    try:
+        idx = await bea_client.get(bea.CURRENT_RELEASES, bea.EmptyRequest())
+    except Exception as e:
+        warnings.append(_exc_summary("BEA current-releases index", e))
+        return None, warnings
+    if not idx.gdp_release_path:
+        warnings.append("BEA current-releases: no GDP release link found")
+        return None, warnings
+    try:
+        resp = await bea_client.get(
+            bea.GDP_RELEASE, bea.ReleasePathRequest(idx.gdp_release_path)
+        )
+        return resp, warnings
+    except Exception as e:
+        warnings.append(_exc_summary(f"BEA GDP release {idx.gdp_release_path}", e))
+        return None, warnings
+
+
+@mcp.tool()
+async def get_gdp_report_texture(ctx: Context) -> str:
+    """Latest BEA Gross Domestic Product: headline + texture beneath the headline.
+
+    Aggregates the BEA GDP press release narrative (composition commentary,
+    inventory swings, trade detail, government breakdown) with FRED GDP series
+    for the published headline (real GDP, nominal GDP, deflator, final sales to
+    private domestic purchasers — the "core" GDP measure that strips inventories,
+    government, and trade), the demand-side composition (contributions to real
+    GDP growth in pp at SAAR for PCE / investment / inventories swing / net
+    exports / government), and component %chg SAAR (PCE, GPDI with residential /
+    nonresidential / equipment, exports, imports, government federal vs state &
+    local). Includes Tradier intraday quotes for rate-sensitive tape + TIP for
+    inflation expectations.
+
+    All units are quarterly % change at SAAR (the canonical GDP-day reporting
+    convention) or pp contributions to real GDP %chg.
+
+    Returns headline + composition + components + tape + raw narrative.
+    Does not interpret — surfaces the data so judgment happens in conversation
+    (especially the inventory swing and net-trade contribution, which are the
+    most common sources of "headline-misleads" GDP reports).
+
+    Requires [fred] + [tradier] sections in ~/.tradingrc.
+    """
+    fred_client = _fred(ctx)
+    tradier = _tradier(ctx)
+    bea_client = _bea(ctx)
+
+    # All series are quarterly. 3 obs is enough for current + 1 prior + a bit of
+    # context (revisions to the prior quarter often move alongside the print).
+    headline_specs = [(sid, 3) for sid, _ in _GDP_HEADLINE]
+    contribution_specs = [(sid, 3) for sid, _ in _GDP_CONTRIBUTIONS]
+    component_specs = [(sid, 3) for sid, _ in _GDP_COMPONENTS]
+    series_specs = headline_specs + contribution_specs + component_specs
+
+    fred_tasks = [
+        fred_client.get(fred.OBSERVATIONS, fred.GetObservationsRequest(sid, lim))
+        for sid, lim in series_specs
+    ]
+    tasks = [
+        _bea_gdp_release(bea_client),
+        tradier.get(t.QUOTES, t.GetQuotesRequest("TLT,IEF,SHY,SPY,XLF,TIP,VIX")),
+        *fred_tasks,
+    ]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    warnings: list[str] = []
+    bea_bundle = results[0]
+    if isinstance(bea_bundle, BaseException):
+        warnings.append(_exc_summary("BEA GDP (unexpected)", bea_bundle))
+        bea_resp = None
+    else:
+        bea_resp, bea_warnings = bea_bundle
+        warnings.extend(bea_warnings)
+    tape_resp = results[1] if not isinstance(results[1], BaseException) else None
+    if tape_resp is None:
+        warnings.append(_exc_summary("Tradier intraday quotes", results[1]))
+    obs_by_id = _collect_fred_obs(results, series_specs, 2, warnings)
+
+    real_gdp = obs_by_id.get("A191RL1Q225SBEA", [])
+    period = real_gdp[0]["date"] if real_gdp else "?"
+
+    out: list[str] = []
+    out.extend(_warnings_section(warnings))
+    out.append("=== Headline (quarterly % change, annualized) ===")
+    out.append(f"Period: {period}")
+
+    def _saar_line(obs: list[dict], label: str) -> None:
+        cur = _latest(obs)
+        prv = _prior(obs)
+        if cur is None:
+            return
+        prior_str = f" (prior {prv:+.2f}%)" if prv is not None else ""
+        out.append(f"  {label:54s} {cur:+7.2f}%{prior_str}")
+
+    for sid, label in _GDP_HEADLINE:
+        _saar_line(obs_by_id.get(sid, []), label)
+
+    # Composition (contributions sum to real GDP %chg)
+    out.append("")
+    out.append("=== Contributions to real GDP %chg (pp at SAAR) ===")
+    for sid, label in _GDP_CONTRIBUTIONS:
+        cur = _latest(obs_by_id.get(sid, []))
+        prv = _prior(obs_by_id.get(sid, []))
+        if cur is None:
+            continue
+        prior_str = f" (prior {prv:+.2f})" if prv is not None else ""
+        out.append(f"  {label:54s} {cur:+7.2f}{prior_str}")
+
+    # Component %chg SAAR
+    out.append("")
+    out.append("=== Components (real %chg SAAR) ===")
+    for sid, label in _GDP_COMPONENTS:
+        cur = _latest(obs_by_id.get(sid, []))
+        prv = _prior(obs_by_id.get(sid, []))
+        if cur is None:
+            continue
+        prior_str = f" (prior {prv:+.2f}%)" if prv is not None else ""
+        out.append(f"  {label:54s} {cur:+7.2f}%{prior_str}")
+
+    # Tape
+    out.append("")
+    out.append("=== Tape (intraday) ===")
+    if tape_resp and tape_resp.quotes:
+        for q in tape_resp.quotes:
+            sym = q.get("symbol", "")
+            last = q.get("last")
+            chg_pct = q.get("change_percentage")
+            chg = q.get("change")
+            if last is None:
+                continue
+            if sym == "VIX":
+                out.append(f"  {sym:6s} {last:>7.2f}  ({chg:+.2f})")
+            else:
+                out.append(f"  {sym:6s} {last:>7.2f}  ({chg_pct:+.2f}%)")
+    else:
+        out.append("  (tape unavailable)")
+
+    # Narrative
+    out.append("")
+    out.append("=== BEA press release narrative ===")
+    if bea_resp and bea_resp.text:
+        out.append(bea_resp.text)
+    else:
+        out.append("(BEA GDP release unavailable)")
 
     return "\n".join(out)
 

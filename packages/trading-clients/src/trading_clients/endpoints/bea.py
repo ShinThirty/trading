@@ -1,9 +1,15 @@
-"""BEA endpoint definitions for the Personal Income and Outlays release (PCE).
+"""BEA endpoint definitions for the Personal Income and Outlays (PCE) and
+Gross Domestic Product (GDP) releases.
 
-Discovery flow:
-  1. Fetch /news/current-releases — find the latest "Personal Income and Outlays
-     -<month>-<year>" link (BEA dates the URL by reference period, not release date).
+Discovery flow (same shape for both releases):
+  1. Fetch /news/current-releases — find the latest release link. BEA dates the
+     PCE URL by reference period (month-year); the GDP URL by quarter-year and
+     estimate vintage (advance/second/third).
   2. Fetch that URL and extract the narrative section.
+
+Both release pages use the same press-release template (markers
+"EMBARGOED UNTIL RELEASE" and "Next release"), so a single response model
+serves both.
 """
 
 import re
@@ -46,26 +52,43 @@ class ReleasePathRequest(PathRequest, ParamsRequest):
 _PCE_LINK_RE = re.compile(
     r'href="(/news/\d{4}/personal-income-and-outlays-[a-z]+-\d{4})"'
 )
+# GDP URL shape (current BEA convention, observed 2026):
+#   /news/2026/gdp-advance-estimate-1st-quarter-2026
+#   /news/2026/gdp-second-estimate-1st-quarter-2026
+#   /news/2026/gdp-third-estimate-1st-quarter-2026
+# Annual revisions and territorial GDP have different paths and are intentionally
+# excluded — those aren't the release the briefing's Step 1b targets.
+_GDP_LINK_RE = re.compile(
+    r'href="(/news/\d{4}/gdp-(?:advance|second|third)-estimate-[a-z0-9-]+-quarter-\d{4})"'
+)
 
 
 @dataclass
 class CurrentReleasesResponse:
     """Index page listing recent BEA news releases. We only care about the latest
-    Personal Income and Outlays link.
+    Personal Income and Outlays and Gross Domestic Product links.
     """
 
     pce_release_path: str | None
+    gdp_release_path: str | None
 
     @classmethod
     def from_response(cls, html: str) -> "CurrentReleasesResponse":
         if not html:
-            return cls(pce_release_path=None)
+            return cls(pce_release_path=None, gdp_release_path=None)
         # The current-releases page lists newest first, so the first match is latest.
-        m = _PCE_LINK_RE.search(html)
-        return cls(pce_release_path=m.group(1) if m else None)
+        pce = _PCE_LINK_RE.search(html)
+        gdp = _GDP_LINK_RE.search(html)
+        return cls(
+            pce_release_path=pce.group(1) if pce else None,
+            gdp_release_path=gdp.group(1) if gdp else None,
+        )
 
     def to_output(self) -> str:
-        return self.pce_release_path or "(no PCE release link found)"
+        parts = []
+        parts.append(f"PCE: {self.pce_release_path or '(none)'}")
+        parts.append(f"GDP: {self.gdp_release_path or '(none)'}")
+        return " | ".join(parts)
 
 
 class _ReleaseHTMLParser(HTMLParser):
@@ -95,17 +118,19 @@ class _ReleaseHTMLParser(HTMLParser):
 
 
 @dataclass
-class PceReleaseResponse:
-    """Narrative section of the BEA Personal Income and Outlays press release.
+class BeaReleaseResponse:
+    """Narrative section of a BEA press release (PCE or GDP).
 
     Trimmed between "EMBARGOED UNTIL RELEASE" (start of the official content) and
-    "Next release" (which marks the boundary into Technical Notes).
+    "Next release" (which marks the boundary into Technical Notes). Both the PCE
+    and GDP release pages use the same template, so a single response model fits
+    both.
     """
 
     text: str
 
     @classmethod
-    def from_response(cls, html: str) -> "PceReleaseResponse":
+    def from_response(cls, html: str) -> "BeaReleaseResponse":
         if not html:
             return cls(text="")
         parser = _ReleaseHTMLParser()
@@ -137,8 +162,16 @@ CURRENT_RELEASES = Endpoint(
 )
 
 # Specific release pages are immutable once published — long TTL.
+# PCE and GDP share the path template and response model; the discovered path
+# from CURRENT_RELEASES tells these apart.
 PCE_RELEASE = Endpoint(
     "/{path}",
     cache_ttl=24 * 3600,
-    response_model=PceReleaseResponse,
+    response_model=BeaReleaseResponse,
+)
+
+GDP_RELEASE = Endpoint(
+    "/{path}",
+    cache_ttl=24 * 3600,
+    response_model=BeaReleaseResponse,
 )

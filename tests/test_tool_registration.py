@@ -78,6 +78,7 @@ EXPECTED_TOOLS: dict[str, set[str]] = {
         "get_cpi_report_texture",
         "get_market_regime",
         "get_pce_report_texture",
+        "get_gdp_report_texture",
         "get_fomc_decision_texture",
     },
     "trading_mcp.tools.news": {
