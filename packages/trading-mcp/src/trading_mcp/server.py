@@ -14,6 +14,8 @@ from trading_clients.finnhub_client import FinnhubClient
 from trading_clients.fmp_client import FmpClient
 from trading_clients.fool_client import FoolClient
 from trading_clients.fred_client import FredClient
+from trading_clients.kalshi_client import KalshiClient
+from trading_clients.polymarket_client import PolymarketClient
 from trading_clients.reddit_client import RedditClient
 from trading_clients.sentiment_client import SentimentClient
 from trading_clients.tastytrade_client import TastyTradeClient
@@ -39,6 +41,7 @@ from trading_mcp.tools.options import mcp as options_mcp
 from trading_mcp.tools.orders import mcp as orders_mcp
 from trading_mcp.tools.pipeline import mcp as pipeline_mcp
 from trading_mcp.tools.pipeline_catalysts import mcp as pipeline_catalysts_mcp
+from trading_mcp.tools.prediction_markets import mcp as prediction_markets_mcp
 from trading_mcp.tools.quotes import mcp as quotes_mcp
 from trading_mcp.tools.rolls import mcp as rolls_mcp
 from trading_mcp.tools.screens import mcp as screens_mcp
@@ -68,6 +71,8 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
     ctx["bea"] = BeaClient()
     ctx["fed"] = FedClient()
     ctx["cftc"] = CftcClient()
+    ctx["polymarket"] = PolymarketClient()
+    ctx["kalshi"] = KalshiClient()
     # Sentiment is optional — Playwright may fail to launch if the chromium
     # binary isn't installed. Server should keep running without it.
     sentiment = SentimentClient()
@@ -104,6 +109,7 @@ mcp.mount(screens_mcp)
 mcp.mount(crypto_mcp)
 mcp.mount(cn_market_mcp)
 mcp.mount(cftc_mcp)
+mcp.mount(prediction_markets_mcp)
 mcp.mount(backtest_mcp)
 mcp.mount(earnings_mcp)
 mcp.mount(signals_mcp)

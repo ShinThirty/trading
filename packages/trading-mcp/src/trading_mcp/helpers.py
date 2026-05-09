@@ -16,6 +16,8 @@ from trading_clients.finnhub_client import FinnhubClient
 from trading_clients.fmp_client import FmpClient
 from trading_clients.fool_client import FoolClient
 from trading_clients.fred_client import FredClient
+from trading_clients.kalshi_client import KalshiClient
+from trading_clients.polymarket_client import PolymarketClient
 from trading_clients.reddit_client import RedditClient
 from trading_clients.sentiment_client import SentimentClient
 from trading_clients.tastytrade_client import TastyTradeClient
@@ -111,6 +113,14 @@ def _fed(ctx: Context) -> FedClient:
 
 def _cftc(ctx: Context) -> CftcClient:
     return ctx.lifespan_context["cftc"]
+
+
+def _polymarket(ctx: Context) -> PolymarketClient:
+    return ctx.lifespan_context["polymarket"]
+
+
+def _kalshi(ctx: Context) -> KalshiClient:
+    return ctx.lifespan_context["kalshi"]
 
 
 def _sentiment(ctx: Context) -> SentimentClient | None:

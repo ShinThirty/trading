@@ -726,6 +726,74 @@ def classify_positioning(
     return label, detail
 
 
+def classify_policy(
+    outcomes: list[tuple[str, float]],
+    hold_threshold: float = 0.70,
+    move_threshold: float = 0.50,
+    bias_threshold: float = 0.25,
+) -> tuple[str, str]:
+    """Classify what the prediction market has priced in for the next FOMC.
+
+    Polymarket FOMC events expose binary YES/NO contracts on each possible
+    decision: "No change", "25 bps decrease", "50+ bps decrease", "25 bps
+    increase", "50+ bps increase". The yes-price on each is the implied
+    probability. We bucket those into hold / cut / hike and label the
+    consensus tilt.
+
+    outcomes: list of (label, implied_prob) from a Polymarket FOMC event.
+        Labels are matched case-insensitively for "no change", "decrease",
+        "increase". Anything that doesn't match is ignored.
+    hold_threshold: P(hold) above this → "Hold Priced"
+    move_threshold: P(cut) or P(hike) above this → "Cut/Hike Priced"
+    bias_threshold: minimum spread between cut and hike before declaring a bias
+
+    Six-tier output:
+      - Hold Priced — high consensus on no change (low surprise risk on direction)
+      - Cut Priced — easing already priced (hawk surprise = downside)
+      - Hike Priced — tightening already priced (dove surprise = upside)
+      - Cut Bias — leaning dovish but not consensus
+      - Hike Bias — leaning hawkish but not consensus
+      - Uncertain — split, no clear lean
+
+    Returns (label, detail_string).
+    """
+    if not outcomes:
+        return "Unknown", "no FOMC market available"
+
+    p_hold = 0.0
+    p_cut = 0.0
+    p_hike = 0.0
+    matched = 0
+    for label, prob in outcomes:
+        s = label.lower().strip()
+        if "no change" in s or s in {"hold", "unchanged"}:
+            p_hold += prob
+            matched += 1
+        elif "decrease" in s or "cut" in s:
+            p_cut += prob
+            matched += 1
+        elif "increase" in s or "hike" in s:
+            p_hike += prob
+            matched += 1
+
+    if matched == 0:
+        return "Unknown", "no recognized FOMC outcome labels"
+
+    detail = f"hold {p_hold * 100:.0f}% / cut {p_cut * 100:.0f}% / hike {p_hike * 100:.0f}%"
+
+    if p_hold >= hold_threshold:
+        return "Hold Priced", detail
+    if p_cut >= move_threshold:
+        return "Cut Priced", detail
+    if p_hike >= move_threshold:
+        return "Hike Priced", detail
+    if p_cut - p_hike >= bias_threshold:
+        return "Cut Bias", detail
+    if p_hike - p_cut >= bias_threshold:
+        return "Hike Bias", detail
+    return "Uncertain", detail
+
+
 def synthesize_verdict(
     volatility: str | None,
     trend: str | None,

@@ -6,7 +6,7 @@ from datetime import date
 from fastmcp import Context, FastMCP
 from trading_clients import indicators as ta
 from trading_clients import regime
-from trading_clients.endpoints import bea, bls, cftc, fed, fmp, fred, sentiment
+from trading_clients.endpoints import bea, bls, cftc, fed, fmp, fred, polymarket, sentiment
 from trading_clients.endpoints import tastytrade as tt
 from trading_clients.endpoints import tradier as t
 from trading_clients.table_helpers import kv_table
@@ -19,6 +19,7 @@ from trading_mcp.helpers import (
     _fed,
     _fmp,
     _fred,
+    _polymarket,
     _sentiment,
     _tradier,
     _year_ago,
@@ -531,6 +532,10 @@ async def get_market_regime(ctx: Context) -> str:
     - Positioning: Crowded/Stretched Long / Mixed / Crowded/Stretched Short / Neutral
       (CFTC COT 52w z-score across SPX, NDX, VIX, 10Y, Gold, WTI; contrarian
       polarity — crowded long = bearish-forward, crowded short = squeeze risk).
+    - Policy: Hold Priced / Cut Priced / Hike Priced / Cut Bias / Hike Bias /
+      Uncertain — Polymarket's next-FOMC outcome probabilities aggregated into
+      hold/cut/hike buckets. Tells you what's already priced so directional
+      bets can be benchmarked against consensus.
     - ⚠ Extended (verdict=Expansion only): fires when 2+ of RSI>70,
       sector dispersion>25pp 30d, SPY 5d>+3% — mean-reversion warning,
       not a verdict change
@@ -545,6 +550,7 @@ async def get_market_regime(ctx: Context) -> str:
     tt_client = ctx.lifespan_context.get("tastytrade")
     sentiment_client = _sentiment(ctx)
     cftc_client = _cftc(ctx)
+    polymarket_client = _polymarket(ctx)
 
     start = _year_ago(date.today()).isoformat()
     tasks: list = [
@@ -581,6 +587,14 @@ async def get_market_regime(ctx: Context) -> str:
         report_key, pattern, _ = cftc.CONTRACTS[key]
         tasks.append(cftc_client.get(cftc.REPORTS[report_key], cftc.GetCotRequest(pattern)))
 
+    fed_events_idx = len(tasks)
+    tasks.append(
+        polymarket_client.get(
+            polymarket.LIST_EVENTS_BY_TAG,
+            polymarket.ListEventsByTagRequest(tag_slug="fed", limit=20),
+        )
+    )
+
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     def _ok(i: int):
@@ -615,6 +629,7 @@ async def get_market_regime(ctx: Context) -> str:
         "speed": None,
         "sentiment": None,
         "positioning": None,
+        "policy": None,
     }
 
     vix_val: float | None = None
@@ -747,6 +762,29 @@ async def get_market_regime(ctx: Context) -> str:
                 else "specs heavily short, squeeze risk / bullish-forward"
             )
             data["⚠ Positioning"] = f"{label} — strong contrarian signal ({note})"
+
+    # Policy — next FOMC implied probabilities from Polymarket. We pull all
+    # tagged Fed events and pick the earliest "Fed Decision in <month>?" by
+    # end date, since that's the one with hold/cut/hike outcome structure.
+    fed_events_resp = _ok(fed_events_idx)
+    next_fomc = None
+    if fed_events_resp is not None and fed_events_resp.events:
+        candidates = [
+            e for e in fed_events_resp.events if e.title.lower().startswith("fed decision in ")
+        ]
+        candidates.sort(key=lambda e: e.end_date or "9999-99-99")
+        if candidates:
+            next_fomc = candidates[0]
+    if next_fomc is not None and next_fomc.outcomes:
+        outcome_pairs = [(o.label, o.implied_prob) for o in next_fomc.outcomes]
+        label, detail = regime.classify_policy(outcome_pairs)
+        labels["policy"] = label
+        meta = (
+            f" — {next_fomc.title}, resolves {next_fomc.end_date}"
+            if next_fomc.end_date
+            else f" — {next_fomc.title}"
+        )
+        data["Policy"] = f"{label} ({detail}){meta}"
 
     tt_resp = _ok(tt_idx) if tt_idx is not None else None
     if tt_resp and tt_resp.items:
