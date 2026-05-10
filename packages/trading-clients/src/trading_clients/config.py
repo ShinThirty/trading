@@ -43,6 +43,11 @@ class AlphaVantageConfig:
 
 
 @dataclass(frozen=True)
+class EiaConfig:
+    api_key: str
+
+
+@dataclass(frozen=True)
 class TastyTradeConfig:
     client_secret: str
     refresh_token: str
@@ -63,6 +68,7 @@ class AppConfig:
     fmp: FmpConfig | None = None
     fred: FredConfig | None = None
     alphavantage: AlphaVantageConfig | None = None
+    eia: EiaConfig | None = None
     tastytrade: TastyTradeConfig | None = None
     edgar: EdgarConfig | None = None
 
@@ -122,6 +128,11 @@ def load_config(path: Path = RC_PATH) -> AppConfig:
     if parser.has_section("alphavantage"):
         alphavantage = AlphaVantageConfig(api_key=parser.get("alphavantage", "api_key"))
 
+    # EIA (optional)
+    eia = None
+    if parser.has_section("eia"):
+        eia = EiaConfig(api_key=parser.get("eia", "api_key"))
+
     # TastyTrade (optional)
     tastytrade = None
     if parser.has_section("tastytrade"):
@@ -142,6 +153,7 @@ def load_config(path: Path = RC_PATH) -> AppConfig:
         fmp=fmp,
         fred=fred,
         alphavantage=alphavantage,
+        eia=eia,
         tastytrade=tastytrade,
         edgar=edgar,
     )

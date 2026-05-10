@@ -85,14 +85,22 @@ Execute the structured biweekly trading review. Work through each section in ord
    - **12-month trajectory** — phase pattern (acceleration vs roll-over) matters more than any single print. Cross-check against the active semi cycle thesis in memory (Phase 1c / Phase 3 timing).
    - Cross-reference any active semi positions and pipeline names from Section 1 / Section 3. This is the single highest-frequency leading indicator we have for that sleeve and should explicitly inform Step 7's semi-cycle assessment.
 
-7. Call `get_btc_entry_signals` — present the composite score and recommended DCA rate:
+7. **EIA Weekly Petroleum Status Report.** Call `get_eia_petroleum`. WPSR publishes Wednesday 10:30 ET — biweekly cadence catches a fresh print every cycle. Highest-frequency read on the US oil/products complex; informs CPI energy, consumer demand destruction, and Fed policy path simultaneously. Read in this order:
+   - **Consumer pump** — US regular gasoline $/gal with WoW + YoY. A YoY >25% or a single WoW >$0.20 is the canonical "shows up in next CPI energy line + dents discretionary" signal. Cross-reference with restaurants/airlines/XRT in pipeline (MCD-class Q-end commentary catches it first).
+   - **SPR move** — sustained draws (>3 mbbl/wk) at high oil = political response to disruption; sustained refills at low oil = strategic buying. The level is a policy signal, not a market signal.
+   - **Crude trade balance** — net imports (imp − exp) WoW. Collapsed exports with steady imports = "US holding barrels at home." Confirms or contradicts the freight tool's chokepoint reading: real Hormuz disruption shows up here as imports falling alongside the chokepoint deviation.
+   - **Refinery utilization** — >90% sustained = downstream constrained before crude shows it; <85% sustained = demand destruction or refiner discipline (bearish crack spreads either way).
+   - **8-week trend table** — phase pattern matters more than any single print; cross-reference active oil/Iran/Hormuz thesis in memory.
+   - **Trade implications:** rising pump = bearish discretionary/airlines/restaurants/XRT, bullish XLE/OIH, bearish duration (energy-led inflation tightens Fed reaction).
+
+8. Call `get_btc_entry_signals` — present the composite score and recommended DCA rate:
    - 0.25x Strongly Unfavorable
    - 0.5x Unfavorable
    - 1x Mixed
    - 1.5x Favorable
    - 2x Strongly Favorable
 
-8. Assess:
+9. Assess:
    - Semi cycle thesis: any capex guidance changes? Phase timing still on track?
    - Sector rotation: who's leading, who's lagging?
    - Any macro shifts that affect CC expiry timing or coverage ratios?

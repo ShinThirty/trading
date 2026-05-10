@@ -48,6 +48,7 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │       ├── fmp_client.py            # API key auth
 │   │       ├── fred_client.py           # API key auth
 │   │       ├── alphavantage_client.py   # API key auth
+│   │       ├── eia_client.py            # API key auth (EIA Open Data v2)
 │   │       ├── tastytrade_client.py     # OAuth2 refresh token auth
 │   │       ├── fool_client.py           # No auth (Motley Fool sitemap+page scrape)
 │   │       ├── edgar_client.py          # No auth, identifies via User-Agent (SEC EDGAR)
@@ -72,6 +73,7 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │           ├── fmp.py               # 8 endpoints (financial statements, profiles, sector perf)
 │   │           ├── fred.py              # 4 endpoints (economic data series)
 │   │           ├── alphavantage.py      # 2 endpoints (sentiment, movers)
+│   │           ├── eia.py               # 1 endpoint (single-series fetch by series_id; v2 /seriesid)
 │   │           ├── tastytrade.py        # 5 endpoints (IV metrics, backtesting, watchlists, dividends)
 │   │           ├── fool.py              # 2 endpoints (monthly sitemap, transcript page)
 │   │           ├── edgar.py             # 4 endpoints (ticker map, submissions, filing index, doc)
@@ -123,6 +125,7 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │           ├── beige_book.py        # Fed Beige Book National Summary + 12 district highlights
 │   │           ├── squeeze_metrics.py   # SqueezeMetrics DIX (dark-pool flow) + GEX (dealer gamma)
 │   │           ├── naaim.py             # NAAIM Exposure Index history with 52w z-score / percentile
+│   │           ├── eia.py               # EIA Weekly Petroleum Status Report (stocks, refinery util, retail gasoline)
 │   │           ├── backtest.py          # TastyTrade option strategy backtests
 │   │           ├── earnings.py          # Earnings call transcript (Fool) + press release (EDGAR 8-K)
 │   │           ├── signals.py           # Conviction, sizing, hedge, entry signals
@@ -211,6 +214,7 @@ EventBridge (cron, Mon-Fri 13:30-20:00 UTC)
 | **FMP** | Financial statements, company profiles, sector performance | API key |
 | **FRED** | Macroeconomic data (CPI, GDP, VIX, rates) | API key |
 | **Alpha Vantage** | News sentiment, top market movers | API key |
+| **EIA** | Weekly Petroleum Status Report — crude/product stocks, refinery utilization, retail gasoline. WPSR Wed 10:30 ET. Used during oil-price / inflation events; informs CPI energy, consumer demand destruction, Fed policy path. | API key (free, [register](https://www.eia.gov/opendata/register.php)) |
 | **TastyTrade** | IV rank/percentile, backtesting, watchlists, dividends | OAuth2 refresh token |
 | **Yahoo Finance** | Stock screener, institutional ownership | None (via yfinance) |
 | **Motley Fool** | Earnings call transcripts (scraped) | None |
@@ -260,6 +264,9 @@ api_key = <your_api_key>
 api_key = <your_api_key>
 
 [alphavantage]
+api_key = <your_api_key>
+
+[eia]
 api_key = <your_api_key>
 
 [tastytrade]

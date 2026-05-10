@@ -11,6 +11,7 @@ from trading_clients.beige_book_client import BeigeBookClient
 from trading_clients.bls_client import BlsClient
 from trading_clients.cftc_client import CftcClient
 from trading_clients.edgar_client import EdgarClient
+from trading_clients.eia_client import EiaClient
 from trading_clients.endpoints import tradier as t
 from trading_clients.fed_client import FedClient
 from trading_clients.finnhub_client import FinnhubClient
@@ -80,6 +81,16 @@ def _alphavantage(ctx: Context) -> AlphaVantageClient:
     if client is None:
         raise RuntimeError(
             "Alpha Vantage not configured. Add [alphavantage] section to ~/.tradingrc"
+        )
+    return client
+
+
+def _eia(ctx: Context) -> EiaClient:
+    client = ctx.lifespan_context.get("eia")
+    if client is None:
+        raise RuntimeError(
+            "EIA not configured. Add [eia] api_key=... to ~/.tradingrc "
+            "(register free at https://www.eia.gov/opendata/register.php)."
         )
     return client
 
