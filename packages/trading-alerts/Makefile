@@ -1,13 +1,17 @@
-# Option Monitor — deployment automation
+# trading-alerts — deployment automation
 #
 # Prerequisites:
 #   - AWS CLI authenticated (aws login)
-#   - Discord app created, bot_token/channel_id in ~/.tradingrc [discord]
+#   - Discord app created, bot_token / channel_id / public_key /
+#     application_id in ~/.tradingrc [discord]
 #
 # Quick start:
-#   make deploy        # build + terraform apply + populate credentials
-#   make test          # invoke Lambda manually
-#   make destroy       # tear down all AWS resources
+#   make deploy             # build + terraform apply
+#   make credentials        # populate SSM with Discord bot creds
+#   make register-commands  # register /unmute and /muted with Discord
+#   make test TRIGGER=naaim # invoke dispatcher Lambda with a specific watcher
+#   make test-local         # run a watcher locally (no AWS); --list by default
+#   make destroy            # tear down all AWS resources
 
 SHELL := /bin/bash
 .ONESHELL:
@@ -46,16 +50,11 @@ credentials:
 	import configparser, json; \
 	c = configparser.ConfigParser(); c.read('$(HOME)/.tradingrc'); \
 	print(json.dumps({ \
-	  'webull_app_key': c['webull']['app_key'], \
-	  'webull_app_secret': c['webull']['app_secret'], \
-	  'webull_token': c['webull']['token'], \
-	  'tradier_api_token': c['tradier']['api_token'], \
-	  'tradier_sandbox': c['tradier'].get('sandbox', 'false'), \
 	  'discord_bot_token': c['discord']['bot_token'], \
 	  'discord_channel_id': c['discord']['channel_id'], \
 	}))" | \
 	aws ssm put-parameter \
-	  --name /option-monitor/credentials \
+	  --name /trading-alerts/credentials \
 	  --type SecureString \
 	  --overwrite \
 	  --value file:///dev/stdin
@@ -66,18 +65,19 @@ register-commands:
 	@DISCORD_APP_ID=$(DISCORD_APP_ID) DISCORD_BOT_TOKEN=$(DISCORD_BOT_TOKEN) \
 	  uv run python $(PKG_DIR)/scripts/register_commands.py
 
-## Invoke monitor Lambda manually (test in AWS)
+## Invoke dispatcher Lambda with a specific watcher trigger (TRIGGER=naaim|gex|...)
 test:
+	@if [ -z "$(TRIGGER)" ]; then echo "Usage: make test TRIGGER=naaim"; exit 1; fi
 	@aws lambda invoke \
-	  --function-name option-monitor \
-	  --payload '{}' \
+	  --function-name trading-alerts-dispatcher \
+	  --payload "$$(printf '{"trigger":"%s"}' $(TRIGGER))" \
 	  --cli-binary-format raw-in-base64-out \
-	  /tmp/option-monitor-out.json > /dev/null 2>&1
-	@cat /tmp/option-monitor-out.json | python3 -m json.tool
+	  /tmp/trading-alerts-out.json > /dev/null 2>&1
+	@cat /tmp/trading-alerts-out.json | python3 -m json.tool
 
-## Test locally without AWS
+## Test locally without AWS — defaults to --list; pass TRIGGER=name to actually run a watcher
 test-local:
-	@uv run python $(PKG_DIR)/scripts/invoke_local.py --skip-clock
+	@uv run python $(PKG_DIR)/scripts/invoke_local.py $(if $(TRIGGER),--trigger $(TRIGGER),--list)
 
 ## Destroy all AWS resources
 destroy:
@@ -85,7 +85,7 @@ destroy:
 
 ## Delete SSM credentials
 credentials-delete:
-	@aws ssm delete-parameter --name /option-monitor/credentials
+	@aws ssm delete-parameter --name /trading-alerts/credentials
 	@echo "==> SSM credentials deleted"
 
 ## Remove build artifacts

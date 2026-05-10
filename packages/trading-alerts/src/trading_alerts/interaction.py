@@ -94,17 +94,17 @@ def _handle_mute_button(custom_id: str) -> dict:
 
     hours = duration // 3600
     label = f"{hours}h" if hours else f"{duration // 60}m"
-    # Extract readable leg name from dedup_key (after the colon)
-    leg_label = dedup_key.split(":", 1)[-1] if ":" in dedup_key else dedup_key
+    # Extract readable alert name from dedup_key (the suffix after the first colon)
+    alert_label = dedup_key.split(":", 1)[-1] if ":" in dedup_key else dedup_key
     logger.info("MUTED %s for %s", dedup_key, label)
-    return _respond(f"Muted **{leg_label}** for {label}.")
+    return _respond(f"Muted **{alert_label}** for {label}.")
 
 
 def _handle_unmute(options: list[dict]) -> dict:
     """Handle /unmute slash command."""
-    leg = next((o["value"] for o in options if o["name"] == "leg"), None)
-    if not leg:
-        return _respond("Missing `leg` parameter.")
+    alert = next((o["value"] for o in options if o["name"] == "alert"), None)
+    if not alert:
+        return _respond("Missing `alert` parameter.")
 
     table = _get_table()
     # Scan for matching muted records (muted_until > now)
@@ -118,12 +118,12 @@ def _handle_unmute(options: list[dict]) -> dict:
         logger.exception("Failed to scan muted alerts")
         return _respond("Failed to fetch muted alerts.")
 
-    # Match by leg label (case-insensitive substring match)
-    search = leg.upper()
+    # Match by dedup_key substring (case-insensitive)
+    search = alert.upper()
     matched = [item for item in resp.get("Items", []) if search in item["dedup_key"].upper()]
 
     if not matched:
-        return _respond(f"No muted alerts matching `{leg}`.")
+        return _respond(f"No muted alerts matching `{alert}`.")
 
     unmuted = []
     for item in matched:
@@ -168,9 +168,9 @@ def _handle_muted() -> dict:
         remaining = int(item["muted_until"]) - int(now)
         hours = remaining // 3600
         minutes = (remaining % 3600) // 60
-        leg_label = item["dedup_key"].split(":", 1)[-1]
+        alert_label = item["dedup_key"].split(":", 1)[-1]
         time_left = f"{hours}h {minutes}m" if hours else f"{minutes}m"
-        lines.append(f"- **{leg_label}** ({time_left} remaining)")
+        lines.append(f"- **{alert_label}** ({time_left} remaining)")
 
     return _respond("Currently muted:\n" + "\n".join(lines))
 

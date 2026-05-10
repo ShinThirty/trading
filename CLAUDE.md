@@ -10,7 +10,7 @@ uv workspace monorepo with three packages:
 
 1. **trading-clients** — Shared API clients and endpoint definitions for Webull, Tradier, Finnhub, FMP, FRED, and Alpha Vantage. Pure library — no server or Lambda dependencies.
 2. **trading-mcp** — MCP server that exposes brokerage operations, option chains, fundamentals, news, economic data, and sentiment as MCP tools. Depends on trading-clients + mcp[cli].
-3. **option-monitor** — AWS Lambda service that monitors short option positions across Webull accounts, evaluates DTE-adjusted strike proximity thresholds, and sends Discord alerts. Depends on trading-clients + boto3 (no MCP dependency).
+3. **trading-alerts** — AWS Lambda fleet of trigger-based market/macro alerts. Per-watcher EventBridge schedules invoke a single dispatcher Lambda; each watcher (NAAIM crowding, GEX regime, future macro print/release watchers) emits AlertEvents that post to Discord with mute buttons + DynamoDB-backed dedup. Depends on trading-clients + boto3 + pynacl (no MCP dependency).
 
 ## Commands
 
@@ -21,8 +21,9 @@ uv run ruff check packages/        # Lint all packages
 uv run ruff format packages/       # Format all packages
 uv run ty check packages/trading-clients/src/    # Type check trading-clients
 uv run ty check packages/trading-mcp/src/        # Type check trading-mcp
-uv run ty check packages/option-monitor/src/     # Type check option-monitor
-uv run python packages/option-monitor/scripts/invoke_local.py --skip-clock  # Test monitor locally
+uv run ty check packages/trading-alerts/src/     # Type check trading-alerts
+uv run python packages/trading-alerts/scripts/invoke_local.py --list             # List wired watchers
+uv run python packages/trading-alerts/scripts/invoke_local.py --trigger naaim    # Run a watcher locally
 ```
 
 To add to Claude Code: `claude mcp add trading-mcp -- uv run --package trading-mcp trading-mcp`
@@ -136,27 +137,31 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │           ├── pipeline_catalysts.py # Pipeline catalyst CRUD
 │   │           ├── rolls.py             # Option roll tracking CRUD
 │   │           └── decisions.py         # Option decision tracking CRUD
-│   └── option-monitor/                  # Lambda monitoring service
+│   └── trading-alerts/                  # Lambda watcher-fleet service
 │       ├── pyproject.toml               # depends on: trading-clients + boto3 + pynacl
 │       ├── Makefile                     # deploy/destroy/credentials/test automation
 │       ├── terraform/                   # AWS infrastructure (self-contained)
-│       │   ├── main.tf                  # Lambda, DynamoDB, EventBridge, IAM, SSM
+│       │   ├── main.tf                  # Dispatcher Lambda, DynamoDB, per-watcher
+│       │   │                            #   EventBridge rules, IAM, SSM, interaction Lambda
 │       │   ├── variables.tf
 │       │   └── outputs.tf
 │       ├── scripts/
-│       │   ├── invoke_local.py          # Local testing with ~/.tradingrc
+│       │   ├── invoke_local.py          # Local watcher runner (--list / --trigger)
 │       │   ├── build_lambda.sh          # Build Lambda deployment ZIP
 │       │   └── register_commands.py     # Register Discord slash commands
-│       └── src/option_monitor/
-│           ├── handler.py               # Lambda entry point
-│           ├── config.py                # MonitorConfig (SSM Parameter Store or ~/.tradingrc)
-│           ├── discord.py               # Bot messaging with rich embeds + mute buttons
-│           ├── state.py                 # DynamoDB alert state read/write
-│           ├── interaction.py           # Discord interaction handler (buttons + slash commands)
-│           └── monitor/
-│               ├── positions.py         # Parse Webull positions → ShortOptionLeg
-│               ├── thresholds.py        # DTE-based proximity evaluation
-│               └── alerts.py            # PagerDuty-inspired alert state machine
+│       └── src/trading_alerts/
+│           ├── handler.py               # Lambda dispatcher: routes EventBridge
+│           │                            #   {"trigger": "..."} → WATCHERS[name]()
+│           ├── config.py                # AlertsConfig (SSM Parameter Store or ~/.tradingrc)
+│           ├── discord.py               # send_embed() generic embed sender + mute buttons
+│           ├── event.py                 # AlertEvent dataclass (watcher return type)
+│           ├── dispatch.py              # dispatch(): dedup → Discord post → DynamoDB persist
+│           ├── state.py                 # AlertRecord, AlertStore Protocol, Dynamo + InMemory
+│           ├── interaction.py           # Discord interaction handler (mute buttons,
+│           │                            #   /unmute, /muted)
+│           └── watchers/
+│               ├── naaim.py             # NAAIM Exposure Index crowding (|z| >= 1.5)
+│               └── gex.py               # GEX regime (sign flip + 1m percentile extreme)
 └── tests/                               # Test suite (Phase 2)
 ```
 
@@ -165,7 +170,7 @@ trading-mcp/                             # monorepo root (uv workspace)
 ```
 trading-clients (httpx[http2])
   ├── trading-mcp (+ fastmcp + yfinance)
-  └── option-monitor (+ boto3)
+  └── trading-alerts (+ boto3 + pynacl)
 ```
 
 ### Data Flow — MCP Server
@@ -180,19 +185,22 @@ MCP tool call (tools/*.py)
   → returns formatted string via .to_output() to FastMCP
 ```
 
-### Data Flow — Option Monitor
+### Data Flow — Trading Alerts
 
 ```
-EventBridge (cron, Mon-Fri 13:30-20:00 UTC)
-  → Lambda handler
-    → TradierClient.get(CLOCK) — market open check
-    → WebullClient.get(ACCOUNT_LIST) — discover accounts
-    → WebullClient.get(POSITIONS) — short option legs per account
-    → TradierClient.get(QUOTES) — batch underlying prices
-    → Threshold evaluation (DTE-adjusted proximity)
-    → Alert state machine (dedup/cooldown/muting via DynamoDB)
-    → Discord bot messaging (warning/critical embeds + mute buttons)
+EventBridge (per-watcher cron rule)
+  → sends {"trigger": "<name>"} to dispatcher Lambda
+    → handler.py looks up WATCHERS[name] and runs it
+      → watcher fetches data (NAAIM XLSX, SqueezeMetrics CSV, …)
+      → evaluates threshold; returns list[AlertEvent]
+    → for each event, dispatch() checks dedup (DynamoDB get_item)
+      → if new: send_embed() to Discord + persist AlertRecord
+      → if duplicate or muted: skip
 ```
+
+A separate Lambda (function URL, no auth — Discord verifies via Ed25519
+signature) handles button clicks (`mute:<seconds>:<dedup_key>`) and the
+`/unmute` and `/muted` slash commands by mutating the same DynamoDB table.
 
 ### BaseClient Methods
 
@@ -278,7 +286,10 @@ client_secret = <your_oauth_client_secret>
 refresh_token = <your_oauth_refresh_token>
 
 [discord]
-webhook_url = <discord_webhook_url_for_option_monitor>
+bot_token      = <discord_bot_token>       # used by trading-alerts to post embeds
+channel_id     = <discord_channel_id>      # the channel alerts post to
+public_key     = <discord_app_public_key>  # interaction handler signature verification
+application_id = <discord_application_id>  # /unmute and /muted slash command registration
 ```
 
 ## Google Workspace
@@ -302,7 +313,7 @@ All Webull endpoints use the v2 API (`x-version: v2` header). Stock and option o
 - MCP tools are split by domain in `tools/*.py` and mounted to the parent server via `fastmcp.mount()`
 - Each provider has its own client file (thin transport) and endpoint file (typed models) in trading-clients
 - Client helper functions in `helpers.py` (`_webull()`, `_tradier()`, etc.) extract the client from `ctx.lifespan_context` and raise a clear error if the provider isn't configured
-- MCP server calls `.to_output()` on response models; option-monitor accesses typed fields directly
+- MCP server calls `.to_output()` on response models; trading-alerts watchers access typed fields directly
 - Ruff rules: E, F, I (isort), UP (pyupgrade). Line length: 100.
 - **Never do manual math.** Always delegate calculations (P&L, PEG, returns, Greeks, position sizing, etc.) to MCP tools. If no suitable MCP tool exists, flag it to the user instead of computing by hand — manual math is error-prone and unverifiable.
 

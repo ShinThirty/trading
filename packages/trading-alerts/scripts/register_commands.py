@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Register Discord slash commands for the option monitor bot.
+"""Register Discord slash commands for the trading-alerts bot.
 
-One-time setup. Run after creating the Discord Application.
+One-time setup. Re-run after changing slash command names, descriptions, or
+parameters — Discord only sees what was last PUT here.
 
 Usage:
     DISCORD_APP_ID=... DISCORD_BOT_TOKEN=... \
-        uv run python packages/option-monitor/scripts/register_commands.py
+        uv run python packages/trading-alerts/scripts/register_commands.py
 
 Environment variables:
     DISCORD_APP_ID    — Application ID from Discord Developer Portal
@@ -22,12 +23,12 @@ DISCORD_API = "https://discord.com/api/v10"
 COMMANDS = [
     {
         "name": "unmute",
-        "description": "Unmute a previously muted option alert",
+        "description": "Unmute a previously muted alert",
         "type": 1,  # CHAT_INPUT
         "options": [
             {
-                "name": "leg",
-                "description": "Option leg to unmute (e.g., AMZN-225.00-2026-06-18-CALL)",
+                "name": "alert",
+                "description": "Alert dedup-key substring to unmute (e.g. naaim, gex-flip)",
                 "type": 3,  # STRING
                 "required": True,
             }
@@ -35,7 +36,7 @@ COMMANDS = [
     },
     {
         "name": "muted",
-        "description": "List all currently muted option alerts",
+        "description": "List all currently muted alerts",
         "type": 1,
     },
 ]

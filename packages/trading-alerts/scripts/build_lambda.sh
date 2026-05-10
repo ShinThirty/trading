@@ -1,10 +1,10 @@
 #!/bin/bash
 # Build Lambda deployment package.
 #
-# Creates dist/lambda.zip containing option_monitor, trading_clients,
+# Creates dist/lambda.zip containing trading_alerts, trading_clients,
 # and all dependencies (except boto3 which Lambda provides).
 #
-# Usage: bash packages/option-monitor/scripts/build_lambda.sh
+# Usage: bash packages/trading-alerts/scripts/build_lambda.sh
 
 set -euo pipefail
 
