@@ -11,6 +11,7 @@ from trading_clients.cftc_client import CftcClient
 from trading_clients.config import load_config
 from trading_clients.edgar_client import EdgarClient
 from trading_clients.eia_client import EiaClient
+from trading_clients.factset_client import FactsetClient
 from trading_clients.fed_client import FedClient
 from trading_clients.finnhub_client import FinnhubClient
 from trading_clients.fmp_client import FmpClient
@@ -44,6 +45,7 @@ from trading_mcp.tools.crypto import mcp as crypto_mcp
 from trading_mcp.tools.decisions import mcp as decisions_mcp
 from trading_mcp.tools.earnings import mcp as earnings_mcp
 from trading_mcp.tools.eia import mcp as eia_mcp
+from trading_mcp.tools.factset import mcp as factset_mcp
 from trading_mcp.tools.freight import mcp as freight_mcp
 from trading_mcp.tools.fundamentals import mcp as fundamentals_mcp
 from trading_mcp.tools.macro import mcp as macro_mcp
@@ -97,6 +99,7 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
     ctx["beige_book"] = BeigeBookClient()
     ctx["squeeze_metrics"] = SqueezeMetricsClient()
     ctx["naaim"] = NaaimClient()
+    ctx["factset"] = FactsetClient()
     # Sentiment is optional — Playwright may fail to launch if the chromium
     # binary isn't installed. Server should keep running without it.
     sentiment = SentimentClient()
@@ -141,6 +144,7 @@ mcp.mount(beige_book_mcp)
 mcp.mount(squeeze_metrics_mcp)
 mcp.mount(naaim_mcp)
 mcp.mount(eia_mcp)
+mcp.mount(factset_mcp)
 mcp.mount(backtest_mcp)
 mcp.mount(earnings_mcp)
 mcp.mount(signals_mcp)

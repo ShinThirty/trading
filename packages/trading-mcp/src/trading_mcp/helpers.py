@@ -13,6 +13,7 @@ from trading_clients.cftc_client import CftcClient
 from trading_clients.edgar_client import EdgarClient
 from trading_clients.eia_client import EiaClient
 from trading_clients.endpoints import tradier as t
+from trading_clients.factset_client import FactsetClient
 from trading_clients.fed_client import FedClient
 from trading_clients.finnhub_client import FinnhubClient
 from trading_clients.fmp_client import FmpClient
@@ -167,6 +168,10 @@ def _squeeze_metrics(ctx: Context) -> SqueezeMetricsClient:
 
 def _naaim(ctx: Context) -> NaaimClient:
     return ctx.lifespan_context["naaim"]
+
+
+def _factset(ctx: Context) -> FactsetClient:
+    return ctx.lifespan_context["factset"]
 
 
 def _sentiment(ctx: Context) -> SentimentClient | None:

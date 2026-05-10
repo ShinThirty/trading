@@ -60,6 +60,9 @@ EXPECTED_TOOLS: dict[str, set[str]] = {
     "trading_mcp.tools.eia": {
         "get_eia_petroleum",
     },
+    "trading_mcp.tools.factset": {
+        "get_earnings_season_pulse",
+    },
     "trading_mcp.tools.freight": {
         "get_freight_signals",
     },

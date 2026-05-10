@@ -55,7 +55,7 @@ Present as carry-forward items before starting any analysis.
    - **Freshness line** — if `⏰ awaiting print` (latest row older than prior calendar month), note that and continue; the tool still surfaces the prior 12 months' trajectory.
    - **Latest YoY + MoM** — surprise vs the prior 3-month run-rate is the signal. Positive YoY surprise ahead of NVDA / AMD reports is bullish for the semi tape; YoY decel >5pp is a warning for short-dated long-semi exposure.
    - **12-month trajectory** — phase pattern (acceleration vs roll-over) matters more than any single print. Cross-check against the active semi cycle thesis in memory (Phase 1c / Phase 3 timing).
-   - Cross-reference any active semi positions and pipeline names from Section 2 / Section 5. This is the single highest-frequency leading indicator we have for that sleeve and should explicitly inform item 10's semi-cycle assessment.
+   - Cross-reference any active semi positions and pipeline names from Section 2 / Section 5. This is the single highest-frequency leading indicator we have for that sleeve and should explicitly inform item 11's semi-cycle assessment.
 
 8. **EIA Weekly Petroleum Status Report.** Call `get_eia_petroleum`. WPSR publishes Wednesday 10:30 ET — biweekly cadence catches a fresh print every cycle. Highest-frequency read on the US oil/products complex; informs CPI energy, consumer demand destruction, and Fed policy path simultaneously. Read in this order:
    - **Consumer pump** — US regular gasoline $/gal with WoW + YoY. A YoY >25% or a single WoW >$0.20 is the canonical "shows up in next CPI energy line + dents discretionary" signal. Cross-reference with restaurants/airlines/XRT in pipeline (MCD-class Q-end commentary catches it first).
@@ -65,14 +65,25 @@ Present as carry-forward items before starting any analysis.
    - **8-week trend table** — phase pattern matters more than any single print; cross-reference active oil/Iran/Hormuz thesis in memory.
    - **Trade implications:** rising pump = bearish discretionary/airlines/restaurants/XRT, bullish XLE/OIH, bearish duration (energy-led inflation tightens Fed reaction).
 
-9. Call `get_btc_entry_signals` — present the composite score and recommended DCA rate:
+9. **FactSet Earnings Insight — earnings season pulse.** Call `get_earnings_season_pulse`. FactSet publishes the Earnings Insight PDF every Friday afternoon ET — biweekly cadence catches one or two fresh prints per cycle. This is the institutional benchmark for "what is earnings season actually saying" — S&P 500 aggregate beat rates, surprise magnitudes, blended growth (current + forward quarters + CY), forward 12M P/E with 5y/10y context, and sector-level revision direction since quarter-end. Read in this order:
+   - **Beat rate texture** — % of S&P 500 reported, % beating EPS / revenue with 5y averages. Beat rates running well above the 5y average means analysts entered the season too cautious; well below means earnings are missing the mark broadly.
+   - **EPS surprise magnitude** — aggregate surprise % vs 5y avg. A large surprise that isn't being rewarded (cross-reference reaction asymmetry below) is the late-cycle tell.
+   - **Blended growth + revision delta** — current YoY growth vs the quarter-end estimate. Big positive revisions during the season = analysts were too pessimistic; big negative = guidance cuts dominating.
+   - **Forward quarterly + CY EPS growth** — the most-watched forward number. Decel from current quarter to next is the primary tell for cycle peaking.
+   - **Forward 12M P/E** — current vs 5y avg, 10y avg, and quarter-end. Anchors valuation regime. P/E expanding into a forward growth deceleration is multiple-driven — bearish setup.
+   - **Reaction asymmetry** — beats vs misses ±2-day stock reaction with 5y baseline. Misses being punished much more than average is the canonical "no margin for error" late-cycle signal — pairs with COT crowded-long and NAAIM stretched-long for a high-confidence "size down new entries" call.
+   - **Guidance counts** — positive vs negative EPS guidance for next quarter. Forward sentiment from companies themselves; ratio shift WoW is the signal.
+   - **Sector revisions** — which sectors moved blended growth up or down since quarter-end, ranked by magnitude. Identifies where surprise positive (or negative) flows concentrated. Cross-reference with active positions and pipeline names from Section 2 / Section 5.
+   - **Trade implications:** beat-and-rewarded sectors with rising forward growth = momentum-friendly for new entries; beat-but-punished broad tape = late-cycle, prefer credit spreads / harvest mode over new long-delta; specific sector with big downward revisions while the index revises up = single-name shorting/avoidance window.
+
+10. Call `get_btc_entry_signals` — present the composite score and recommended DCA rate:
    - 0.25x Strongly Unfavorable
    - 0.5x Unfavorable
    - 1x Mixed
    - 1.5x Favorable
    - 2x Strongly Favorable
 
-10. Assess:
+11. Assess:
    - Semi cycle thesis: any capex guidance changes? Phase timing still on track?
    - Sector rotation: who's leading, who's lagging?
    - Any macro shifts that affect CC expiry timing or coverage ratios?

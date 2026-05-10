@@ -6,6 +6,7 @@ requires-python = ">=3.12"
 dependencies = [
     "httpx[http2]",
     "openpyxl",
+    "pdfplumber",
 ]
 
 [build-system]
