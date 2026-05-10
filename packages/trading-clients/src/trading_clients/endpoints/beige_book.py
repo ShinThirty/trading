@@ -181,9 +181,22 @@ class BeigeBookSummaryResponse:
         parser = _SummaryHTMLParser()
         parser.feed(html)
 
+        # The trailing footer ("Note: This report was prepared at the Federal
+        # Reserve Bank of X based on information collected on or before ...")
+        # plus the boilerplate sentence after it sit in <p> tags after the last
+        # district highlight without an intervening <h5> reset, so without this
+        # trim they get glued onto the final district's paragraph. Cut the
+        # event stream at the first "Note:" <p>; the note-extraction regex
+        # below still scans the original list.
+        events = parser.events
+        for i, (tag, text) in enumerate(parser.events):
+            if tag == "p" and text.strip().startswith("Note:"):
+                events = parser.events[:i]
+                break
+
         # Extract period from H2 (most reliable — page title is generic).
         period_label = "?"
-        for tag, text in parser.events:
+        for tag, text in events:
             if tag == "h2":
                 m = _PERIOD_RE.search(text)
                 if m:
@@ -199,7 +212,7 @@ class BeigeBookSummaryResponse:
         current_district: str | None = None
         in_highlights = False
 
-        for tag, text in parser.events:
+        for tag, text in events:
             if tag in ("h2", "h3"):
                 # Section transitions reset the per-section accumulator.
                 current_section = None

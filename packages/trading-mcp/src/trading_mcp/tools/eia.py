@@ -19,6 +19,7 @@ Single tool, single call: surfaces headline + crude + products + refinery +
 """
 
 import asyncio
+import datetime
 
 from fastmcp import Context, FastMCP
 from trading_clients.endpoints import eia
@@ -125,6 +126,40 @@ def _flow_line(label: str, vals: list[float | None]) -> str:
     return f"  {label:42s}  {cur_m:>7.3f} mbbl/d  {wow_str}{pct_str}"
 
 
+def _retail_for_week(
+    retail_pts: list[eia.EiaPoint], wpsr_period: str, max_days: int = 7
+) -> float | None:
+    """Pick the retail-gasoline observation closest in time to a WPSR Friday.
+
+    Retail prints on Monday; WPSR week-ending is Friday. Picking the latest
+    Monday <= Friday biases stale: when the latest available Monday print
+    falls *after* the latest WPSR Friday (typical case — WPSR publishes
+    Wednesday for the prior Friday; the next Monday's pump survey is in
+    hand by then), the headline pump value disagrees with the trend's
+    latest row. Closest-in-time fixes the alignment so the trend's most
+    recent row matches the headline."""
+    if not retail_pts:
+        return None
+    try:
+        target = datetime.date.fromisoformat(wpsr_period)
+    except ValueError:
+        return None
+    best_v: float | None = None
+    best_dist: int | None = None
+    for rp in retail_pts:
+        try:
+            rp_date = datetime.date.fromisoformat(rp.period)
+        except ValueError:
+            continue
+        dist = abs((rp_date - target).days)
+        if dist > max_days:
+            continue
+        if best_dist is None or dist < best_dist:
+            best_dist = dist
+            best_v = rp.value
+    return best_v
+
+
 def _format_trend(
     crude: eia.EiaSeriesResponse | None,
     gasoline: eia.EiaSeriesResponse | None,
@@ -134,16 +169,14 @@ def _format_trend(
 ) -> str:
     """8-week trend table. Each row is keyed by the WPSR week-ending date
     (Friday) — we index off the crude series since that's the canonical WPSR
-    date. Retail gasoline publishes on a different cadence (Monday) so its
-    column lines up by closest preceding row, with an em-dash if no point
-    falls in the prior week."""
+    date. Retail gasoline publishes Monday (different cadence) so we pair
+    each WPSR Friday with the closest-in-time Monday print, capped at ±7d
+    so old rows fall back to em-dash if no nearby retail point exists."""
     if crude is None or not crude.data:
         return "(no data)"
     crude_pts = crude.data[:weeks]
     gas_by_period = {p.period: p.value for p in (gasoline.data if gasoline else [])}
     util_by_period = {p.period: p.value for p in (util.data if util else [])}
-    # Retail is keyed off Monday-of-week; we won't match exact dates so just
-    # walk it in parallel and use the most recent <= row date.
     retail_pts = list(retail.data) if retail else []
 
     rows: list[list[str]] = []
@@ -151,11 +184,7 @@ def _format_trend(
         crude_m = _kbbl_to_mbbl(p.value)
         gas_m = _kbbl_to_mbbl(gas_by_period.get(p.period))
         u = util_by_period.get(p.period)
-        retail_v: float | None = None
-        for rp in retail_pts:
-            if rp.period <= p.period:
-                retail_v = rp.value
-                break
+        retail_v = _retail_for_week(retail_pts, p.period)
         rows.append(
             [
                 p.period,

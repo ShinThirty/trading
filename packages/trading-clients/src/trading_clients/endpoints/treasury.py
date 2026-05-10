@@ -163,27 +163,77 @@ class QraArchiveResponse:
 
 class _StatementHTMLParser(HTMLParser):
     SKIP_TAGS = {"script", "style", "noscript", "header", "footer", "nav", "svg", "form", "aside"}
-    BLOCK_TAGS = {"p", "div", "br", "h1", "h2", "h3", "h4", "li", "tr", "table"}
+    BLOCK_TAGS = {"p", "div", "br", "h1", "h2", "h3", "h4", "li"}
 
     def __init__(self) -> None:
         super().__init__()
         self._skip = 0
+        # Table rendering. Treasury QRA statements include the auction-sizes
+        # table inline; without explicit handling the column-major HTML dumps
+        # cells onto their own lines and the grid is unreadable. We collect
+        # cell text into a per-row buffer and emit "| c1 | c2 | ... |" rows
+        # plus a markdown header separator after the first row of each table.
+        self._table_depth = 0
+        self._row_cells: list[str] = []
+        self._cell_buf: list[str] | None = None
+        self._first_row_pending: list[bool] = []
         self.parts: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         if tag in self.SKIP_TAGS:
             self._skip += 1
-        elif tag in self.BLOCK_TAGS and self._skip == 0:
+            return
+        if self._skip > 0:
+            return
+        if tag == "table":
+            self._table_depth += 1
+            self._first_row_pending.append(True)
+            self.parts.append("\n")
+            return
+        if tag == "tr" and self._table_depth > 0:
+            self._row_cells = []
+            return
+        if tag in ("td", "th") and self._table_depth > 0:
+            self._cell_buf = []
+            return
+        if tag in self.BLOCK_TAGS and self._cell_buf is None:
             self.parts.append("\n")
 
     def handle_endtag(self, tag: str) -> None:
         if tag in self.SKIP_TAGS and self._skip > 0:
             self._skip -= 1
-        elif tag in self.BLOCK_TAGS and self._skip == 0:
+            return
+        if self._skip > 0:
+            return
+        if tag == "table" and self._table_depth > 0:
+            self._table_depth -= 1
+            if self._first_row_pending:
+                self._first_row_pending.pop()
+            self.parts.append("\n")
+            return
+        if tag == "tr" and self._table_depth > 0:
+            if self._row_cells:
+                self.parts.append("| " + " | ".join(self._row_cells) + " |\n")
+                if self._first_row_pending and self._first_row_pending[-1]:
+                    sep = "|" + "|".join(["---"] * len(self._row_cells)) + "|\n"
+                    self.parts.append(sep)
+                    self._first_row_pending[-1] = False
+            self._row_cells = []
+            return
+        if tag in ("td", "th") and self._cell_buf is not None:
+            cell_text = re.sub(r"\s+", " ", "".join(self._cell_buf)).strip()
+            self._row_cells.append(cell_text)
+            self._cell_buf = None
+            return
+        if tag in self.BLOCK_TAGS and self._cell_buf is None:
             self.parts.append("\n")
 
     def handle_data(self, data: str) -> None:
-        if self._skip == 0:
+        if self._skip > 0:
+            return
+        if self._cell_buf is not None:
+            self._cell_buf.append(data)
+        else:
             self.parts.append(data)
 
 
