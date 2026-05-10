@@ -9,6 +9,12 @@ dependencies = [
     "pdfplumber",
 ]
 
+[project.optional-dependencies]
+# Playwright is only needed by sentiment_client (CBOE p/c, AAII — sites
+# require a real-browser context). Opt-in extra so option-monitor's Lambda
+# build stays lean.
+sentiment = ["playwright>=1.48"]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

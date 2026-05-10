@@ -5,11 +5,10 @@ description = "MCP server for trading stocks and options on Webull"
 requires-python = ">=3.12"
 dependencies = [
     "fastmcp>=3.2",
-    "trading-clients",
+    "trading-clients[sentiment]",
     "yfinance>=1.2",
     "youtube-transcript-api>=1.2.4",
     "akshare>=1.18.56",
-    "playwright>=1.48",
 ]
 
 [project.scripts]

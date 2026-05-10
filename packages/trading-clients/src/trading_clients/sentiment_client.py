@@ -15,12 +15,29 @@ that gives the latest reading plus full history at no extra cost.
 The client is optional: if Playwright fails to start (browser binary missing,
 sandbox issue), the MCP server skips it and the regime tool falls back to its
 non-sentiment dimensions.
+
+Playwright is an optional dep of trading-clients (the `sentiment` extra).
+Importing this module without it raises a clear error so consumers like
+option-monitor — which depend on plain `trading-clients` — never hit a
+confusing `ModuleNotFoundError: playwright` at import time.
 """
 
 import asyncio
 from typing import Any
 
-from playwright.async_api import Browser, BrowserContext, Playwright, async_playwright
+try:
+    from playwright.async_api import (
+        Browser,
+        BrowserContext,
+        Playwright,
+        async_playwright,
+    )
+except ImportError as e:  # pragma: no cover — exercised only without the extra
+    raise ImportError(
+        "sentiment_client requires Playwright. Install the optional extra: "
+        "pip install 'trading-clients[sentiment]' (or `uv sync --all-packages` "
+        "in this workspace, which installs it via trading-mcp)."
+    ) from e
 
 from trading_clients.cache import TTLCache
 from trading_clients.endpoint import Endpoint, ParamsRequest

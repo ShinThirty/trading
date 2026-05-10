@@ -2034,12 +2034,19 @@ dependencies = [
     { name = "pdfplumber" },
 ]
 
+[package.optional-dependencies]
+sentiment = [
+    { name = "playwright" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "httpx", extras = ["http2"] },
     { name = "openpyxl" },
     { name = "pdfplumber" },
+    { name = "playwright", marker = "extra == 'sentiment'", specifier = ">=1.48" },
 ]
+provides-extras = ["sentiment"]
 
 [[package]]
 name = "trading-mcp"
@@ -2048,8 +2055,7 @@ source = { editable = "packages/trading-mcp" }
 dependencies = [
     { name = "akshare" },
     { name = "fastmcp" },
-    { name = "playwright" },
-    { name = "trading-clients" },
+    { name = "trading-clients", extra = ["sentiment"] },
     { name = "yfinance" },
     { name = "youtube-transcript-api" },
 ]
@@ -2058,8 +2064,7 @@ dependencies = [
 requires-dist = [
     { name = "akshare", specifier = ">=1.18.56" },
     { name = "fastmcp", specifier = ">=3.2" },
-    { name = "playwright", specifier = ">=1.48" },
-    { name = "trading-clients", editable = "packages/trading-clients" },
+    { name = "trading-clients", extras = ["sentiment"], editable = "packages/trading-clients" },
     { name = "yfinance", specifier = ">=1.2" },
     { name = "youtube-transcript-api", specifier = ">=1.2.4" },
 ]
