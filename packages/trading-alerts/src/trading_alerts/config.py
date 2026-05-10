@@ -6,8 +6,6 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from trading_clients.config import TradierConfig, WebullConfig
-
 RC_PATH = Path.home() / ".tradingrc"
 
 
@@ -18,22 +16,17 @@ class DiscordConfig:
 
 
 @dataclass(frozen=True)
-class MonitorConfig:
-    webull: WebullConfig
-    tradier: TradierConfig
+class AlertsConfig:
     discord: DiscordConfig | None = None
     dynamodb_table: str | None = None  # None = in-memory store (local dev)
 
 
-def load_from_rc(path: Path = RC_PATH) -> MonitorConfig:
+def load_from_rc(path: Path = RC_PATH) -> AlertsConfig:
     """Load credentials from ~/.tradingrc INI file (local development)."""
     if not path.exists():
         raise FileNotFoundError(f"{path} not found")
     parser = configparser.ConfigParser()
     parser.read(path)
-
-    webull_section = parser["webull"]
-    tradier_section = parser["tradier"]
 
     discord = None
     if parser.has_section("discord") and parser.has_option("discord", "bot_token"):
@@ -42,50 +35,28 @@ def load_from_rc(path: Path = RC_PATH) -> MonitorConfig:
             channel_id=parser.get("discord", "channel_id"),
         )
 
-    return MonitorConfig(
-        webull=WebullConfig(
-            app_key=webull_section["app_key"],
-            app_secret=webull_section["app_secret"],
-            region_id=webull_section.get("region_id", "us"),
-            token=webull_section.get("token") or None,
-        ),
-        tradier=TradierConfig(
-            api_token=tradier_section["api_token"],
-            sandbox=parser.getboolean("tradier", "sandbox", fallback=True),
-        ),
-        discord=discord,
-    )
+    return AlertsConfig(discord=discord)
 
 
-def load_from_ssm(parameter_name: str | None = None) -> MonitorConfig:
+def load_from_ssm(parameter_name: str | None = None) -> AlertsConfig:
     """Load credentials from SSM Parameter Store SecureString (Lambda)."""
     import boto3
 
-    name = parameter_name or os.environ.get("SSM_PARAMETER", "/option-monitor/credentials")
+    name = parameter_name or os.environ.get("SSM_PARAMETER", "/trading-alerts/credentials")
     client = boto3.client("ssm")
     resp = client.get_parameter(Name=name, WithDecryption=True)
     data = json.loads(resp["Parameter"]["Value"])
-    return MonitorConfig(
-        webull=WebullConfig(
-            app_key=data["webull_app_key"],
-            app_secret=data["webull_app_secret"],
-            region_id="us",
-            token=data["webull_token"],
-        ),
-        tradier=TradierConfig(
-            api_token=data["tradier_api_token"],
-            sandbox=data.get("tradier_sandbox", "false").lower() == "true",
-        ),
+    return AlertsConfig(
         discord=DiscordConfig(
             bot_token=data["discord_bot_token"],
             channel_id=data["discord_channel_id"],
         ),
-        dynamodb_table=os.environ.get("DYNAMODB_TABLE", "option-monitor-alerts"),
+        dynamodb_table=os.environ.get("DYNAMODB_TABLE", "trading-alerts"),
     )
 
 
-def load_config() -> MonitorConfig:
-    """Auto-detect environment: SSM Parameter Store if AWS_LAMBDA_FUNCTION_NAME is set, else RC."""
+def load_config() -> AlertsConfig:
+    """Auto-detect environment: SSM if running in Lambda, else ~/.tradingrc."""
     if os.environ.get("AWS_LAMBDA_FUNCTION_NAME"):
         return load_from_ssm()
     return load_from_rc()

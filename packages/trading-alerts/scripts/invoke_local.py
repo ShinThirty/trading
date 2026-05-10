@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Local test runner — invokes the handler with ~/.tradingrc credentials.
+"""Run a watcher locally with ~/.tradingrc credentials.
 
 Usage:
-    uv run python packages/trading-alerts/scripts/invoke_local.py
-    uv run python packages/trading-alerts/scripts/invoke_local.py --skip-clock
+    uv run python packages/trading-alerts/scripts/invoke_local.py --trigger naaim
+    uv run python packages/trading-alerts/scripts/invoke_local.py --list
 """
 
 import argparse
@@ -11,37 +11,30 @@ import json
 import logging
 import sys
 
-logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
-
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Invoke option monitor locally")
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+
+    parser = argparse.ArgumentParser(description="Invoke a trading-alerts watcher locally")
+    parser.add_argument("--trigger", help="Watcher name to run (e.g., naaim, gex)")
     parser.add_argument(
-        "--skip-clock",
-        action="store_true",
-        help="Skip market clock check (test outside market hours)",
+        "--list", action="store_true", help="List available watcher triggers and exit"
     )
     args = parser.parse_args()
 
-    if args.skip_clock:
-        # Monkey-patch get to return open clock for the CLOCK endpoint
-        from trading_clients.tradier_client import TradierClient
+    from trading_alerts.handler import WATCHERS, handler
 
-        original_get = TradierClient.get
+    if args.list:
+        print("Available triggers:" if WATCHERS else "No watchers wired yet.")
+        for name in sorted(WATCHERS):
+            print(f"  {name}")
+        return
 
-        def patched_get(self, endpoint, request):
-            from trading_clients.endpoints.tradier import CLOCK, ClockResponse
+    if not args.trigger:
+        parser.error("--trigger is required (or --list to see available watchers)")
 
-            if endpoint is CLOCK:
-                return ClockResponse(data={"state": "open"})
-            return original_get(self, endpoint, request)
-
-        TradierClient.get = patched_get
-
-    from trading_alerts.handler import handler
-
-    result = handler({}, None)
-    print(json.dumps(result, indent=2))
+    result = handler({"trigger": args.trigger}, None)
+    print(json.dumps(result, indent=2, default=str))
 
     if result.get("status") == "error":
         sys.exit(1)

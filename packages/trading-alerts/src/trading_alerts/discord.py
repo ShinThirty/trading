@@ -1,4 +1,10 @@
-"""Discord bot notifications with rich embeds and mute buttons."""
+"""Discord bot notifications: generic embed sender + mute buttons.
+
+Each alert posts:
+- An embed (title, color, fields, footer)
+- An action row with Mute 1h / Mute 24h buttons whose custom_id encodes
+  the dedup_key, parsed by interaction.py when the user clicks.
+"""
 
 import logging
 from typing import Any
@@ -6,23 +12,22 @@ from typing import Any
 import httpx
 
 from trading_alerts.config import DiscordConfig
-from trading_alerts.monitor.positions import ShortOptionLeg
+from trading_alerts.event import AlertEvent
 
 logger = logging.getLogger(__name__)
 
 DISCORD_API = "https://discord.com/api/v10"
 
+COLOR_INFO = 0x3498DB  # blue
 COLOR_WARNING = 0xFFAA00  # amber
 COLOR_CRITICAL = 0xFF0000  # red
-COLOR_ERROR = 0x8B0000  # dark red for system errors
+COLOR_ERROR = 0x8B0000  # dark red (system errors only)
 
-
-def _strategy_label(leg: ShortOptionLeg) -> str:
-    if leg.option_type == "CALL" and leg.strategy == "COVERED_STOCK":
-        return "Covered Call"
-    if leg.option_type == "PUT":
-        return "Cash-Secured Put"
-    return leg.strategy
+LEVEL_COLOR: dict[str, int] = {
+    "info": COLOR_INFO,
+    "warning": COLOR_WARNING,
+    "critical": COLOR_CRITICAL,
+}
 
 
 def _mute_buttons(dedup_key: str) -> dict:
@@ -46,59 +51,30 @@ def _mute_buttons(dedup_key: str) -> dict:
     }
 
 
-def send_alert(
-    discord: DiscordConfig | None,
-    leg: ShortOptionLeg,
-    level: str,
-    underlying_price: float,
-    proximity_pct: float,
-) -> None:
-    """Send a warning or critical alert with mute buttons."""
-    if not discord:
-        logger.warning("No Discord bot configured, skipping notification")
-        return
-    is_itm = proximity_pct <= 0
-    color = COLOR_CRITICAL if level == "critical" else COLOR_WARNING
-    level_label = "CRITICAL" if level == "critical" else "Warning"
-
-    title = f"{level_label}: {leg.symbol} Short {leg.option_type} @ ${leg.strike:.2f}"
-    if is_itm:
-        title += " ITM"
-
-    fields: list[dict[str, Any]] = [
-        {"name": "Account", "value": leg.account_label or leg.account_id[-4:], "inline": True},
-        {"name": "Underlying Price", "value": f"${underlying_price:.2f}", "inline": True},
-        {"name": "Strike", "value": f"${leg.strike:.2f}", "inline": True},
-        {"name": "DTE", "value": str(leg.dte), "inline": True},
-        {
-            "name": "Proximity",
-            "value": f"{'ITM' if is_itm else f'{proximity_pct:.1%} from strike'}",
-            "inline": True,
-        },
-        {"name": "Strategy", "value": _strategy_label(leg), "inline": True},
-    ]
-
-    embed = {
-        "title": title,
-        "color": color,
-        "fields": fields,
-        "footer": {"text": f"{leg.symbol} {leg.strike:.0f}{leg.option_type[0]} {leg.expiration}"},
+def send_embed(discord: DiscordConfig, event: AlertEvent) -> None:
+    """Post an alert embed with mute buttons."""
+    embed: dict[str, Any] = {
+        "title": event.title,
+        "color": LEVEL_COLOR.get(event.level, COLOR_INFO),
     }
+    if event.fields:
+        embed["fields"] = event.fields
+    if event.footer_text:
+        embed["footer"] = {"text": event.footer_text}
 
     payload: dict[str, Any] = {
         "embeds": [embed],
-        "components": [_mute_buttons(leg.dedup_key)],
+        "components": [_mute_buttons(event.dedup_key)],
     }
-
     _post_bot(discord, payload)
 
 
 def send_error(discord: DiscordConfig | None, message: str) -> None:
-    """Send a system error alert (e.g., token expired)."""
+    """Post a system-level error (no mute buttons; we want to see these)."""
     if not discord:
         return
     embed = {
-        "title": "Option Monitor Error",
+        "title": "Trading Alerts Error",
         "description": message,
         "color": COLOR_ERROR,
     }
