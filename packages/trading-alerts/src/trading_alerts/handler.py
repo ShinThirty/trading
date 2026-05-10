@@ -14,7 +14,7 @@ from trading_alerts.config import AlertsConfig, load_config
 from trading_alerts.dispatch import dispatch
 from trading_alerts.event import AlertEvent
 from trading_alerts.state import AlertStore, alert_store
-from trading_alerts.watchers import naaim
+from trading_alerts.watchers import gex, naaim
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -23,6 +23,7 @@ WatcherFn = Callable[[AlertsConfig], Coroutine[Any, Any, list[AlertEvent]]]
 
 WATCHERS: dict[str, WatcherFn] = {
     "naaim": naaim.run,
+    "gex": gex.run,
 }
 
 # Module-level cache for Lambda warm starts
