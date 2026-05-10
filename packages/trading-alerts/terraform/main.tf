@@ -18,7 +18,10 @@ provider "aws" {
 
 resource "aws_dynamodb_table" "alerts" {
   name         = var.dynamodb_table_name
-  billing_mode = "PAY_PER_REQUEST" # on-demand, free tier eligible
+  billing_mode = "PROVISIONED" # 25 RCU/25 WCU stays inside the always-free tier
+
+  read_capacity  = 25
+  write_capacity = 25
 
   hash_key = "dedup_key"
 
