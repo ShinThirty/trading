@@ -17,9 +17,11 @@ from trading_clients.finnhub_client import FinnhubClient
 from trading_clients.fmp_client import FmpClient
 from trading_clients.fool_client import FoolClient
 from trading_clients.fred_client import FredClient
+from trading_clients.freightos_client import FreightosClient
 from trading_clients.kalshi_client import KalshiClient
 from trading_clients.naaim_client import NaaimClient
 from trading_clients.polymarket_client import PolymarketClient
+from trading_clients.portwatch_client import PortwatchClient
 from trading_clients.reddit_client import RedditClient
 from trading_clients.sentiment_client import SentimentClient
 from trading_clients.squeeze_metrics_client import SqueezeMetricsClient
@@ -134,6 +136,14 @@ def _tsmc(ctx: Context) -> TsmcClient:
 
 def _treasury(ctx: Context) -> TreasuryClient:
     return ctx.lifespan_context["treasury"]
+
+
+def _freightos(ctx: Context) -> FreightosClient:
+    return ctx.lifespan_context["freightos"]
+
+
+def _portwatch(ctx: Context) -> PortwatchClient:
+    return ctx.lifespan_context["portwatch"]
 
 
 def _beige_book(ctx: Context) -> BeigeBookClient:

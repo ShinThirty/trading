@@ -57,6 +57,9 @@ EXPECTED_TOOLS: dict[str, set[str]] = {
         "get_earnings_transcript",
         "get_earnings_release",
     },
+    "trading_mcp.tools.freight": {
+        "get_freight_signals",
+    },
     "trading_mcp.tools.fundamentals": {
         "get_company_profile",
         "get_income_statement",

@@ -59,6 +59,8 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │       ├── kalshi_client.py         # No auth (Kalshi elections-api event/market data)
 │   │       ├── tsmc_client.py           # No auth, identifies via User-Agent (TSMC IR monthly revenue)
 │   │       ├── treasury_client.py       # No auth, identifies via User-Agent (Treasury QRA Policy Statement)
+│   │       ├── freightos_client.py      # No auth, identifies via User-Agent (Freightos Baltic Index lane pages)
+│   │       ├── portwatch_client.py      # No auth, identifies via User-Agent (IMF PortWatch ArcGIS chokepoint data)
 │   │       ├── beige_book_client.py     # No auth, identifies via User-Agent (Fed Beige Book)
 │   │       ├── squeeze_metrics_client.py # No auth (SqueezeMetrics public DIX/GEX CSV)
 │   │       ├── naaim_client.py          # No auth (NAAIM since-inception XLSX history)
@@ -81,6 +83,7 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │           ├── kalshi.py            # 1 endpoint (event by ticker with nested markets)
 │   │           ├── tsmc.py              # 1 endpoint (consolidated monthly revenue by year)
 │   │           ├── treasury.py          # 3 endpoints (QRA most-recent index, archive index, statement page)
+│   │           ├── freight.py           # 2 endpoints (Freightos FBX lane page + IMF PortWatch chokepoints query) with FBX_LANES + CHOKEPOINTS catalogs
 │   │           ├── beige_book.py        # 2 endpoints (release index, National Summary by period)
 │   │           ├── squeeze_metrics.py   # 1 endpoint (DIX/GEX daily history CSV)
 │   │           ├── naaim.py             # NaaimHistoryResponse (XLSX-parsed weekly history with z-score)
@@ -116,6 +119,7 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │           ├── prediction_markets.py # Polymarket + Kalshi by-key fetcher and cross-source compare
 │   │           ├── tsmc.py              # TSMC monthly revenue (semi cycle leading indicator)
 │   │           ├── treasury.py          # QRA Policy Statement texture (latest + prior for diff)
+│   │           ├── freight.py           # Container freight signals: FBX lane prices + chokepoint transit volumes
 │   │           ├── beige_book.py        # Fed Beige Book National Summary + 12 district highlights
 │   │           ├── squeeze_metrics.py   # SqueezeMetrics DIX (dark-pool flow) + GEX (dealer gamma)
 │   │           ├── naaim.py             # NAAIM Exposure Index history with 52w z-score / percentile
@@ -219,6 +223,8 @@ EventBridge (cron, Mon-Fri 13:30-20:00 UTC)
 | **Kalshi** | Prediction-market implied probabilities (CFTC-regulated US exchange) — by event ticker | None (elections-api JSON) |
 | **TSMC** | Consolidated monthly revenue (NT$M) — leading indicator for the global semi cycle, released ~10th of each month | None (User-Agent only) |
 | **Treasury** | Quarterly Refunding Announcement (QRA) Policy Statement — auction sizes, bill-vs-coupon mix, buyback program, and forward guidance. Released 4x/year (early Feb / May / Aug / Nov), Wednesday 8:30 AM after Monday's borrowing estimate. | None (User-Agent only) |
+| **Freightos** | Freightos Baltic Index (FBX) — weekly container freight prices per lane (USD/FEU). Published Fridays. Used for geopolitical-risk rerouting confirmation. | None (User-Agent only) |
+| **IMF PortWatch** | Daily chokepoint vessel transit volumes (Suez, Bab el-Mandeb, Hormuz, Panama, Cape of Good Hope, Bosporus, Malacca and 21 more). ArcGIS REST. ~5-day publish lag. | None (User-Agent only) |
 | **SqueezeMetrics** | DIX (dark-pool dollar-weighted short ratio of S&P 500 components) + GEX (dealer net gamma in $) — daily history CSV powering the public /monitor/dix chart | None (User-Agent only) |
 | **CBOE** | Equity put/call ratio (daily) | None (Playwright, realistic browser context) |
 | **AAII** | Investor sentiment survey bull/neutral/bear (weekly) | None (Playwright, realistic browser context) |

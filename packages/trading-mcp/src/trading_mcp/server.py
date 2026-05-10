@@ -15,9 +15,11 @@ from trading_clients.finnhub_client import FinnhubClient
 from trading_clients.fmp_client import FmpClient
 from trading_clients.fool_client import FoolClient
 from trading_clients.fred_client import FredClient
+from trading_clients.freightos_client import FreightosClient
 from trading_clients.kalshi_client import KalshiClient
 from trading_clients.naaim_client import NaaimClient
 from trading_clients.polymarket_client import PolymarketClient
+from trading_clients.portwatch_client import PortwatchClient
 from trading_clients.reddit_client import RedditClient
 from trading_clients.sentiment_client import SentimentClient
 from trading_clients.squeeze_metrics_client import SqueezeMetricsClient
@@ -40,6 +42,7 @@ from trading_mcp.tools.cn_market import mcp as cn_market_mcp
 from trading_mcp.tools.crypto import mcp as crypto_mcp
 from trading_mcp.tools.decisions import mcp as decisions_mcp
 from trading_mcp.tools.earnings import mcp as earnings_mcp
+from trading_mcp.tools.freight import mcp as freight_mcp
 from trading_mcp.tools.fundamentals import mcp as fundamentals_mcp
 from trading_mcp.tools.macro import mcp as macro_mcp
 from trading_mcp.tools.naaim import mcp as naaim_mcp
@@ -85,6 +88,8 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
     ctx["kalshi"] = KalshiClient()
     ctx["tsmc"] = TsmcClient()
     ctx["treasury"] = TreasuryClient()
+    ctx["freightos"] = FreightosClient()
+    ctx["portwatch"] = PortwatchClient()
     ctx["beige_book"] = BeigeBookClient()
     ctx["squeeze_metrics"] = SqueezeMetricsClient()
     ctx["naaim"] = NaaimClient()
@@ -127,6 +132,7 @@ mcp.mount(cftc_mcp)
 mcp.mount(prediction_markets_mcp)
 mcp.mount(tsmc_mcp)
 mcp.mount(treasury_mcp)
+mcp.mount(freight_mcp)
 mcp.mount(beige_book_mcp)
 mcp.mount(squeeze_metrics_mcp)
 mcp.mount(naaim_mcp)
