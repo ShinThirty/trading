@@ -11,7 +11,7 @@ dependencies = [
 
 [project.optional-dependencies]
 # Playwright is only needed by sentiment_client (CBOE p/c, AAII — sites
-# require a real-browser context). Opt-in extra so option-monitor's Lambda
+# require a real-browser context). Opt-in extra so trading-alerts' Lambda
 # build stays lean.
 sentiment = ["playwright>=1.48"]
 

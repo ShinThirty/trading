@@ -18,7 +18,7 @@ non-sentiment dimensions.
 
 Playwright is an optional dep of trading-clients (the `sentiment` extra).
 Importing this module without it raises a clear error so consumers like
-option-monitor — which depend on plain `trading-clients` — never hit a
+trading-alerts — which depend on plain `trading-clients` — never hit a
 confusing `ModuleNotFoundError: playwright` at import time.
 """
 

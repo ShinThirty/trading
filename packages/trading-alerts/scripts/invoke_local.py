@@ -2,8 +2,8 @@
 """Local test runner — invokes the handler with ~/.tradingrc credentials.
 
 Usage:
-    uv run python packages/option-monitor/scripts/invoke_local.py
-    uv run python packages/option-monitor/scripts/invoke_local.py --skip-clock
+    uv run python packages/trading-alerts/scripts/invoke_local.py
+    uv run python packages/trading-alerts/scripts/invoke_local.py --skip-clock
 """
 
 import argparse
@@ -38,7 +38,7 @@ def main() -> None:
 
         TradierClient.get = patched_get
 
-    from option_monitor.handler import handler
+    from trading_alerts.handler import handler
 
     result = handler({}, None)
     print(json.dumps(result, indent=2))

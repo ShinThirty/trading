@@ -11,7 +11,7 @@ State transitions:
 
 from dataclasses import dataclass
 
-from option_monitor.state import AlertRecord
+from trading_alerts.state import AlertRecord
 
 COOLDOWN_SECONDS = 1800  # 30 minutes
 

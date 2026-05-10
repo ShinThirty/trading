@@ -5,8 +5,8 @@ from typing import Any
 
 import httpx
 
-from option_monitor.config import DiscordConfig
-from option_monitor.monitor.positions import ShortOptionLeg
+from trading_alerts.config import DiscordConfig
+from trading_alerts.monitor.positions import ShortOptionLeg
 
 logger = logging.getLogger(__name__)
 

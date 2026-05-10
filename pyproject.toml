@@ -13,7 +13,7 @@ dev = ["ruff", "ty", "pytest"]
 extra-paths = [
     "packages/trading-clients/src",
     "packages/trading-mcp/src",
-    "packages/option-monitor/src",
+    "packages/trading-alerts/src",
 ]
 
 [tool.ruff]

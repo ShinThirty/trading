@@ -29,12 +29,12 @@ from trading_clients.endpoints.webull import (
 from trading_clients.tradier_client import TradierClient
 from trading_clients.webull_client import WebullClient
 
-from option_monitor.config import MonitorConfig, load_config
-from option_monitor.discord import send_alert, send_error
-from option_monitor.monitor.alerts import COOLDOWN_SECONDS, decide
-from option_monitor.monitor.positions import extract_short_legs
-from option_monitor.monitor.thresholds import evaluate
-from option_monitor.state import AlertRecord, DynamoAlertStore, InMemoryAlertStore
+from trading_alerts.config import MonitorConfig, load_config
+from trading_alerts.discord import send_alert, send_error
+from trading_alerts.monitor.alerts import COOLDOWN_SECONDS, decide
+from trading_alerts.monitor.positions import extract_short_legs
+from trading_alerts.monitor.thresholds import evaluate
+from trading_alerts.state import AlertRecord, DynamoAlertStore, InMemoryAlertStore
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)

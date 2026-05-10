@@ -1,6 +1,6 @@
 """DTE-based threshold evaluation for option strike proximity."""
 
-from option_monitor.monitor.positions import ShortOptionLeg
+from trading_alerts.monitor.positions import ShortOptionLeg
 
 
 def evaluate(leg: ShortOptionLeg, underlying_price: float) -> str | None:
