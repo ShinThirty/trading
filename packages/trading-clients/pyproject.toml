@@ -2,7 +2,7 @@
 name = "trading-clients"
 version = "0.1.0"
 description = "Shared API clients for Webull, Tradier, Finnhub, FMP, FRED, and Alpha Vantage"
-requires-python = ">=3.12"
+requires-python = ">=3.13"
 dependencies = [
     "httpx[http2]",
     "openpyxl",

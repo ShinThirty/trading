@@ -2,7 +2,7 @@
 name = "trading-mcp"
 version = "0.1.0"
 description = "MCP server for trading stocks and options on Webull"
-requires-python = ">=3.12"
+requires-python = ">=3.13"
 dependencies = [
     "fastmcp>=3.2",
     "trading-clients[sentiment]",
