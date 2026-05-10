@@ -33,7 +33,7 @@ resource "aws_dynamodb_table" "alerts" {
   }
 
   tags = {
-    Service = "option-monitor"
+    Service = "trading-alerts"
   }
 }
 
@@ -41,12 +41,12 @@ resource "aws_dynamodb_table" "alerts" {
 
 resource "aws_ssm_parameter" "credentials" {
   name        = var.ssm_parameter_name
-  description = "Option monitor credentials (Webull, Tradier, Discord)"
+  description = "trading-alerts credentials (Discord bot)"
   type        = "SecureString"
-  value       = "{}" # placeholder — populate via AWS CLI after first apply
+  value       = "{}" # placeholder — populate via `make credentials` after first apply
 
   tags = {
-    Service = "option-monitor"
+    Service = "trading-alerts"
   }
 
   lifecycle {
@@ -67,11 +67,11 @@ data "aws_iam_policy_document" "lambda_assume" {
 }
 
 resource "aws_iam_role" "lambda" {
-  name               = "option-monitor-lambda"
+  name               = "trading-alerts-lambda"
   assume_role_policy = data.aws_iam_policy_document.lambda_assume.json
 
   tags = {
-    Service = "option-monitor"
+    Service = "trading-alerts"
   }
 }
 
@@ -84,12 +84,12 @@ data "aws_iam_policy_document" "lambda_permissions" {
       "logs:PutLogEvents",
     ]
     resources = [
-      "${aws_cloudwatch_log_group.monitor.arn}:*",
+      "${aws_cloudwatch_log_group.dispatcher.arn}:*",
       "${aws_cloudwatch_log_group.interaction.arn}:*",
     ]
   }
 
-  # DynamoDB (monitor: Get/Put, interaction: Update/Scan)
+  # DynamoDB (dispatcher: Get/Put, interaction: Update/Scan)
   statement {
     actions = [
       "dynamodb:GetItem",
@@ -108,17 +108,17 @@ data "aws_iam_policy_document" "lambda_permissions" {
 }
 
 resource "aws_iam_role_policy" "lambda" {
-  name   = "option-monitor-permissions"
+  name   = "trading-alerts-permissions"
   role   = aws_iam_role.lambda.id
   policy = data.aws_iam_policy_document.lambda_permissions.json
 }
 
-# --- Lambda ---
+# --- Lambda — dispatcher (cron-driven watchers) ---
 
-resource "aws_lambda_function" "monitor" {
-  function_name = "option-monitor"
+resource "aws_lambda_function" "dispatcher" {
+  function_name = "trading-alerts-dispatcher"
   role          = aws_iam_role.lambda.arn
-  handler       = "option_monitor.handler.handler"
+  handler       = "trading_alerts.handler.handler"
   runtime       = "python3.13"
   timeout       = var.lambda_timeout
   memory_size   = var.lambda_memory_mb
@@ -134,50 +134,80 @@ resource "aws_lambda_function" "monitor" {
   }
 
   tags = {
-    Service = "option-monitor"
+    Service = "trading-alerts"
   }
 }
 
-resource "aws_cloudwatch_log_group" "monitor" {
-  name              = "/aws/lambda/${aws_lambda_function.monitor.function_name}"
+resource "aws_cloudwatch_log_group" "dispatcher" {
+  name              = "/aws/lambda/${aws_lambda_function.dispatcher.function_name}"
   retention_in_days = 14
 
   tags = {
-    Service = "option-monitor"
+    Service = "trading-alerts"
   }
 }
 
-# --- EventBridge ---
+# --- EventBridge — per-watcher schedules ---
+#
+# Each rule fires the dispatcher with a static {"trigger": "<name>"} input,
+# which the handler routes to the matching watcher.
 
-resource "aws_cloudwatch_event_rule" "schedule" {
-  name                = "option-monitor-schedule"
-  description         = "Trigger option monitor every 5 min during market hours"
-  schedule_expression = var.schedule_expression
+# NAAIM publishes Wed afternoon ET; fire Thu morning to ensure the print is live.
+resource "aws_cloudwatch_event_rule" "naaim" {
+  name                = "trading-alerts-naaim"
+  description         = "NAAIM Exposure Index crowding watcher (weekly, Thu)"
+  schedule_expression = var.naaim_schedule
 
   tags = {
-    Service = "option-monitor"
+    Service = "trading-alerts"
   }
 }
 
-resource "aws_cloudwatch_event_target" "monitor" {
-  rule = aws_cloudwatch_event_rule.schedule.name
-  arn  = aws_lambda_function.monitor.arn
+resource "aws_cloudwatch_event_target" "naaim" {
+  rule  = aws_cloudwatch_event_rule.naaim.name
+  arn   = aws_lambda_function.dispatcher.arn
+  input = jsonencode({ trigger = "naaim" })
 }
 
-resource "aws_lambda_permission" "eventbridge" {
-  statement_id  = "AllowEventBridgeInvoke"
+resource "aws_lambda_permission" "naaim" {
+  statement_id  = "AllowEventBridgeNaaim"
   action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.monitor.function_name
+  function_name = aws_lambda_function.dispatcher.function_name
   principal     = "events.amazonaws.com"
-  source_arn    = aws_cloudwatch_event_rule.schedule.arn
+  source_arn    = aws_cloudwatch_event_rule.naaim.arn
 }
 
-# --- Discord Interaction Handler ---
+# SqueezeMetrics CSV refreshes ~30 min after market close; fire ~6 PM ET.
+resource "aws_cloudwatch_event_rule" "gex" {
+  name                = "trading-alerts-gex"
+  description         = "GEX (dealer gamma) regime watcher (daily, Mon-Fri after close)"
+  schedule_expression = var.gex_schedule
+
+  tags = {
+    Service = "trading-alerts"
+  }
+}
+
+resource "aws_cloudwatch_event_target" "gex" {
+  rule  = aws_cloudwatch_event_rule.gex.name
+  arn   = aws_lambda_function.dispatcher.arn
+  input = jsonencode({ trigger = "gex" })
+}
+
+resource "aws_lambda_permission" "gex" {
+  statement_id  = "AllowEventBridgeGex"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.dispatcher.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.gex.arn
+}
+
+# --- Lambda — Discord interaction handler (mute buttons + slash commands) ---
 
 resource "aws_lambda_function" "interaction" {
-  function_name = "option-monitor-interaction"
-  role          = aws_iam_role.lambda.arn # shares IAM role with monitor
-  handler       = "option_monitor.interaction.handler"
+  function_name = "trading-alerts-interaction"
+  role          = aws_iam_role.lambda.arn # shares IAM role with dispatcher
+  handler       = "trading_alerts.interaction.handler"
   runtime       = "python3.13"
   timeout       = 10
   memory_size   = 128
@@ -193,7 +223,7 @@ resource "aws_lambda_function" "interaction" {
   }
 
   tags = {
-    Service = "option-monitor"
+    Service = "trading-alerts"
   }
 }
 
@@ -202,7 +232,7 @@ resource "aws_cloudwatch_log_group" "interaction" {
   retention_in_days = 14
 
   tags = {
-    Service = "option-monitor"
+    Service = "trading-alerts"
   }
 }
 
@@ -218,4 +248,3 @@ resource "aws_lambda_permission" "function_url_public" {
   principal              = "*"
   function_url_auth_type = "NONE"
 }
-

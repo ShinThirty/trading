@@ -13,19 +13,25 @@ variable "lambda_zip_path" {
 variable "ssm_parameter_name" {
   description = "SSM Parameter Store name for credentials (SecureString)"
   type        = string
-  default     = "/option-monitor/credentials"
+  default     = "/trading-alerts/credentials"
 }
 
 variable "dynamodb_table_name" {
   description = "DynamoDB table name for alert state"
   type        = string
-  default     = "option-monitor-alerts"
+  default     = "trading-alerts"
 }
 
-variable "schedule_expression" {
-  description = "EventBridge cron schedule (Mon-Fri, 13:30-20:00 UTC = market hours)"
+variable "naaim_schedule" {
+  description = "EventBridge cron for NAAIM watcher (default: Thu 14:00 UTC = 10 AM ET in DST, after Wed PM print)"
   type        = string
-  default     = "cron(0/5 13-20 ? * MON-FRI *)"
+  default     = "cron(0 14 ? * THU *)"
+}
+
+variable "gex_schedule" {
+  description = "EventBridge cron for GEX watcher (default: Mon-Fri 22:00 UTC = 6 PM ET in DST, after SqueezeMetrics CSV refresh)"
+  type        = string
+  default     = "cron(0 22 ? * MON-FRI *)"
 }
 
 variable "lambda_memory_mb" {
