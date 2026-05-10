@@ -139,9 +139,7 @@ class QraArchiveResponse:
             if path in seen:
                 continue
             seen.add(path)
-            items.append(
-                QraArchiveEntry(path=path, year=int(m.group(2)), quarter=int(m.group(3)))
-            )
+            items.append(QraArchiveEntry(path=path, year=int(m.group(2)), quarter=int(m.group(3))))
         items.sort(key=lambda e: (e.year, e.quarter), reverse=True)
         return cls(entries=items)
 

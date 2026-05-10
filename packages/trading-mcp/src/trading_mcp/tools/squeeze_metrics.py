@@ -142,9 +142,7 @@ def _percentile(values: list[float], target: float) -> float:
     return below / n * 100
 
 
-def _window_stats(
-    rows: list[DixRow], days: int, attr: str
-) -> tuple[float, float]:
+def _window_stats(rows: list[DixRow], days: int, attr: str) -> tuple[float, float]:
     """Return (mean, latest_percentile) for trailing `days` window."""
     window = rows[-days:] if len(rows) >= days else rows
     values = [getattr(r, attr) for r in window]
