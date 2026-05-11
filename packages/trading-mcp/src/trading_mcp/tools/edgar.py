@@ -111,12 +111,17 @@ async def get_recent_filings(
     return "\n".join(sections)
 
 
+_DEFAULT_MAX_CHARS = 100_000
+
+
 @mcp.tool()
 async def get_filing_content(
     ctx: Context,
     symbol: str,
     accession_number: str,
     document: str,
+    max_chars: int = _DEFAULT_MAX_CHARS,
+    offset: int = 0,
 ) -> str:
     """Fetch and parse the text of a specific document inside an SEC filing.
 
@@ -128,6 +133,14 @@ async def get_filing_content(
     document: filename to fetch — use the 'Primary Doc' shown in
         get_recent_filings output, or any exhibit name from the filing index
         (e.g. 'ex99-1.htm' for a press release attachment).
+    max_chars: cap on returned text (default 100k chars ≈ 25k tokens). 8-K
+        press releases easily fit; 10-Q/10-K primary docs are typically
+        300k-1M chars and will be truncated. Re-call with a larger
+        max_chars or a non-zero offset to read further.
+    offset: number of chars to skip from the start. Useful for paging through
+        long 10-Q/10-K filings — the first ~15-20k chars of these are
+        inline-XBRL tag soup, so offset=20000 gets you straight to the
+        narrative.
 
     For multi-document filings (8-K with exhibits, 10-K with segments) you may
     need separate calls — start with the primary document, then drill into
@@ -155,10 +168,27 @@ async def get_filing_content(
             f"{_exc_summary('EDGAR filing doc', ex)}"
         )
 
+    full_text = doc.text or ""
+    total = len(full_text)
+    start = max(0, min(offset, total))
+    end = min(total, start + max(0, max_chars))
+    body = full_text[start:end] or "(no content)"
+
+    notes: list[str] = []
+    if start > 0:
+        notes.append(f"skipped first {start:,} chars (offset)")
+    if end < total:
+        notes.append(
+            f"truncated at {end:,}/{total:,} chars; re-call with "
+            f"offset={end} to continue"
+        )
+    note_line = f"Note: {'; '.join(notes)}\n" if notes else ""
+
     url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{accession_no_dashes}/{document}"
     return (
         f"# {ticker} filing content — {document}\n"
         f"Accession: {accession_number}\n"
-        f"Source: {url}\n\n"
-        f"{doc.to_output()}"
+        f"Source: {url}\n"
+        f"{note_line}\n"
+        f"{body}"
     )
