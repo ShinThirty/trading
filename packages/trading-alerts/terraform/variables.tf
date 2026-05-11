@@ -40,6 +40,12 @@ variable "dix_schedule" {
   default     = "cron(0 22 ? * MON-FRI *)"
 }
 
+variable "pce_schedule" {
+  description = "EventBridge cron for PCE watcher (default: daily 14:30 UTC, days 26-31 — covers the typical 8:30 ET end-month publish; non-PCE days no-op via dedup)"
+  type        = string
+  default     = "cron(30 14 26-31 * ? *)"
+}
+
 variable "cpi_schedule" {
   description = "EventBridge cron for CPI watcher (default: daily 14:30 UTC, days 10-15 — covers the typical 8:30 ET mid-month publish; non-CPI days no-op via dedup)"
   type        = string

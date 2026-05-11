@@ -205,6 +205,32 @@ resource "aws_lambda_permission" "gex" {
   source_arn    = aws_cloudwatch_event_rule.gex.arn
 }
 
+# PCE publishes near month-end at 8:30 AM ET. Run daily 14:30 UTC during
+# days 26-31; non-PCE days no-op via slug dedup.
+resource "aws_cloudwatch_event_rule" "pce" {
+  name                = "trading-alerts-pce"
+  description         = "BEA Personal Income & Outlays (PCE) new-release watcher"
+  schedule_expression = var.pce_schedule
+
+  tags = {
+    Service = "trading-alerts"
+  }
+}
+
+resource "aws_cloudwatch_event_target" "pce" {
+  rule  = aws_cloudwatch_event_rule.pce.name
+  arn   = aws_lambda_function.dispatcher.arn
+  input = jsonencode({ trigger = "pce" })
+}
+
+resource "aws_lambda_permission" "pce" {
+  statement_id  = "AllowEventBridgePce"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.dispatcher.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.pce.arn
+}
+
 # CPI publishes mid-month at 8:30 AM ET (typical days 10-15). Run daily
 # 14:30 UTC during that window; non-CPI days no-op via dedup.
 resource "aws_cloudwatch_event_rule" "cpi" {
