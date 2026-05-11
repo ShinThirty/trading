@@ -15,6 +15,7 @@ from trading_alerts.dispatch import dispatch
 from trading_alerts.event import AlertEvent
 from trading_alerts.state import AlertStore, alert_store
 from trading_alerts.watchers import (
+    activist_filing,
     beige_book,
     cpi,
     dix,
@@ -22,6 +23,7 @@ from trading_alerts.watchers import (
     fomc,
     gdp,
     gex,
+    material_8k,
     naaim,
     nfp,
     pce,
@@ -49,6 +51,8 @@ WATCHERS: dict[str, WatcherFn] = {
     "pce": pce.run,
     "gdp": gdp.run,
     "fomc": fomc.run,
+    "material_8k": material_8k.run,
+    "activist_filing": activist_filing.run,
 }
 
 # Module-level cache for Lambda warm starts
