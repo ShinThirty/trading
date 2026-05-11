@@ -303,12 +303,15 @@ async def pipeline_resync(ctx: Context) -> str:
     """
     import os
 
-    from trading_mcp.pipeline_sync import _BUCKET_ENV, _KEY_ENV
+    from trading_mcp.pipeline_sync import _BUCKET_ENV, _KEY_ENV, publish_pipeline_to_s3
 
     bucket = os.environ.get(_BUCKET_ENV)
     key = os.environ.get(_KEY_ENV)
     if not bucket or not key:
         return f"Skipped — {_BUCKET_ENV} / {_KEY_ENV} not set; pipeline sync is disabled."
     conn = _db(ctx)
-    count = await publish_pipeline_to_s3(conn)
-    return f"Published {count} active entries to s3://{bucket}/{key}"
+    try:
+        count = await publish_pipeline_to_s3(conn)
+        return f"Published {count} active entries to s3://{bucket}/{key}"
+    except Exception as exc:
+        return f"S3 sync failed: {exc}"

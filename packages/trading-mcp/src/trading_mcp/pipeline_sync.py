@@ -42,10 +42,16 @@ def _serialize(entries: list[dict]) -> bytes:
     return json.dumps(payload, indent=2, default=str).encode("utf-8")
 
 
+_PROFILE_ENV = "PIPELINE_STATE_AWS_PROFILE"
+
+
 def _put(bucket: str, key: str, body: bytes) -> None:
     import boto3
 
-    boto3.client("s3").put_object(Bucket=bucket, Key=key, Body=body, ContentType="application/json")
+    profile = os.environ.get(_PROFILE_ENV, "personal")
+    boto3.Session(profile_name=profile).client("s3").put_object(
+        Bucket=bucket, Key=key, Body=body, ContentType="application/json"
+    )
 
 
 async def publish_pipeline_to_s3(conn: sqlite3.Connection) -> int:
