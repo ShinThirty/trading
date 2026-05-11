@@ -205,6 +205,31 @@ resource "aws_lambda_permission" "gex" {
   source_arn    = aws_cloudwatch_event_rule.gex.arn
 }
 
+# WPSR publishes Wednesday 10:30 ET; fire ~90 min later for slack.
+resource "aws_cloudwatch_event_rule" "wpsr" {
+  name                = "trading-alerts-wpsr"
+  description         = "EIA Weekly Petroleum Status Report watcher (gas YoY/WoW + SPR)"
+  schedule_expression = var.wpsr_schedule
+
+  tags = {
+    Service = "trading-alerts"
+  }
+}
+
+resource "aws_cloudwatch_event_target" "wpsr" {
+  rule  = aws_cloudwatch_event_rule.wpsr.name
+  arn   = aws_lambda_function.dispatcher.arn
+  input = jsonencode({ trigger = "wpsr" })
+}
+
+resource "aws_lambda_permission" "wpsr" {
+  statement_id  = "AllowEventBridgeWpsr"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.dispatcher.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.wpsr.arn
+}
+
 # DIX shares the same SqueezeMetrics CSV as GEX (post-close refresh). A
 # separate rule keeps each watcher independently mutable / debuggable.
 resource "aws_cloudwatch_event_rule" "dix" {

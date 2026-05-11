@@ -40,6 +40,12 @@ variable "dix_schedule" {
   default     = "cron(0 22 ? * MON-FRI *)"
 }
 
+variable "wpsr_schedule" {
+  description = "EventBridge cron for WPSR watcher (default: Wed 16:00 UTC = 12 PM ET in DST, ~90 min after WPSR publishes at 10:30 ET)"
+  type        = string
+  default     = "cron(0 16 ? * WED *)"
+}
+
 variable "tsmc_revenue_schedule" {
   description = "EventBridge cron for TSMC monthly revenue watcher (default: daily 08:00 UTC, days 5-15 — TSMC publishes ~10th, ~14:00 Taipei = 06:00 UTC)"
   type        = string

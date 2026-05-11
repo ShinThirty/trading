@@ -46,13 +46,7 @@ deploy: build init
 
 ## Populate SSM credentials from ~/.tradingrc
 credentials:
-	@python3 -c "\
-	import configparser, json; \
-	c = configparser.ConfigParser(); c.read('$(HOME)/.tradingrc'); \
-	print(json.dumps({ \
-	  'discord_bot_token': c['discord']['bot_token'], \
-	  'discord_channel_id': c['discord']['channel_id'], \
-	}))" | \
+	@python3 $(PKG_DIR)/scripts/build_credentials.py | \
 	aws ssm put-parameter \
 	  --name /trading-alerts/credentials \
 	  --type SecureString \
