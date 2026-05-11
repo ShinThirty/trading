@@ -13,10 +13,35 @@ PKG_DIR="$(dirname "$SCRIPT_DIR")"
 REPO_ROOT="$(dirname "$(dirname "$PKG_DIR")")"
 BUILD_DIR="$PKG_DIR/.build"
 OUTPUT="$PKG_DIR/dist/lambda.zip"
+HASH_FILE="$PKG_DIR/dist/lambda.zip.hash"
+
+# Compute a fingerprint of all source inputs that affect the zip.
+compute_hash() {
+    {
+        find \
+            "$REPO_ROOT/packages/trading-alerts/src" \
+            "$REPO_ROOT/packages/trading-clients/src" \
+            -type f | sort | xargs sha256sum
+        sha256sum \
+            "$REPO_ROOT/packages/trading-alerts/pyproject.toml" \
+            "$REPO_ROOT/packages/trading-clients/pyproject.toml" \
+            "$REPO_ROOT/uv.lock" \
+            "$SCRIPT_DIR/build_lambda.sh"
+    } | sha256sum | cut -d' ' -f1
+}
+
+mkdir -p "$(dirname "$OUTPUT")"
+
+CURRENT_HASH="$(compute_hash)"
+if [ -f "$OUTPUT" ] && [ -f "$HASH_FILE" ] && [ "$(cat "$HASH_FILE")" = "$CURRENT_HASH" ]; then
+    SIZE=$(du -h "$OUTPUT" | cut -f1)
+    echo "==> No changes detected — skipping rebuild ($OUTPUT $SIZE)"
+    exit 0
+fi
 
 echo "==> Cleaning build directory"
 rm -rf "$BUILD_DIR"
-mkdir -p "$BUILD_DIR" "$(dirname "$OUTPUT")"
+mkdir -p "$BUILD_DIR"
 
 echo "==> Installing dependencies"
 uv pip install \
@@ -39,4 +64,5 @@ cd "$BUILD_DIR"
 zip -qr "$OUTPUT" . -x "*.pyc" "*/__pycache__/*" "*.dist-info/*" "bin/*"
 
 SIZE=$(du -h "$OUTPUT" | cut -f1)
+echo "$CURRENT_HASH" > "$HASH_FILE"
 echo "==> Built $OUTPUT ($SIZE)"
