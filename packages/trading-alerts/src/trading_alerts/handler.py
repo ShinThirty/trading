@@ -14,7 +14,7 @@ from trading_alerts.config import AlertsConfig, load_config
 from trading_alerts.dispatch import dispatch
 from trading_alerts.event import AlertEvent
 from trading_alerts.state import AlertStore, alert_store
-from trading_alerts.watchers import gex, naaim, tsmc_revenue
+from trading_alerts.watchers import dix, gex, naaim, tsmc_revenue
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -24,6 +24,7 @@ WatcherFn = Callable[[AlertsConfig], Coroutine[Any, Any, list[AlertEvent]]]
 WATCHERS: dict[str, WatcherFn] = {
     "naaim": naaim.run,
     "gex": gex.run,
+    "dix": dix.run,
     "tsmc_revenue": tsmc_revenue.run,
 }
 
