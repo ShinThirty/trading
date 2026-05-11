@@ -205,6 +205,33 @@ resource "aws_lambda_permission" "gex" {
   source_arn    = aws_cloudwatch_event_rule.gex.arn
 }
 
+# QRA Policy Statement is released 4x/year (early Feb / May / Aug / Nov)
+# Wednesday 8:30 AM ET. Run weekly Wednesday 14:00 UTC; non-QRA Wednesdays
+# no-op via slug dedup.
+resource "aws_cloudwatch_event_rule" "qra" {
+  name                = "trading-alerts-qra"
+  description         = "Treasury Quarterly Refunding Announcement Policy Statement watcher"
+  schedule_expression = var.qra_schedule
+
+  tags = {
+    Service = "trading-alerts"
+  }
+}
+
+resource "aws_cloudwatch_event_target" "qra" {
+  rule  = aws_cloudwatch_event_rule.qra.name
+  arn   = aws_lambda_function.dispatcher.arn
+  input = jsonencode({ trigger = "qra" })
+}
+
+resource "aws_lambda_permission" "qra" {
+  statement_id  = "AllowEventBridgeQra"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.dispatcher.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.qra.arn
+}
+
 # Beige Book publishes Wednesday 2 PM ET, 8x/year ~2 weeks before each FOMC.
 # Run weekly Wed 19:00 UTC; dedup keeps the alert to one fire per release.
 resource "aws_cloudwatch_event_rule" "beige_book" {

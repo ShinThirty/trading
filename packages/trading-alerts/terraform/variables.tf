@@ -40,6 +40,12 @@ variable "dix_schedule" {
   default     = "cron(0 22 ? * MON-FRI *)"
 }
 
+variable "qra_schedule" {
+  description = "EventBridge cron for QRA watcher (default: Wed 14:00 UTC = 10 AM ET in DST, ~90 min after the 8:30 ET release; non-QRA Wednesdays no-op via dedup)"
+  type        = string
+  default     = "cron(0 14 ? * WED *)"
+}
+
 variable "beige_book_schedule" {
   description = "EventBridge cron for Beige Book watcher (default: Wed 19:00 UTC = 3 PM ET in DST, ~1h after the 2 PM ET release)"
   type        = string
