@@ -112,6 +112,18 @@ variable "tsmc_revenue_schedule" {
   default     = "cron(0 8 5-20 * ? *)"
 }
 
+variable "material_8k_schedule" {
+  description = "EventBridge cron for material 8-K watcher (default: Mon-Fri 13:00 UTC = 9 AM ET in DST, before market open — catches overnight + previous-day 8-K filings for pipeline tickers)"
+  type        = string
+  default     = "cron(0 13 ? * MON-FRI *)"
+}
+
+variable "activist_filing_schedule" {
+  description = "EventBridge cron for activist filing (Schedule 13D) watcher (default: Mon-Fri 13:15 UTC, staggered 15 min after material_8k to avoid double-tapping EDGAR rate limit)"
+  type        = string
+  default     = "cron(15 13 ? * MON-FRI *)"
+}
+
 variable "lambda_memory_mb" {
   description = "Lambda memory allocation in MB"
   type        = number

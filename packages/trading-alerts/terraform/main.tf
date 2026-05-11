@@ -543,6 +543,60 @@ resource "aws_lambda_permission" "tsmc_revenue" {
   source_arn    = aws_cloudwatch_event_rule.tsmc_revenue.arn
 }
 
+# Material 8-K (signal-bearing items: 1.01, 1.02, 2.01, 2.05, 2.06, 4.01, 4.02,
+# 5.02, 7.01, 8.01) for pipeline tickers. Daily morning before market open;
+# LOOKBACK_DAYS=2 + dispatcher dedup handles overlap if a run is missed.
+resource "aws_cloudwatch_event_rule" "material_8k" {
+  name                = "trading-alerts-material-8k"
+  description         = "Material 8-K watcher for pipeline tickers (signal-bearing item codes only)"
+  schedule_expression = var.material_8k_schedule
+
+  tags = {
+    Service = "trading-alerts"
+  }
+}
+
+resource "aws_cloudwatch_event_target" "material_8k" {
+  rule  = aws_cloudwatch_event_rule.material_8k.name
+  arn   = aws_lambda_function.dispatcher.arn
+  input = jsonencode({ trigger = "material_8k" })
+}
+
+resource "aws_lambda_permission" "material_8k" {
+  statement_id  = "AllowEventBridgeMaterial8k"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.dispatcher.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.material_8k.arn
+}
+
+# Schedule 13D / 13D/A activist filings for pipeline tickers. Same daily
+# morning cadence as material_8k, staggered 15 min so the two ticker-aware
+# scans don't double-tap EDGAR's rate limit in the same second.
+resource "aws_cloudwatch_event_rule" "activist_filing" {
+  name                = "trading-alerts-activist-filing"
+  description         = "Schedule 13D activist filing watcher for pipeline tickers"
+  schedule_expression = var.activist_filing_schedule
+
+  tags = {
+    Service = "trading-alerts"
+  }
+}
+
+resource "aws_cloudwatch_event_target" "activist_filing" {
+  rule  = aws_cloudwatch_event_rule.activist_filing.name
+  arn   = aws_lambda_function.dispatcher.arn
+  input = jsonencode({ trigger = "activist_filing" })
+}
+
+resource "aws_lambda_permission" "activist_filing" {
+  statement_id  = "AllowEventBridgeActivistFiling"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.dispatcher.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.activist_filing.arn
+}
+
 # --- Lambda — Discord interaction handler (mute buttons + slash commands) ---
 
 resource "aws_lambda_function" "interaction" {
