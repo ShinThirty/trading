@@ -40,6 +40,12 @@ variable "dix_schedule" {
   default     = "cron(0 22 ? * MON-FRI *)"
 }
 
+variable "factset_ei_schedule" {
+  description = "EventBridge cron for FactSet Earnings Insight watcher (default: Fri 23:00 UTC = 7 PM ET in DST, after typical Friday afternoon publish)"
+  type        = string
+  default     = "cron(0 23 ? * FRI *)"
+}
+
 variable "qra_schedule" {
   description = "EventBridge cron for QRA watcher (default: Wed 14:00 UTC = 10 AM ET in DST, ~90 min after the 8:30 ET release; non-QRA Wednesdays no-op via dedup)"
   type        = string

@@ -205,6 +205,33 @@ resource "aws_lambda_permission" "gex" {
   source_arn    = aws_cloudwatch_event_rule.gex.arn
 }
 
+# FactSet Earnings Insight publishes Friday afternoon ET. Run Fri 23:00 UTC
+# = ~7 PM ET. Watcher walks back up to 4 Fridays to find the latest live PDF
+# and dedupes on the publish date.
+resource "aws_cloudwatch_event_rule" "factset_ei" {
+  name                = "trading-alerts-factset-ei"
+  description         = "FactSet Earnings Insight weekly PDF release watcher"
+  schedule_expression = var.factset_ei_schedule
+
+  tags = {
+    Service = "trading-alerts"
+  }
+}
+
+resource "aws_cloudwatch_event_target" "factset_ei" {
+  rule  = aws_cloudwatch_event_rule.factset_ei.name
+  arn   = aws_lambda_function.dispatcher.arn
+  input = jsonencode({ trigger = "factset_ei" })
+}
+
+resource "aws_lambda_permission" "factset_ei" {
+  statement_id  = "AllowEventBridgeFactsetEi"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.dispatcher.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.factset_ei.arn
+}
+
 # QRA Policy Statement is released 4x/year (early Feb / May / Aug / Nov)
 # Wednesday 8:30 AM ET. Run weekly Wednesday 14:00 UTC; non-QRA Wednesdays
 # no-op via slug dedup.
