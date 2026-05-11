@@ -40,6 +40,12 @@ variable "dix_schedule" {
   default     = "cron(0 22 ? * MON-FRI *)"
 }
 
+variable "nfp_schedule" {
+  description = "EventBridge cron for NFP watcher (default: Fri 14:30 UTC = 10:30 AM ET in DST, ~2h after first-Friday 8:30 ET release; non-NFP Fridays no-op)"
+  type        = string
+  default     = "cron(30 14 ? * FRI *)"
+}
+
 variable "factset_ei_schedule" {
   description = "EventBridge cron for FactSet Earnings Insight watcher (default: Fri 23:00 UTC = 7 PM ET in DST, after typical Friday afternoon publish)"
   type        = string

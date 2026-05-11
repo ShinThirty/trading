@@ -205,6 +205,32 @@ resource "aws_lambda_permission" "gex" {
   source_arn    = aws_cloudwatch_event_rule.gex.arn
 }
 
+# NFP publishes the first Friday of each month at 8:30 AM ET. Run Fri
+# 14:30 UTC (10:30 AM ET); non-NFP Fridays no-op via period dedup.
+resource "aws_cloudwatch_event_rule" "nfp" {
+  name                = "trading-alerts-nfp"
+  description         = "BLS Employment Situation (NFP) new-release watcher"
+  schedule_expression = var.nfp_schedule
+
+  tags = {
+    Service = "trading-alerts"
+  }
+}
+
+resource "aws_cloudwatch_event_target" "nfp" {
+  rule  = aws_cloudwatch_event_rule.nfp.name
+  arn   = aws_lambda_function.dispatcher.arn
+  input = jsonencode({ trigger = "nfp" })
+}
+
+resource "aws_lambda_permission" "nfp" {
+  statement_id  = "AllowEventBridgeNfp"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.dispatcher.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.nfp.arn
+}
+
 # FactSet Earnings Insight publishes Friday afternoon ET. Run Fri 23:00 UTC
 # = ~7 PM ET. Watcher walks back up to 4 Fridays to find the latest live PDF
 # and dedupes on the publish date.

@@ -20,6 +20,7 @@ from trading_alerts.watchers import (
     factset_ei,
     gex,
     naaim,
+    nfp,
     qra,
     tsmc_revenue,
     wpsr,
@@ -39,6 +40,7 @@ WATCHERS: dict[str, WatcherFn] = {
     "beige_book": beige_book.run,
     "qra": qra.run,
     "factset_ei": factset_ei.run,
+    "nfp": nfp.run,
 }
 
 # Module-level cache for Lambda warm starts
