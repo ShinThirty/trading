@@ -100,6 +100,50 @@ class CompanyTickersResponse:
         return f"{len(self.by_ticker)} tickers"
 
 
+# 8-K item codes that meaningfully move the stock or change the thesis.
+# 2.02 (Results of Operations) is treated separately as the EARNINGS tier.
+MATERIAL_8K_ITEMS: frozenset[str] = frozenset(
+    {
+        "1.01",  # Material definitive agreement
+        "1.02",  # Termination of material agreement
+        "2.01",  # Acquisition / disposition of assets
+        "2.05",  # Restructuring charges
+        "2.06",  # Material impairment
+        "4.01",  # Auditor change
+        "4.02",  # Non-reliance on prior financials (restatement)
+        "5.02",  # Officer/director departure or appointment
+        "7.01",  # Reg FD disclosure
+        "8.01",  # Other events
+    }
+)
+
+# Tier labels — ordered roughly by signal severity (most actionable first).
+TIER_MATERIAL = "MATERIAL"
+TIER_EARNINGS = "EARNINGS"
+TIER_INTERIM = "INTERIM"
+TIER_INSIDER = "INSIDER"
+TIER_GOVERNANCE = "GOVERNANCE"
+TIER_CAPITAL = "CAPITAL"
+TIER_ROUTINE = "ROUTINE"
+
+TIER_ORDER: tuple[str, ...] = (
+    TIER_MATERIAL,
+    TIER_EARNINGS,
+    TIER_INTERIM,
+    TIER_INSIDER,
+    TIER_GOVERNANCE,
+    TIER_CAPITAL,
+    TIER_ROUTINE,
+)
+
+_EARNINGS_FORMS = frozenset({"10-Q", "10-K", "20-F"})
+_INTERIM_FOREIGN_FORMS = frozenset({"6-K"})
+_ACTIVIST_FORMS = frozenset({"SCHEDULE 13D", "SCHEDULE 13D/A", "SC 13D", "SC 13D/A"})
+_LATE_FILING_FORMS = frozenset({"NT 10-Q", "NT 10-K", "NT 20-F"})
+_GOVERNANCE_FORMS = frozenset({"DEF 14A", "PRE 14A", "DEFA14A"})
+_CAPITAL_FORMS = frozenset({"S-1", "S-3", "S-3ASR", "S-4", "424B2", "424B5"})
+
+
 @dataclass
 class Filing:
     form: str
@@ -111,6 +155,29 @@ class Filing:
     @property
     def accession_no_dashes(self) -> str:
         return self.accession_number.replace("-", "")
+
+    @property
+    def tier(self) -> str:
+        """Classify the filing into a signal-severity tier for the index tool."""
+        if self.form == "8-K":
+            if set(self.items) & MATERIAL_8K_ITEMS:
+                return TIER_MATERIAL
+            if "2.02" in self.items:
+                return TIER_EARNINGS
+            return TIER_ROUTINE
+        if self.form in _EARNINGS_FORMS:
+            return TIER_EARNINGS
+        if self.form in _INTERIM_FOREIGN_FORMS:
+            return TIER_INTERIM
+        if self.form in _ACTIVIST_FORMS or self.form in _LATE_FILING_FORMS:
+            return TIER_MATERIAL
+        if self.form == "4":
+            return TIER_INSIDER
+        if self.form in _GOVERNANCE_FORMS:
+            return TIER_GOVERNANCE
+        if self.form in _CAPITAL_FORMS:
+            return TIER_CAPITAL
+        return TIER_ROUTINE
 
 
 @dataclass
@@ -145,6 +212,16 @@ class SubmissionsResponse:
             if f.form == "8-K" and "2.02" in f.items:
                 return f
         return None
+
+    def within_window(self, today: str, days: int) -> list[Filing]:
+        """Return filings dated within `days` of `today` (both YYYY-MM-DD strings).
+
+        Lexicographic compare works because dates are zero-padded ISO format.
+        """
+        from datetime import date, timedelta
+
+        cutoff = (date.fromisoformat(today) - timedelta(days=days)).isoformat()
+        return [f for f in self.filings if f.filing_date >= cutoff]
 
     def to_output(self) -> str:
         return f"{len(self.filings)} filings"

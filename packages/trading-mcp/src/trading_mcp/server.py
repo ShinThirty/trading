@@ -45,6 +45,7 @@ from trading_mcp.tools.cn_market import mcp as cn_market_mcp
 from trading_mcp.tools.crypto import mcp as crypto_mcp
 from trading_mcp.tools.decisions import mcp as decisions_mcp
 from trading_mcp.tools.earnings import mcp as earnings_mcp
+from trading_mcp.tools.edgar import mcp as edgar_mcp
 from trading_mcp.tools.eia import mcp as eia_mcp
 from trading_mcp.tools.factset import mcp as factset_mcp
 from trading_mcp.tools.freight import mcp as freight_mcp
@@ -149,6 +150,7 @@ mcp.mount(eia_mcp)
 mcp.mount(factset_mcp)
 mcp.mount(backtest_mcp)
 mcp.mount(earnings_mcp)
+mcp.mount(edgar_mcp)
 mcp.mount(signals_mcp)
 mcp.mount(pipeline_mcp)
 mcp.mount(pipeline_catalysts_mcp)
