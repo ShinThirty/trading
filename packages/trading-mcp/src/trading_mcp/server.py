@@ -28,13 +28,14 @@ from trading_clients.squeeze_metrics_client import SqueezeMetricsClient
 from trading_clients.tastytrade_client import TastyTradeClient
 from trading_clients.tradier_client import TradierClient
 from trading_clients.treasury_client import TreasuryClient
-from trading_clients.tsmc_client import TsmcClient
+from trading_clients.twse_client import TwseClient
 from trading_clients.webull_client import WebullClient
 
 from trading_mcp.db import open_db
 from trading_mcp.db.decisions import init_schema as init_decision_schema
 from trading_mcp.db.pipeline import init_schema as init_pipeline_schema
 from trading_mcp.db.rolls import init_schema as init_roll_schema
+from trading_mcp.db.twse_revenue import init_schema as init_twse_revenue_schema
 from trading_mcp.tools.account import mcp as account_mcp
 from trading_mcp.tools.backtest import mcp as backtest_mcp
 from trading_mcp.tools.beige_book import mcp as beige_book_mcp
@@ -92,7 +93,7 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
     ctx["cftc"] = CftcClient()
     ctx["polymarket"] = PolymarketClient()
     ctx["kalshi"] = KalshiClient()
-    ctx["tsmc"] = TsmcClient()
+    ctx["twse"] = TwseClient()
     ctx["treasury"] = TreasuryClient()
     ctx["freightos"] = FreightosClient()
     ctx["portwatch"] = PortwatchClient()
@@ -112,6 +113,7 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
     init_pipeline_schema(db)
     init_roll_schema(db)
     init_decision_schema(db)
+    init_twse_revenue_schema(db)
     ctx["db"] = db
     try:
         yield ctx

@@ -515,9 +515,10 @@ resource "aws_lambda_permission" "dix" {
   source_arn    = aws_cloudwatch_event_rule.dix.arn
 }
 
-# TSMC publishes monthly revenue ~14:00 Taipei (06:00 UTC) around the 10th of
-# each month. Run daily 08:00 UTC during days 5-15 to catch the print whenever
-# it lands; dedup keeps the alert to one fire per reported month.
+# TSMC files monthly revenue with the exchange ~the 10th, but the TWSE
+# open-data feed (t187ap05_L) — our source — only regenerates around the 17th.
+# Run daily 08:00 UTC during days 5-20 to catch the feed refresh whenever it
+# lands; dedup keeps the alert to one fire per reported month.
 resource "aws_cloudwatch_event_rule" "tsmc_revenue" {
   name                = "trading-alerts-tsmc-revenue"
   description         = "TSMC monthly consolidated revenue watcher (semi cycle leading indicator)"

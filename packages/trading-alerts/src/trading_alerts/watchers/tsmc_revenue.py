@@ -1,58 +1,67 @@
 """TSMC monthly consolidated revenue watcher.
 
-TSMC publishes monthly revenue (in NT$ millions) around the 10th of each
-month at https://investor.tsmc.com/english/monthly-revenue/{year}. This is
-one of the cleanest leading indicators for the global semi cycle: TSMC is
-the foundry layer underneath every advanced AI accelerator, so a positive
-YoY surprise often pre-prints upside in the broader semi tape (NVDA, AMD,
-AVGO, MRVL, ASML, AMAT) before any of those names report.
+TSMC publishes monthly revenue (in NT$ thousands) on the 10th of each month.
+This is one of the cleanest leading indicators for the global semi cycle:
+TSMC is the foundry layer underneath every advanced AI accelerator, so a
+positive YoY surprise often pre-prints upside in the broader semi tape
+(NVDA, AMD, AVGO, MRVL, ASML, AMAT) before any of those names report.
 
-The watcher dedupes on `tsmc:{YYYY-MM}` of the *reported* month — the first
-time a new month's revenue lands, we fire once. Re-runs on the same print
-short-circuit at the dispatcher.
+Source: TWSE OpenAPI t187ap05_L feed (listed-company monthly revenue, JSON,
+no auth, no browser challenge). TSMC's own IR page now sits behind a
+Cloudflare browser challenge and is not scrapable from a vanilla HTTP client.
 
-Cadence: daily 5-15 of each month (covers the typical ~10th publish date
-plus a few days of slack for holidays / late posts).
+The watcher dedupes on `tsmc:{YYYY-MM}` of the reported month — the first
+time a new month's revenue lands we fire once. Re-runs short-circuit at
+the dispatcher.
+
+Cadence: daily 5-20 of each month. TSMC files monthly revenue with the
+exchange ~the 10th, but the TWSE open-data feed (t187ap05_L) is a separate
+aggregation that only regenerates around the 17th — so the window runs
+through the 20th to catch the feed refresh, then dedup short-circuits the
+rest of the days.
 """
 
-import datetime as dt
 import logging
 from typing import Any
 
-from trading_clients.endpoints.tsmc import (
-    MONTHLY_REVENUE,
-    GetMonthlyRevenueRequest,
-    MonthlyRevenue,
-    MonthlyRevenueResponse,
+from trading_clients.endpoints.twse import (
+    LISTED_MONTHLY_REVENUE,
+    ListedMonthlyRevenueRequest,
+    ListedMonthlyRevenueResponse,
 )
-from trading_clients.tsmc_client import TsmcClient
+from trading_clients.twse_client import TwseClient
 
 from trading_alerts.config import AlertsConfig
 from trading_alerts.event import AlertEvent
 
 logger = logging.getLogger(__name__)
 
+TSMC_COMPANY_CODE = "2330"
+
 
 async def run(config: AlertsConfig) -> list[AlertEvent]:
-    del config  # TSMC has no auth and no config knobs
+    del config  # TWSE OpenAPI has no auth and no config knobs
 
-    today = dt.date.today()
-    client = TsmcClient()
+    client = TwseClient()
     try:
-        latest = await _latest_reported(client, today.year)
-        # Year-rollover edge: if running in early Jan and the new year's
-        # table is empty, fall back to last year (December's print lands ~Jan 10).
-        if latest is None and today.month == 1:
-            latest = await _latest_reported(client, today.year - 1)
+        feed: ListedMonthlyRevenueResponse = await client.get(
+            LISTED_MONTHLY_REVENUE, ListedMonthlyRevenueRequest()
+        )
     finally:
         await client.close()
 
-    if latest is None or latest.revenue_ntd_m is None:
-        logger.info("TSMC: no reported month found; skipping")
+    row = feed.by_code(TSMC_COMPANY_CODE)
+    if row is None:
+        logger.info(
+            "TSMC: %s not present in TWSE OpenAPI feed (%d companies); skipping",
+            TSMC_COMPANY_CODE,
+            len(feed.rows),
+        )
         return []
 
-    period = f"{latest.year}-{latest.month:02d}"
-    yoy = latest.yoy_pct
+    period = f"{row.year}-{row.month:02d}"
+    yoy = row.yoy_pct
+    revenue_millions = row.revenue_curr_thousands / 1000
 
     if yoy is None:
         level = "info"
@@ -75,10 +84,12 @@ async def run(config: AlertsConfig) -> list[AlertEvent]:
 
     fields: list[dict[str, Any]] = [
         {"name": "Month", "value": period, "inline": True},
-        {"name": "Revenue (NT$M)", "value": f"{latest.revenue_ntd_m:,.0f}", "inline": True},
+        {"name": "Revenue (NT$M)", "value": f"{revenue_millions:,.0f}", "inline": True},
     ]
     if yoy is not None:
         fields.append({"name": "YoY", "value": f"{yoy:+.1f}%", "inline": True})
+    if row.mom_pct is not None:
+        fields.append({"name": "MoM", "value": f"{row.mom_pct:+.1f}%", "inline": True})
 
     event = AlertEvent(
         dedup_key=f"tsmc:{period}",
@@ -89,14 +100,3 @@ async def run(config: AlertsConfig) -> list[AlertEvent]:
         ttl_days=45,  # next month's print arrives ~30 days later; comfortable margin
     )
     return [event]
-
-
-async def _latest_reported(client: TsmcClient, year: int) -> MonthlyRevenue | None:
-    """Fetch a year's table and return the most recent month with reported revenue."""
-    resp: MonthlyRevenueResponse = await client.get(
-        MONTHLY_REVENUE, GetMonthlyRevenueRequest(year=year)
-    )
-    reported = [r for r in resp.rows if r.revenue_ntd_m is not None]
-    if not reported:
-        return None
-    return max(reported, key=lambda r: r.month)

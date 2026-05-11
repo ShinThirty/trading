@@ -60,7 +60,7 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │       ├── cftc_client.py           # No auth (CFTC publicreporting Socrata JSON)
 │   │       ├── polymarket_client.py     # No auth (Polymarket gamma-api event/market data)
 │   │       ├── kalshi_client.py         # No auth (Kalshi elections-api event/market data)
-│   │       ├── tsmc_client.py           # No auth, identifies via User-Agent (TSMC IR monthly revenue)
+│   │       ├── twse_client.py           # No auth (TWSE OpenAPI t187ap05_L listed-company monthly revenue feed)
 │   │       ├── treasury_client.py       # No auth, identifies via User-Agent (Treasury QRA Policy Statement)
 │   │       ├── freightos_client.py      # No auth, identifies via User-Agent (Freightos Baltic Index lane pages)
 │   │       ├── portwatch_client.py      # No auth, identifies via User-Agent (IMF PortWatch ArcGIS chokepoint data)
@@ -94,7 +94,7 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │           ├── cftc.py              # 3 endpoints (TFF / Disaggregated / Legacy COT reports)
 │   │           ├── polymarket.py        # 2 endpoints (event by slug, list events by tag) + shared models
 │   │           ├── kalshi.py            # 1 endpoint (event by ticker with nested markets)
-│   │           ├── tsmc.py              # 1 endpoint (consolidated monthly revenue by year)
+│   │           ├── twse.py              # 1 endpoint (listed-company monthly revenue feed, JSON)
 │   │           ├── treasury.py          # 3 endpoints (QRA most-recent index, archive index, statement page)
 │   │           ├── freight.py           # 2 endpoints (Freightos FBX lane page + IMF PortWatch chokepoints query) with FBX_LANES + CHOKEPOINTS catalogs
 │   │           ├── beige_book.py        # 2 endpoints (release index, National Summary by period)
@@ -115,7 +115,8 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │       │   ├── __init__.py          # Connection, shared utilities
 │   │       │   ├── pipeline.py          # Pipeline table schema, enums, async CRUD
 │   │       │   ├── rolls.py             # Rolls table schema, enums, async CRUD
-│   │       │   └── decisions.py         # Option decisions table schema, enums, async CRUD
+│   │       │   ├── decisions.py         # Option decisions table schema, enums, async CRUD
+│   │       │   └── twse_revenue.py      # TWSE monthly revenue cache (TSMC + future TW tickers)
 │   │       └── tools/                   # Subdomain-organized tool modules
 │   │           ├── account.py           # Balances, positions, instruments, portfolio aggregates
 │   │           ├── orders.py            # Place/preview/replace/cancel orders, order history
@@ -132,7 +133,7 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │           ├── cn_market.py         # China A-share quotes, financials, fund flow (AKShare)
 │   │           ├── cftc.py              # CFTC COT positioning (single contract + extremes scan)
 │   │           ├── prediction_markets.py # Polymarket + Kalshi by-key fetcher and cross-source compare
-│   │           ├── tsmc.py              # TSMC monthly revenue (semi cycle leading indicator)
+│   │           ├── tsmc.py              # TSMC monthly revenue via TWSE OpenAPI + SQLite history cache
 │   │           ├── treasury.py          # QRA Policy Statement texture (latest + prior for diff)
 │   │           ├── freight.py           # Container freight signals: FBX lane prices + chokepoint transit volumes
 │   │           ├── beige_book.py        # Fed Beige Book National Summary + 12 district highlights
@@ -261,7 +262,7 @@ signature) handles button clicks (`mute:<seconds>:<dedup_key>`) and the
 | **CFTC** | Commitments of Traders (COT) — speculator positioning across SPX, NDX, VIX, 10Y, Gold, WTI | None (Socrata JSON) |
 | **Polymarket** | Prediction-market implied probabilities (FOMC, elections, macro) — by event slug | None (gamma-api JSON) |
 | **Kalshi** | Prediction-market implied probabilities (CFTC-regulated US exchange) — by event ticker | None (elections-api JSON) |
-| **TSMC** | Consolidated monthly revenue (NT$M) — leading indicator for the global semi cycle, released ~10th of each month | None (User-Agent only) |
+| **TWSE** | Listed-company monthly revenue via openapi.twse.com.tw t187ap05_L feed — leading indicator for the global semi cycle via TSMC (2330), released ~10th of each month. History accumulates in `~/.trading/trading.db`. | None (JSON, polite User-Agent) |
 | **Treasury** | Quarterly Refunding Announcement (QRA) Policy Statement — auction sizes, bill-vs-coupon mix, buyback program, and forward guidance. Released 4x/year (early Feb / May / Aug / Nov), Wednesday 8:30 AM after Monday's borrowing estimate. | None (User-Agent only) |
 | **Freightos** | Freightos Baltic Index (FBX) — weekly container freight prices per lane (USD/FEU). Published Fridays. Used for geopolitical-risk rerouting confirmation. | None (User-Agent only) |
 | **IMF PortWatch** | Daily chokepoint vessel transit volumes (Suez, Bab el-Mandeb, Hormuz, Panama, Cape of Good Hope, Bosporus, Malacca and 21 more). ArcGIS REST. ~5-day publish lag. | None (User-Agent only) |

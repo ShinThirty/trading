@@ -107,9 +107,9 @@ variable "wpsr_schedule" {
 }
 
 variable "tsmc_revenue_schedule" {
-  description = "EventBridge cron for TSMC monthly revenue watcher (default: daily 08:00 UTC, days 5-15 — TSMC publishes ~10th, ~14:00 Taipei = 06:00 UTC)"
+  description = "EventBridge cron for TSMC monthly revenue watcher (default: daily 08:00 UTC, days 5-20 — TSMC files ~10th but the TWSE open-data feed only regenerates ~17th, so the window runs through the 20th to catch the refresh)"
   type        = string
-  default     = "cron(0 8 5-15 * ? *)"
+  default     = "cron(0 8 5-20 * ? *)"
 }
 
 variable "lambda_memory_mb" {
