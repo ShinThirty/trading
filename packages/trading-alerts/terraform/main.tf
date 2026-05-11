@@ -46,8 +46,10 @@ resource "aws_dynamodb_table" "alerts" {
 # trading-mcp pipeline_* tools. Lambda watchers read it on cold start to
 # filter ticker-aware alerts to the active pipeline universe.
 
+data "aws_caller_identity" "current" {}
+
 resource "aws_s3_bucket" "state" {
-  bucket = var.state_bucket_name
+  bucket = "${var.state_bucket_name}-${data.aws_caller_identity.current.account_id}"
 
   tags = {
     Service = "trading-alerts"

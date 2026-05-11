@@ -10,7 +10,7 @@
         "trading-mcp"
       ],
       "env": {
-        "PIPELINE_STATE_BUCKET": "trading-alerts-state",
+        "PIPELINE_STATE_BUCKET": "trading-alerts-state-113477077840",
         "PIPELINE_STATE_KEY": "pipeline.json"
       }
     }

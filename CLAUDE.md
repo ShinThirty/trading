@@ -214,7 +214,7 @@ EventBridge (per-watcher cron rule)
   → sends {"trigger": "<name>"} to dispatcher Lambda
     → handler.py looks up WATCHERS[name] and runs it
       → ticker-aware watchers call pipeline_state.get_pipeline() on cold start
-          → fetches active pipeline from s3://trading-alerts-state/pipeline.json
+          → fetches active pipeline from s3://trading-alerts-state-{account_id}/pipeline.json
           → result cached for container lifetime; returns [] if unset/missing
       → watcher fetches data (NAAIM XLSX, SqueezeMetrics CSV, BLS press release, …)
       → evaluates threshold; returns list[AlertEvent]
