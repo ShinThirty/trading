@@ -40,6 +40,12 @@ variable "dix_schedule" {
   default     = "cron(0 22 ? * MON-FRI *)"
 }
 
+variable "gdp_schedule" {
+  description = "EventBridge cron for GDP watcher (default: Thu 14:00 UTC = 10 AM ET in DST, ~90 min after the typical Thursday 8:30 ET BEA release; non-GDP Thursdays no-op)"
+  type        = string
+  default     = "cron(0 14 ? * THU *)"
+}
+
 variable "pce_schedule" {
   description = "EventBridge cron for PCE watcher (default: daily 14:30 UTC, days 26-31 — covers the typical 8:30 ET end-month publish; non-PCE days no-op via dedup)"
   type        = string

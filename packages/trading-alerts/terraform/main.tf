@@ -205,6 +205,32 @@ resource "aws_lambda_permission" "gex" {
   source_arn    = aws_cloudwatch_event_rule.gex.arn
 }
 
+# GDP publishes 12x/year (4 quarters × 3 estimates) at 8:30 AM ET, typically
+# Thursday. Run weekly Thu 14:00 UTC; non-GDP Thursdays no-op via slug dedup.
+resource "aws_cloudwatch_event_rule" "gdp" {
+  name                = "trading-alerts-gdp"
+  description         = "BEA Gross Domestic Product (GDP) new-release watcher"
+  schedule_expression = var.gdp_schedule
+
+  tags = {
+    Service = "trading-alerts"
+  }
+}
+
+resource "aws_cloudwatch_event_target" "gdp" {
+  rule  = aws_cloudwatch_event_rule.gdp.name
+  arn   = aws_lambda_function.dispatcher.arn
+  input = jsonencode({ trigger = "gdp" })
+}
+
+resource "aws_lambda_permission" "gdp" {
+  statement_id  = "AllowEventBridgeGdp"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.dispatcher.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.gdp.arn
+}
+
 # PCE publishes near month-end at 8:30 AM ET. Run daily 14:30 UTC during
 # days 26-31; non-PCE days no-op via slug dedup.
 resource "aws_cloudwatch_event_rule" "pce" {
