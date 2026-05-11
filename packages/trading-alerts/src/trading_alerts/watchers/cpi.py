@@ -1,18 +1,18 @@
-"""BLS Employment Situation (Nonfarm Payrolls) new-release watcher.
+"""BLS Consumer Price Index (CPI) new-release watcher.
 
-NFP publishes the first Friday of each month at 8:30 AM ET — the headline
-labor market read the FOMC and rates desk both react to most directly. The
-report URL (/news.release/empsit.htm) is static; only the rendered content
-rotates each month.
+CPI publishes mid-month at 8:30 AM ET (typical window: days 10-15) — the
+inflation read that anchors Fed policy expectations and the rates curve.
+The press release URL (/news.release/cpi.htm) is static; only the rendered
+content rotates each month.
 
-Watcher fetches the press release narrative, extracts the reference
-period from the opening sentence (e.g. "in April"), and dedupes on
-that period token combined with the release-date year scraped from the
-header. When a new period appears, posts an info-level alert with the
-first sentence so the headline number is visible at a glance.
+Watcher fetches the press release narrative, extracts the reference month
+from the opening sentence and the release year from the date stamp, and
+dedupes on month-year. New period -> info-level alert with the headline
+sentence.
 
-Cadence: weekly Friday 14:30 UTC = 10:30 AM ET — 2 hours after release
-to give BLS time to update the page. Non-NFP Fridays no-op via dedup.
+Cadence: daily 14:30 UTC during days 10-15 of each month — covers the
+typical 10-15 release window with a few hours of slack after the 8:30 ET
+publish. Non-CPI days no-op via dedup.
 """
 
 import logging
@@ -21,8 +21,8 @@ from typing import Any
 
 from trading_clients.bls_client import BlsClient
 from trading_clients.endpoints.bls import (
-    EMPLOYMENT_SITUATION,
-    EmploymentSituationResponse,
+    CPI_RELEASE,
+    CpiReleaseResponse,
     EmptyRequest,
 )
 
@@ -48,21 +48,21 @@ async def run(config: AlertsConfig) -> list[AlertEvent]:
 
     client = BlsClient()
     try:
-        resp: EmploymentSituationResponse = await client.get(EMPLOYMENT_SITUATION, EmptyRequest())
+        resp: CpiReleaseResponse = await client.get(CPI_RELEASE, EmptyRequest())
     finally:
         await client.close()
 
     if not resp.text:
-        logger.warning("NFP: empty Employment Situation body; skipping")
+        logger.warning("CPI: empty body; skipping")
         return []
 
     period, release_year = _extract_period(resp.text)
     if period is None:
-        logger.warning("NFP: could not parse reference month from body; skipping")
+        logger.warning("CPI: could not parse reference month from body; skipping")
         return []
 
-    dedup_key = f"nfp:{period}-{release_year or 'unknown'}"
-    title = f"BLS Employment Situation ({period} {release_year or ''}) released".strip()
+    dedup_key = f"cpi:{period}-{release_year or 'unknown'}"
+    title = f"BLS CPI ({period} {release_year or ''}) released".strip()
     teaser = _first_sentence(resp.text)
 
     fields: list[dict[str, Any]] = [
@@ -73,7 +73,7 @@ async def run(config: AlertsConfig) -> list[AlertEvent]:
     fields.append(
         {
             "name": "Press release",
-            "value": "https://www.bls.gov/news.release/empsit.htm",
+            "value": "https://www.bls.gov/news.release/cpi.htm",
             "inline": False,
         }
     )
@@ -85,14 +85,13 @@ async def run(config: AlertsConfig) -> list[AlertEvent]:
         level="info",
         title=title,
         fields=fields,
-        footer_text="BLS Employment Situation — monthly NFP / unemployment / earnings",
+        footer_text="BLS Consumer Price Index — monthly headline + core inflation",
         ttl_days=45,
     )
     return [event]
 
 
 def _extract_period(text: str) -> tuple[str | None, str | None]:
-    """Return (reference month, release year). Both may be None if regex misses."""
     m = _REFERENCE_MONTH_RE.search(text)
     period = m.group(1).capitalize() if m else None
     rd = _RELEASE_DATE_RE.search(text)

@@ -205,6 +205,32 @@ resource "aws_lambda_permission" "gex" {
   source_arn    = aws_cloudwatch_event_rule.gex.arn
 }
 
+# CPI publishes mid-month at 8:30 AM ET (typical days 10-15). Run daily
+# 14:30 UTC during that window; non-CPI days no-op via dedup.
+resource "aws_cloudwatch_event_rule" "cpi" {
+  name                = "trading-alerts-cpi"
+  description         = "BLS Consumer Price Index new-release watcher"
+  schedule_expression = var.cpi_schedule
+
+  tags = {
+    Service = "trading-alerts"
+  }
+}
+
+resource "aws_cloudwatch_event_target" "cpi" {
+  rule  = aws_cloudwatch_event_rule.cpi.name
+  arn   = aws_lambda_function.dispatcher.arn
+  input = jsonencode({ trigger = "cpi" })
+}
+
+resource "aws_lambda_permission" "cpi" {
+  statement_id  = "AllowEventBridgeCpi"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.dispatcher.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.cpi.arn
+}
+
 # NFP publishes the first Friday of each month at 8:30 AM ET. Run Fri
 # 14:30 UTC (10:30 AM ET); non-NFP Fridays no-op via period dedup.
 resource "aws_cloudwatch_event_rule" "nfp" {

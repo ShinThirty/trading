@@ -16,6 +16,7 @@ from trading_alerts.event import AlertEvent
 from trading_alerts.state import AlertStore, alert_store
 from trading_alerts.watchers import (
     beige_book,
+    cpi,
     dix,
     factset_ei,
     gex,
@@ -41,6 +42,7 @@ WATCHERS: dict[str, WatcherFn] = {
     "qra": qra.run,
     "factset_ei": factset_ei.run,
     "nfp": nfp.run,
+    "cpi": cpi.run,
 }
 
 # Module-level cache for Lambda warm starts
