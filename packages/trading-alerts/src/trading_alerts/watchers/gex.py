@@ -85,9 +85,7 @@ def _flip_event(today: DixRow, prior: DixRow, trade_date: str) -> AlertEvent | N
         # neg -> pos: vol suppression returns (good news, info-level)
         level = "info"
         title = "GEX flipped POSITIVE — dealer vol suppression returns"
-        body = (
-            "Short-vol structures more attractive again; covered-call premium richer."
-        )
+        body = "Short-vol structures more attractive again; covered-call premium richer."
     else:
         # pos -> neg: amplification (bad news, warning-level)
         level = "warning"
@@ -135,10 +133,7 @@ def _percentile_event(history: DixHistoryResponse, trade_date: str) -> AlertEven
         # Extreme suppression — info, not warning (cheap hedges, low vol)
         level = "info"
         title = f"GEX 1m %ile {pct:.0f} — extreme dealer SUPPRESSION"
-        body = (
-            "Cheap-hedge window if under-hedged; CC premium thin "
-            "(low write attractiveness)."
-        )
+        body = "Cheap-hedge window if under-hedged; CC premium thin (low write attractiveness)."
     else:  # pct <= PCT_LOW
         # Extreme amplification — warning
         level = "warning"

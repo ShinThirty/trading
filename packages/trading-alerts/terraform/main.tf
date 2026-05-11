@@ -205,6 +205,33 @@ resource "aws_lambda_permission" "gex" {
   source_arn    = aws_cloudwatch_event_rule.gex.arn
 }
 
+# TSMC publishes monthly revenue ~14:00 Taipei (06:00 UTC) around the 10th of
+# each month. Run daily 08:00 UTC during days 5-15 to catch the print whenever
+# it lands; dedup keeps the alert to one fire per reported month.
+resource "aws_cloudwatch_event_rule" "tsmc_revenue" {
+  name                = "trading-alerts-tsmc-revenue"
+  description         = "TSMC monthly consolidated revenue watcher (semi cycle leading indicator)"
+  schedule_expression = var.tsmc_revenue_schedule
+
+  tags = {
+    Service = "trading-alerts"
+  }
+}
+
+resource "aws_cloudwatch_event_target" "tsmc_revenue" {
+  rule  = aws_cloudwatch_event_rule.tsmc_revenue.name
+  arn   = aws_lambda_function.dispatcher.arn
+  input = jsonencode({ trigger = "tsmc_revenue" })
+}
+
+resource "aws_lambda_permission" "tsmc_revenue" {
+  statement_id  = "AllowEventBridgeTsmcRevenue"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.dispatcher.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.tsmc_revenue.arn
+}
+
 # --- Lambda — Discord interaction handler (mute buttons + slash commands) ---
 
 resource "aws_lambda_function" "interaction" {

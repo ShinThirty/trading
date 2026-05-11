@@ -34,6 +34,12 @@ variable "gex_schedule" {
   default     = "cron(0 22 ? * MON-FRI *)"
 }
 
+variable "tsmc_revenue_schedule" {
+  description = "EventBridge cron for TSMC monthly revenue watcher (default: daily 08:00 UTC, days 5-15 — TSMC publishes ~10th, ~14:00 Taipei = 06:00 UTC)"
+  type        = string
+  default     = "cron(0 8 5-15 * ? *)"
+}
+
 variable "lambda_memory_mb" {
   description = "Lambda memory allocation in MB"
   type        = number

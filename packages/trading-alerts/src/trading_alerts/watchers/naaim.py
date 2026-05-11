@@ -82,9 +82,7 @@ async def run(config: AlertsConfig) -> list[AlertEvent]:
     if history.wow_change is not None:
         fields.append({"name": "WoW Δ", "value": f"{history.wow_change:+.1f}", "inline": True})
     if history.trailing_mean is not None:
-        fields.append(
-            {"name": "52w mean", "value": f"{history.trailing_mean:.1f}", "inline": True}
-        )
+        fields.append({"name": "52w mean", "value": f"{history.trailing_mean:.1f}", "inline": True})
 
     event = AlertEvent(
         dedup_key=f"naaim:{history.latest_date}",
