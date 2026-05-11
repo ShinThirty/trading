@@ -8,9 +8,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 uv workspace monorepo with three packages:
 
-1. **trading-clients** — Shared API clients and endpoint definitions for Webull, Tradier, Finnhub, FMP, FRED, and Alpha Vantage. Pure library — no server or Lambda dependencies.
-2. **trading-mcp** — MCP server that exposes brokerage operations, option chains, fundamentals, news, economic data, and sentiment as MCP tools. Depends on trading-clients + mcp[cli].
-3. **trading-alerts** — AWS Lambda fleet of trigger-based market/macro alerts. Per-watcher EventBridge schedules invoke a single dispatcher Lambda; each watcher (NAAIM crowding, GEX regime, future macro print/release watchers) emits AlertEvents that post to Discord with mute buttons + DynamoDB-backed dedup. Depends on trading-clients + boto3 + pynacl (no MCP dependency).
+1. **trading-clients** — Shared API clients, endpoint definitions, and pure-computation helpers for Webull, Tradier, Finnhub, FMP, FRED, Alpha Vantage, Reddit, and many more providers. Also contains standalone math modules (BSM pricing, options analytics, technical indicators, regime classification). Pure library — no server or Lambda dependencies.
+2. **trading-mcp** — MCP server that exposes brokerage operations, option chains, fundamentals, news, economic data, and sentiment as MCP tools. Depends on trading-clients + mcp[cli]. Publishes the active pipeline universe to S3 on every mutation so Lambda watchers can filter to pipeline names.
+3. **trading-alerts** — AWS Lambda fleet of 13 trigger-based market/macro alert watchers. Per-watcher EventBridge schedules invoke a single dispatcher Lambda; each watcher emits AlertEvents that post to Discord with mute buttons + DynamoDB-backed dedup. Depends on trading-clients + boto3 + pynacl (no MCP dependency).
 
 ## Commands
 
@@ -67,7 +67,15 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │       ├── beige_book_client.py     # No auth, identifies via User-Agent (Fed Beige Book)
 │   │       ├── squeeze_metrics_client.py # No auth (SqueezeMetrics public DIX/GEX CSV)
 │   │       ├── naaim_client.py          # No auth (NAAIM since-inception XLSX history)
+│   │       ├── reddit_client.py         # No auth (Reddit JSON API — search, subreddit, post)
 │   │       ├── sentiment_client.py      # Playwright-based scraper (CBOE p/c, AAII, NAAIM)
+│   │       ├── bsm.py                   # Black-Scholes-Merton option pricing (pure math, no I/O)
+│   │       ├── btc_regime.py            # BTC macro regime classification (pure functions)
+│   │       ├── indicators.py            # Technical analysis indicators on OHLCV bars (pure functions)
+│   │       ├── options.py               # Options analytics: expected move, HV, strategy P&L (pure functions)
+│   │       ├── options_multi_exp.py     # Multi-expiration strategy analysis: calendars, diagonals, PMCC (uses BSM for far leg)
+│   │       ├── portfolio.py             # Multi-account portfolio aggregation (Fidelity CSV + Webull API)
+│   │       ├── regime.py                # Market regime classification from pre-fetched data (pure functions)
 │   │       └── endpoints/               # Typed request/response models + Endpoint defs
 │   │           ├── webull.py            # 11 endpoints (account, orders, instruments)
 │   │           ├── tradier.py           # 19 endpoints (options, quotes, account, orders)
@@ -93,6 +101,7 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │           ├── squeeze_metrics.py   # 1 endpoint (DIX/GEX daily history CSV)
 │   │           ├── naaim.py             # NaaimHistoryResponse (XLSX-parsed weekly history with z-score)
 │   │           ├── prediction_market.py # Shared PredictionEvent / PredictionOutcome types
+│   │           ├── reddit.py            # 3 endpoints (search, subreddit listing, post + comments)
 │   │           ├── sentiment.py         # 3 endpoints (CBOE equity p/c, AAII, NAAIM)
 │   │           └── yahoo.py             # Response models for Yahoo Finance (via yfinance)
 │   ├── trading-mcp/                     # MCP server (composed via fastmcp mount)
@@ -101,6 +110,7 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │       ├── server.py                # Lifespan, parent FastMCP, mount() calls
 │   │       ├── helpers.py               # Client extractors, shared helpers (_retry, etc.)
 │   │       ├── yfinance_helper.py       # Shared yfinance namespace (_yfc) for fundamentals + screens
+│   │       ├── pipeline_sync.py         # Best-effort S3 publish of active pipeline on every mutation
 │   │       ├── db/                      # SQLite database layer (~/.trading/trading.db)
 │   │       │   ├── __init__.py          # Connection, shared utilities
 │   │       │   ├── pipeline.py          # Pipeline table schema, enums, async CRUD
@@ -129,7 +139,7 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │           ├── squeeze_metrics.py   # SqueezeMetrics DIX (dark-pool flow) + GEX (dealer gamma)
 │   │           ├── naaim.py             # NAAIM Exposure Index history with 52w z-score / percentile
 │   │           ├── eia.py               # EIA Weekly Petroleum Status Report (stocks, refinery util, retail gasoline)
-│           ├── factset.py           # FactSet Earnings Insight (S&P 500 beat rates, blended growth, forward EPS, P/E, sector revisions)
+│   │           ├── factset.py           # FactSet Earnings Insight (S&P 500 beat rates, blended growth, forward EPS, P/E, sector revisions)
 │   │           ├── backtest.py          # TastyTrade option strategy backtests
 │   │           ├── earnings.py          # Earnings call transcript (Fool) + press release (EDGAR 8-K)
 │   │           ├── signals.py           # Conviction, sizing, hedge, entry signals
@@ -141,8 +151,8 @@ trading-mcp/                             # monorepo root (uv workspace)
 │       ├── pyproject.toml               # depends on: trading-clients + boto3 + pynacl
 │       ├── Makefile                     # deploy/destroy/credentials/test automation
 │       ├── terraform/                   # AWS infrastructure (self-contained)
-│       │   ├── main.tf                  # Dispatcher Lambda, DynamoDB, per-watcher
-│       │   │                            #   EventBridge rules, IAM, SSM, interaction Lambda
+│       │   ├── main.tf                  # Dispatcher Lambda, DynamoDB, S3 pipeline-state bucket,
+│       │   │                            #   per-watcher EventBridge rules, IAM, SSM, interaction Lambda
 │       │   ├── variables.tf
 │       │   └── outputs.tf
 │       ├── scripts/
@@ -159,9 +169,21 @@ trading-mcp/                             # monorepo root (uv workspace)
 │           ├── state.py                 # AlertRecord, AlertStore Protocol, Dynamo + InMemory
 │           ├── interaction.py           # Discord interaction handler (mute buttons,
 │           │                            #   /unmute, /muted)
+│           ├── pipeline_state.py        # Read active pipeline from S3; module-level cache per container
 │           └── watchers/
 │               ├── naaim.py             # NAAIM Exposure Index crowding (|z| >= 1.5)
-│               └── gex.py               # GEX regime (sign flip + 1m percentile extreme)
+│               ├── gex.py               # GEX regime (sign flip + 1m percentile extreme)
+│               ├── dix.py               # DIX single-day move (dark-pool short ratio spike)
+│               ├── tsmc_revenue.py      # TSMC monthly revenue new-release detection
+│               ├── wpsr.py              # EIA WPSR new-release detection (Wed 10:30 ET)
+│               ├── beige_book.py        # Fed Beige Book new-release detection
+│               ├── qra.py               # Treasury QRA Policy Statement new-release detection
+│               ├── factset_ei.py        # FactSet Earnings Insight weekly PDF new-release detection
+│               ├── nfp.py               # BLS Employment Situation (NFP) new-release detection
+│               ├── cpi.py               # BLS CPI new-release detection
+│               ├── pce.py               # BEA PCE new-release detection
+│               ├── gdp.py               # BEA GDP new-release detection
+│               └── fomc.py              # FOMC statement new-release detection
 └── tests/                               # Test suite (Phase 2)
 ```
 
@@ -191,7 +213,10 @@ MCP tool call (tools/*.py)
 EventBridge (per-watcher cron rule)
   → sends {"trigger": "<name>"} to dispatcher Lambda
     → handler.py looks up WATCHERS[name] and runs it
-      → watcher fetches data (NAAIM XLSX, SqueezeMetrics CSV, …)
+      → ticker-aware watchers call pipeline_state.get_pipeline() on cold start
+          → fetches active pipeline from s3://trading-alerts-state/pipeline.json
+          → result cached for container lifetime; returns [] if unset/missing
+      → watcher fetches data (NAAIM XLSX, SqueezeMetrics CSV, BLS press release, …)
       → evaluates threshold; returns list[AlertEvent]
     → for each event, dispatch() checks dedup (DynamoDB get_item)
       → if new: send_embed() to Discord + persist AlertRecord
@@ -245,6 +270,7 @@ signature) handles button clicks (`mute:<seconds>:<dedup_key>`) and the
 | **AAII** | Investor sentiment survey bull/neutral/bear (weekly) | None (Playwright, realistic browser context) |
 | **NAAIM** | Active manager equity exposure index — full since-inception history with 52w z-score / percentile (latest entry replaces the prior Playwright scrape) | None (httpx + polite User-Agent; XLSX) |
 | **FactSet** | Earnings Insight weekly PDF (S&P 500 beat rates, surprise magnitudes, blended growth, forward EPS by quarter + CY, forward 12M P/E with 5y/10y context, sector revisions, beat/miss reaction asymmetry). Published Friday afternoon ET. The institutional benchmark for earnings season tone. | None (httpx + polite User-Agent; pdfplumber) |
+| **Reddit** | Subreddit search, hot/top/new listings, and individual post + comments — used for sentiment reading on specific tickers or themes via `search_reddit`, `get_subreddit_posts`, `get_reddit_post` tools | None (JSON API) |
 
 ### No Webull SDK
 
