@@ -31,7 +31,8 @@ uv pip install \
     --target "$BUILD_DIR" \
     --python-platform linux \
     "httpx[http2]" \
-    "pynacl>=1.5"
+    "pynacl>=1.5" \
+    "openpyxl"
 
 echo "==> Creating deployment package"
 cd "$BUILD_DIR"
