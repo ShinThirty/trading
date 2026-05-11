@@ -40,6 +40,44 @@ resource "aws_dynamodb_table" "alerts" {
   }
 }
 
+# --- S3 — shared state ---
+#
+# Holds the pipeline snapshot (pipeline.json) published from the local
+# trading-mcp pipeline_* tools. Lambda watchers read it on cold start to
+# filter ticker-aware alerts to the active pipeline universe.
+
+resource "aws_s3_bucket" "state" {
+  bucket = var.state_bucket_name
+
+  tags = {
+    Service = "trading-alerts"
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "state" {
+  bucket                  = aws_s3_bucket.state.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_versioning" "state" {
+  bucket = aws_s3_bucket.state.id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "state" {
+  bucket = aws_s3_bucket.state.id
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
 # --- SSM Parameter Store ---
 
 resource "aws_ssm_parameter" "credentials" {
@@ -108,6 +146,12 @@ data "aws_iam_policy_document" "lambda_permissions" {
     actions   = ["ssm:GetParameter"]
     resources = [aws_ssm_parameter.credentials.arn]
   }
+
+  # S3 — read-only access to the published pipeline snapshot
+  statement {
+    actions   = ["s3:GetObject"]
+    resources = ["${aws_s3_bucket.state.arn}/${var.pipeline_state_key}"]
+  }
 }
 
 resource "aws_iam_role_policy" "lambda" {
@@ -131,8 +175,10 @@ resource "aws_lambda_function" "dispatcher" {
 
   environment {
     variables = {
-      SSM_PARAMETER  = var.ssm_parameter_name
-      DYNAMODB_TABLE = var.dynamodb_table_name
+      SSM_PARAMETER         = var.ssm_parameter_name
+      DYNAMODB_TABLE        = var.dynamodb_table_name
+      PIPELINE_STATE_BUCKET = aws_s3_bucket.state.id
+      PIPELINE_STATE_KEY    = var.pipeline_state_key
     }
   }
 

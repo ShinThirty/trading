@@ -10,6 +10,10 @@ output "dynamodb_table_name" {
   value = aws_dynamodb_table.alerts.name
 }
 
+output "state_bucket_name" {
+  value = aws_s3_bucket.state.id
+}
+
 output "naaim_rule_arn" {
   value = aws_cloudwatch_event_rule.naaim.arn
 }

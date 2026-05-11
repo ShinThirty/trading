@@ -1911,6 +1911,7 @@ version = "0.1.0"
 source = { editable = "packages/trading-mcp" }
 dependencies = [
     { name = "akshare" },
+    { name = "boto3" },
     { name = "fastmcp" },
     { name = "trading-clients", extra = ["sentiment"] },
     { name = "yfinance" },
@@ -1920,6 +1921,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "akshare", specifier = ">=1.18.56" },
+    { name = "boto3", specifier = ">=1.34" },
     { name = "fastmcp", specifier = ">=3.2" },
     { name = "trading-clients", extras = ["sentiment"], editable = "packages/trading-clients" },
     { name = "yfinance", specifier = ">=1.2" },

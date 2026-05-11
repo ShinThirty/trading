@@ -18,6 +18,7 @@ from trading_mcp.db.pipeline import (
     update_entry,
 )
 from trading_mcp.helpers import _db
+from trading_mcp.pipeline_sync import publish_pipeline_to_s3
 
 mcp = FastMCP("pipeline-tools")
 
@@ -154,6 +155,7 @@ async def pipeline_add(
         if v is not None
     }
     entry = await add_entry(conn, data)
+    await publish_pipeline_to_s3(conn)
     return _entry_detail(entry)
 
 
@@ -215,6 +217,7 @@ async def pipeline_update(
         if v is not None
     }
     entry = await update_entry(conn, ticker, updates)
+    await publish_pipeline_to_s3(conn)
     return _entry_detail(entry)
 
 
@@ -286,4 +289,26 @@ async def pipeline_close(
     if reason:
         await add_note(conn, ticker, f"Closed ({status}): {reason}")
     entry = await close_entry(conn, ticker, status)
+    await publish_pipeline_to_s3(conn)
     return _entry_detail(entry)
+
+
+@mcp.tool()
+async def pipeline_resync(ctx: Context) -> str:
+    """Re-publish the active pipeline snapshot to S3.
+
+    Use after manual SQLite edits or to recover from a sync that failed
+    silently. No-ops with a clear message if PIPELINE_STATE_BUCKET /
+    PIPELINE_STATE_KEY env vars are unset.
+    """
+    import os
+
+    from trading_mcp.pipeline_sync import _BUCKET_ENV, _KEY_ENV
+
+    bucket = os.environ.get(_BUCKET_ENV)
+    key = os.environ.get(_KEY_ENV)
+    if not bucket or not key:
+        return f"Skipped — {_BUCKET_ENV} / {_KEY_ENV} not set; pipeline sync is disabled."
+    conn = _db(ctx)
+    count = await publish_pipeline_to_s3(conn)
+    return f"Published {count} active entries to s3://{bucket}/{key}"

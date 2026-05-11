@@ -22,6 +22,18 @@ variable "dynamodb_table_name" {
   default     = "trading-alerts"
 }
 
+variable "state_bucket_name" {
+  description = "S3 bucket holding shared state objects (e.g. pipeline.json published from local trading-mcp)"
+  type        = string
+  default     = "trading-alerts-state"
+}
+
+variable "pipeline_state_key" {
+  description = "S3 key for the published pipeline snapshot consumed by ticker-aware watchers"
+  type        = string
+  default     = "pipeline.json"
+}
+
 variable "naaim_schedule" {
   description = "EventBridge cron for NAAIM watcher (default: Thu 14:00 UTC = 10 AM ET in DST, after Wed PM print)"
   type        = string

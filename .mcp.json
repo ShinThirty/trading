@@ -9,7 +9,10 @@
         "trading-mcp",
         "trading-mcp"
       ],
-      "env": {}
+      "env": {
+        "PIPELINE_STATE_BUCKET": "trading-alerts-state",
+        "PIPELINE_STATE_KEY": "pipeline.json"
+      }
     }
   }
 }
