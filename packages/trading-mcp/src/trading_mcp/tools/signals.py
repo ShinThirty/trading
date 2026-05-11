@@ -448,10 +448,18 @@ async def get_entry_signals(ctx: Context, symbol: str) -> str:
     size = d.get("size", "Unknown")
 
     iv_item = iv_resp.items[0] if iv_resp and iv_resp.items else {}
+    iv_index_raw = to_float(iv_item.get("implied-volatility-index"))
+    iv_index = iv_index_raw * 100 if iv_index_raw is not None else None
     iv_rank_raw = to_float(iv_item.get("tw-implied-volatility-index-rank"))
     iv_rank = iv_rank_raw * 100 if iv_rank_raw is not None else None
+    iv_pctl_raw = to_float(iv_item.get("implied-volatility-percentile"))
+    iv_pctl = iv_pctl_raw * 100 if iv_pctl_raw is not None else None
+    iv_5d_chg_raw = to_float(iv_item.get("implied-volatility-index-5-day-change"))
+    iv_5d_chg = iv_5d_chg_raw * 100 if iv_5d_chg_raw is not None else None
     iv_30d = to_float(iv_item.get("implied-volatility-30-day"))
     hv_30d = to_float(iv_item.get("historical-volatility-30-day"))
+    hv_60d = to_float(iv_item.get("historical-volatility-60-day"))
+    hv_90d = to_float(iv_item.get("historical-volatility-90-day"))
     iv_hv = to_float(iv_item.get("iv-hv-30-day-difference"))
     earnings = iv_item.get("earnings", {})
     earnings_date = earnings.get("expected-report-date") if isinstance(earnings, dict) else None
@@ -573,14 +581,24 @@ async def get_entry_signals(ctx: Context, symbol: str) -> str:
 
     data["Size Tier"] = size
 
+    if iv_index is not None:
+        data["IV Index"] = f"{iv_index:.1f}%"
     if iv_rank is not None:
         data["IV Rank"] = f"{iv_rank:.0f}%"
-    if iv_hv is not None:
-        data["IV-HV"] = f"{iv_hv:+.1f}%"
+    if iv_pctl is not None:
+        data["IV Pctl"] = f"{iv_pctl:.0f}%"
+    if iv_5d_chg is not None:
+        data["IV 5d Chg"] = f"{iv_5d_chg:+.1f}%"
     if iv_30d is not None:
         data["IV 30d"] = f"{iv_30d:.1f}%"
     if hv_30d is not None:
         data["HV 30d"] = f"{hv_30d:.1f}%"
+    if hv_60d is not None:
+        data["HV 60d"] = f"{hv_60d:.1f}%"
+    if hv_90d is not None:
+        data["HV 90d"] = f"{hv_90d:.1f}%"
+    if iv_hv is not None:
+        data["IV-HV"] = f"{iv_hv:+.1f}%"
     if earnings_date:
         data["Earnings"] = earnings_date
     if liq is not None:
