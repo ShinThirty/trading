@@ -7,6 +7,14 @@ terraform {
       version = "~> 5.0"
     }
   }
+
+  backend "s3" {
+    bucket  = "trading-tf-state-113477077840"
+    key     = "trading-alerts/terraform.tfstate"
+    region  = "us-west-2"
+    profile = "personal"
+    encrypt = true
+  }
 }
 
 provider "aws" {
