@@ -40,6 +40,12 @@ variable "dix_schedule" {
   default     = "cron(0 22 ? * MON-FRI *)"
 }
 
+variable "beige_book_schedule" {
+  description = "EventBridge cron for Beige Book watcher (default: Wed 19:00 UTC = 3 PM ET in DST, ~1h after the 2 PM ET release)"
+  type        = string
+  default     = "cron(0 19 ? * WED *)"
+}
+
 variable "wpsr_schedule" {
   description = "EventBridge cron for WPSR watcher (default: Wed 16:00 UTC = 12 PM ET in DST, ~90 min after WPSR publishes at 10:30 ET)"
   type        = string

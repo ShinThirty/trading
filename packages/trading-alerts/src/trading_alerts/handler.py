@@ -14,7 +14,7 @@ from trading_alerts.config import AlertsConfig, load_config
 from trading_alerts.dispatch import dispatch
 from trading_alerts.event import AlertEvent
 from trading_alerts.state import AlertStore, alert_store
-from trading_alerts.watchers import dix, gex, naaim, tsmc_revenue, wpsr
+from trading_alerts.watchers import beige_book, dix, gex, naaim, tsmc_revenue, wpsr
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -27,6 +27,7 @@ WATCHERS: dict[str, WatcherFn] = {
     "dix": dix.run,
     "tsmc_revenue": tsmc_revenue.run,
     "wpsr": wpsr.run,
+    "beige_book": beige_book.run,
 }
 
 # Module-level cache for Lambda warm starts

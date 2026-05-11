@@ -205,6 +205,32 @@ resource "aws_lambda_permission" "gex" {
   source_arn    = aws_cloudwatch_event_rule.gex.arn
 }
 
+# Beige Book publishes Wednesday 2 PM ET, 8x/year ~2 weeks before each FOMC.
+# Run weekly Wed 19:00 UTC; dedup keeps the alert to one fire per release.
+resource "aws_cloudwatch_event_rule" "beige_book" {
+  name                = "trading-alerts-beige-book"
+  description         = "Federal Reserve Beige Book new-release watcher"
+  schedule_expression = var.beige_book_schedule
+
+  tags = {
+    Service = "trading-alerts"
+  }
+}
+
+resource "aws_cloudwatch_event_target" "beige_book" {
+  rule  = aws_cloudwatch_event_rule.beige_book.name
+  arn   = aws_lambda_function.dispatcher.arn
+  input = jsonencode({ trigger = "beige_book" })
+}
+
+resource "aws_lambda_permission" "beige_book" {
+  statement_id  = "AllowEventBridgeBeigeBook"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.dispatcher.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.beige_book.arn
+}
+
 # WPSR publishes Wednesday 10:30 ET; fire ~90 min later for slack.
 resource "aws_cloudwatch_event_rule" "wpsr" {
   name                = "trading-alerts-wpsr"
