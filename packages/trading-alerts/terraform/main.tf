@@ -9,11 +9,12 @@ terraform {
   }
 
   backend "s3" {
-    bucket  = "trading-tf-state-113477077840"
-    key     = "trading-alerts/terraform.tfstate"
-    region  = "us-west-2"
-    profile = "personal"
-    encrypt = true
+    bucket       = "trading-tf-state-113477077840"
+    key          = "trading-alerts/terraform.tfstate"
+    region       = "us-west-2"
+    profile      = "personal"
+    encrypt      = true
+    use_lockfile = true
   }
 }
 
