@@ -606,6 +606,34 @@ resource "aws_lambda_permission" "activist_filing" {
   source_arn    = aws_cloudwatch_event_rule.activist_filing.arn
 }
 
+# Form 4 insider open-market purchases (Code=P) for pipeline tickers. Two
+# fire paths: cluster (≥2 distinct insiders in a 5d window) and single-large
+# (one filing crossing a role-tiered $-threshold). Staggered 15 min after
+# activist_filing so the three ticker-aware EDGAR scans don't pile up.
+resource "aws_cloudwatch_event_rule" "insider_buying" {
+  name                = "trading-alerts-insider-buying"
+  description         = "Form 4 insider buying watcher for pipeline tickers (cluster + single-large)"
+  schedule_expression = var.insider_buying_schedule
+
+  tags = {
+    Service = "trading-alerts"
+  }
+}
+
+resource "aws_cloudwatch_event_target" "insider_buying" {
+  rule  = aws_cloudwatch_event_rule.insider_buying.name
+  arn   = aws_lambda_function.dispatcher.arn
+  input = jsonencode({ trigger = "insider_buying" })
+}
+
+resource "aws_lambda_permission" "insider_buying" {
+  statement_id  = "AllowEventBridgeInsiderBuying"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.dispatcher.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.insider_buying.arn
+}
+
 # --- Lambda — Discord interaction handler (mute buttons + slash commands) ---
 
 resource "aws_lambda_function" "interaction" {

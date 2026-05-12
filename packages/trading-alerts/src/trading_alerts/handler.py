@@ -23,6 +23,7 @@ from trading_alerts.watchers import (
     fomc,
     gdp,
     gex,
+    insider_buying,
     material_8k,
     naaim,
     nfp,
@@ -53,6 +54,7 @@ WATCHERS: dict[str, WatcherFn] = {
     "fomc": fomc.run,
     "material_8k": material_8k.run,
     "activist_filing": activist_filing.run,
+    "insider_buying": insider_buying.run,
 }
 
 # Module-level cache for Lambda warm starts

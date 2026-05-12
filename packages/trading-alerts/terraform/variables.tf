@@ -124,6 +124,12 @@ variable "activist_filing_schedule" {
   default     = "cron(15 13 ? * MON-FRI *)"
 }
 
+variable "insider_buying_schedule" {
+  description = "EventBridge cron for insider buying (Form 4) watcher (default: Mon-Fri 13:30 UTC, staggered 15 min after activist_filing — third EDGAR scan in the morning batch)"
+  type        = string
+  default     = "cron(30 13 ? * MON-FRI *)"
+}
+
 variable "lambda_memory_mb" {
   description = "Lambda memory allocation in MB"
   type        = number

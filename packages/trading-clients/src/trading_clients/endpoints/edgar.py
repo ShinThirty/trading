@@ -302,6 +302,177 @@ class FilingDocResponse:
 
 
 # ═══════════════════════════════════════════════════════════════
+# Form 4 (insider transaction) XML schema
+# ═══════════════════════════════════════════════════════════════
+#
+# Form 4 ownership documents are XML, not HTML. The schema is unnamespaced;
+# we only need a small subset to drive the insider_buying watcher: who filed,
+# their relationship to the company, and their non-derivative purchases.
+#
+# Reference (informal): https://www.sec.gov/info/edgar/specifications/form345xml.htm
+
+# Officer-title patterns that promote a filing into the CEO/CFO tier
+# (lower $-threshold for single-large fires; "critical" alert level).
+_FORM4_CEO_PATTERNS: tuple[str, ...] = (
+    "chief executive",
+    "chief financial",
+    "principal financial",
+    "principal executive",
+    "ceo",
+    "cfo",
+)
+
+
+def _form4_truthy(v: str | None) -> bool:
+    if not v:
+        return False
+    return v.strip().lower() in {"1", "true"}
+
+
+@dataclass
+class Form4Transaction:
+    """One non-derivative transaction parsed from a Form 4."""
+
+    date: str  # YYYY-MM-DD (transaction date, not filing date)
+    code: str  # P=open-market purchase, S=sale, A=grant, M=exercise, F=tax-withhold, ...
+    shares: float
+    price: float | None  # missing/zero for grants/exercises
+    acquired_disposed: str  # "A" or "D"
+
+    @property
+    def value(self) -> float:
+        return self.shares * (self.price or 0.0)
+
+
+@dataclass
+class Form4Filing:
+    """One Form 4 (insider transaction) filing parsed from XML."""
+
+    person: str
+    is_officer: bool
+    is_director: bool
+    is_ten_percent_owner: bool
+    officer_title: str
+    transactions: list[Form4Transaction] = field(default_factory=list)
+
+    @property
+    def role_tag(self) -> str:
+        """Compact label for embeds: CEO / CFO / OFFICER / DIRECTOR / 10%+ / OTHER."""
+        title = (self.officer_title or "").lower()
+        if any(p in title for p in _FORM4_CEO_PATTERNS):
+            if "financial" in title or "cfo" in title:
+                return "CFO"
+            return "CEO"
+        if self.is_officer:
+            return "OFFICER"
+        if self.is_director:
+            return "DIRECTOR"
+        if self.is_ten_percent_owner:
+            return "10%+"
+        return "OTHER"
+
+    @property
+    def is_ceo_or_cfo(self) -> bool:
+        return self.role_tag in {"CEO", "CFO"}
+
+    def purchases(self) -> list[Form4Transaction]:
+        """Open-market purchases only (Code=P) with usable share + price data."""
+        return [
+            t for t in self.transactions if t.code == "P" and t.shares > 0 and (t.price or 0) > 0
+        ]
+
+    @property
+    def total_purchase_value(self) -> float:
+        return sum(t.value for t in self.purchases())
+
+    @property
+    def total_purchase_shares(self) -> float:
+        return sum(t.shares for t in self.purchases())
+
+    @property
+    def avg_purchase_price(self) -> float | None:
+        shares = self.total_purchase_shares
+        if shares <= 0:
+            return None
+        return self.total_purchase_value / shares
+
+    @property
+    def latest_purchase_date(self) -> str:
+        # Lex-sorted ISO dates; latest wins.
+        dates = [t.date for t in self.purchases() if t.date]
+        return max(dates) if dates else ""
+
+
+@dataclass
+class Form4Response:
+    filing: Form4Filing | None
+
+    @classmethod
+    def from_response(cls, xml: str) -> "Form4Response":
+        if not xml:
+            return cls(filing=None)
+        from xml.etree import ElementTree as ET
+
+        try:
+            root = ET.fromstring(xml)
+        except ET.ParseError:
+            return cls(filing=None)
+
+        owner_id = root.find("./reportingOwner/reportingOwnerId")
+        if owner_id is None:
+            return cls(filing=None)
+        rel = root.find("./reportingOwner/reportingOwnerRelationship")
+
+        person = (owner_id.findtext("rptOwnerName") or "").strip()
+        is_officer = _form4_truthy(rel.findtext("isOfficer") if rel is not None else "")
+        is_director = _form4_truthy(rel.findtext("isDirector") if rel is not None else "")
+        is_10pct = _form4_truthy(rel.findtext("isTenPercentOwner") if rel is not None else "")
+        officer_title = ((rel.findtext("officerTitle") if rel is not None else "") or "").strip()
+
+        transactions: list[Form4Transaction] = []
+        for tx in root.findall("./nonDerivativeTable/nonDerivativeTransaction"):
+            date = (tx.findtext("./transactionDate/value") or "").strip()
+            code = (tx.findtext("./transactionCoding/transactionCode") or "").strip().upper()
+            shares_s = tx.findtext("./transactionAmounts/transactionShares/value") or ""
+            price_s = tx.findtext("./transactionAmounts/transactionPricePerShare/value") or ""
+            ad = tx.findtext("./transactionAmounts/transactionAcquiredDisposedCode/value") or ""
+            try:
+                shares = float(shares_s) if shares_s else 0.0
+            except ValueError:
+                shares = 0.0
+            try:
+                price: float | None = float(price_s) if price_s else None
+            except ValueError:
+                price = None
+            transactions.append(
+                Form4Transaction(
+                    date=date,
+                    code=code,
+                    shares=shares,
+                    price=price,
+                    acquired_disposed=ad.strip().upper(),
+                )
+            )
+
+        return cls(
+            filing=Form4Filing(
+                person=person,
+                is_officer=is_officer,
+                is_director=is_director,
+                is_ten_percent_owner=is_10pct,
+                officer_title=officer_title,
+                transactions=transactions,
+            )
+        )
+
+    def to_output(self) -> str:
+        if self.filing is None:
+            return "(empty)"
+        f = self.filing
+        return f"{f.person} ({f.role_tag}) — {len(f.transactions)} tx"
+
+
+# ═══════════════════════════════════════════════════════════════
 # Endpoint Definitions
 # ═══════════════════════════════════════════════════════════════
 
@@ -333,5 +504,15 @@ FILING_DOC = Endpoint(
     "/Archives/edgar/data/{cik}/{accession}/{filename}",
     cache_ttl=30 * 24 * 3600,
     response_model=FilingDocResponse,
+    base_url=WWW_HOST,
+)
+
+# Same path as FILING_DOC but parses the response as Form 4 XML rather than
+# HTML. Form 4 schema is unnamespaced; we extract reporting owner relationship
+# + non-derivative transactions to power the insider_buying watcher.
+FILING_FORM4 = Endpoint(
+    "/Archives/edgar/data/{cik}/{accession}/{filename}",
+    cache_ttl=30 * 24 * 3600,
+    response_model=Form4Response,
     base_url=WWW_HOST,
 )
