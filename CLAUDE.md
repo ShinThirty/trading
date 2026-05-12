@@ -88,7 +88,9 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │           ├── tastytrade.py        # 5 endpoints (IV metrics, backtesting, watchlists, dividends)
 │   │           ├── fool.py              # 2 endpoints (monthly sitemap, transcript page)
 │   │           ├── edgar.py             # 5 endpoints (ticker map, submissions, filing index, doc, Form 4)
-│   │           │                        #   + section anchors, risk-factor splitter & Jaccard diff helpers
+│   │           │                        #   + 10-K/10-Q section anchors, risk-factor splitter & Jaccard diff
+│   │           │                        #   + S-1/F-1/424B catalog-driven section extractor (line-anchored,
+│   │           │                        #   last-match-wins; handles both domestic + foreign-issuer prospectuses)
 │   │           ├── bls.py               # 2 endpoints (Employment Situation, CPI press releases)
 │   │           ├── bea.py               # 2 endpoints (current releases index, PCE press release)
 │   │           ├── fed.py               # 2 endpoints (FOMC calendar, FOMC statement)
@@ -147,6 +149,9 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │           ├── edgar.py             # Generic EDGAR primitives: filings index, content fetch,
 │   │           │                        #   10-K/10-Q section extract, risk-factor diff, 8-K exhibit,
 │   │           │                        #   pipeline-wide filings sweep
+│   │           ├── ipo.py               # S-1/F-1/424B prospectus tools: latest-filing locator,
+│   │           │                        #   named-section reader, customer-concentration extractor.
+│   │           │                        #   Powers the /ipo skill (pre-profit speculative-growth gate run).
 │   │           ├── signals.py           # Conviction, sizing, hedge, entry signals
 │   │           ├── pipeline.py          # Pipeline ticker CRUD
 │   │           ├── pipeline_catalysts.py # Pipeline catalyst CRUD

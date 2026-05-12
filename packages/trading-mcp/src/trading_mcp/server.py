@@ -50,6 +50,7 @@ from trading_mcp.tools.eia import mcp as eia_mcp
 from trading_mcp.tools.factset import mcp as factset_mcp
 from trading_mcp.tools.freight import mcp as freight_mcp
 from trading_mcp.tools.fundamentals import mcp as fundamentals_mcp
+from trading_mcp.tools.ipo import mcp as ipo_mcp
 from trading_mcp.tools.macro import mcp as macro_mcp
 from trading_mcp.tools.naaim import mcp as naaim_mcp
 from trading_mcp.tools.news import mcp as news_mcp
@@ -151,6 +152,7 @@ mcp.mount(factset_mcp)
 mcp.mount(backtest_mcp)
 mcp.mount(earnings_mcp)
 mcp.mount(edgar_mcp)
+mcp.mount(ipo_mcp)
 mcp.mount(signals_mcp)
 mcp.mount(pipeline_mcp)
 mcp.mount(pipeline_catalysts_mcp)

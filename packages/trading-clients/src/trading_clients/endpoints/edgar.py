@@ -643,6 +643,184 @@ def extract_section(text: str, section_id: str) -> str:
 
 
 # ═══════════════════════════════════════════════════════════════
+# Section extraction (S-1 / F-1 / 424B prospectus)
+# ═══════════════════════════════════════════════════════════════
+#
+# S-1 / F-1 prospectuses don't use Item-numbered headers like 10-K/10-Q, so the
+# 10-K extractor doesn't apply. Instead, body section headers appear as the
+# section name on a line by itself (CBRS/KLAR use ALL-CAPS, RBRK uses Title
+# Case — both work with case-insensitive whole-line matching). Cross-references
+# in flowing text don't match because they're embedded in sentences.
+#
+# Algorithm:
+#   1. For each section, find all whole-line matches (case-insensitive, MULTILINE).
+#   2. Body header position = LAST match per section. TOC entries always come
+#      first; the body header is strictly later in document order.
+#   3. Section end = nearest body position greater than ours, REGARDLESS of
+#      catalog order — KLAR (F-1) puts Market & Industry Data before Risk
+#      Factors, opposite of CBRS/RBRK. End determination must be position-based.
+#
+# Sections deliberately omitted:
+#   - "selected_financial" — SEC eliminated this requirement in 2021 (Reg S-K
+#     Item 301). Modern S-1s have only summary financial data + MD&A.
+
+# (section_id, name_variants) — order is informational; extraction is position-driven.
+SECTION_CATALOG_S1: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("prospectus_summary", ("prospectus summary",)),
+    ("the_offering", ("the offering",)),
+    (
+        "summary_financial_data",
+        (
+            "summary consolidated financial data",
+            "summary consolidated financial and other data",
+            "summary financial data",
+        ),
+    ),
+    ("risk_factors", ("risk factors",)),
+    (
+        "special_note_forward_looking",
+        (
+            "special note regarding forward-looking statements",
+            "cautionary note regarding forward-looking statements",
+        ),
+    ),
+    (
+        "market_industry_data",
+        (
+            "market, industry, and other data",
+            "market and industry data",
+        ),
+    ),
+    ("use_of_proceeds", ("use of proceeds",)),
+    ("dividend_policy", ("dividend policy",)),
+    ("capitalization", ("capitalization",)),
+    ("dilution", ("dilution",)),
+    (
+        "mda",
+        (
+            "management’s discussion and analysis of financial condition and results of operations",
+            "management's discussion and analysis of financial condition and results of operations",
+            "management’s discussion and analysis",
+            "management's discussion and analysis",
+        ),
+    ),
+    ("business", ("business",)),
+    ("management", ("management",)),
+    (
+        "executive_compensation",
+        (
+            "executive compensation",
+            "executive and director remuneration",
+            "executive and director compensation",
+        ),
+    ),
+    (
+        "related_party",
+        (
+            "certain relationships and related party transactions",
+            "related party transactions",
+        ),
+    ),
+    (
+        "principal_stockholders",
+        (
+            "principal stockholders",
+            "principal and selling shareholders",
+            "principal and selling stockholders",
+        ),
+    ),
+    (
+        "description_of_capital_stock",
+        (
+            "description of capital stock",
+            "description of share capital and articles of association",
+            "description of share capital",
+        ),
+    ),
+    (
+        "underwriting",
+        (
+            "underwriting (conflicts of interest)",
+            "underwriters",
+            "underwriting",
+            "plan of distribution",
+        ),
+    ),
+)
+
+# Forms this catalog applies to — domestic S-1, foreign F-1, and final prospectuses.
+S1_FAMILY_FORMS: frozenset[str] = frozenset(
+    {
+        "S-1",
+        "S-1/A",
+        "F-1",
+        "F-1/A",
+        "424B1",
+        "424B2",
+        "424B3",
+        "424B4",
+        "424B5",
+    }
+)
+
+
+def _whole_line_pattern(phrase: str) -> re.Pattern[str]:
+    """Match the phrase as a complete trimmed line (case-insensitive, MULTILINE)."""
+    parts = re.split(r"\s+", phrase.strip())
+    inner = r"\s+".join(re.escape(p) for p in parts)
+    return re.compile(rf"^[\s]*{inner}[\s]*$", re.IGNORECASE | re.MULTILINE)
+
+
+def _find_s1_body_positions(text: str) -> dict[str, int]:
+    """Locate the body header position for each section in SECTION_CATALOG_S1.
+
+    Body position = last whole-line match per section. Sections with no match
+    are omitted from the result.
+    """
+    out: dict[str, int] = {}
+    for sid, variants in SECTION_CATALOG_S1:
+        latest = -1
+        for phrase in variants:
+            for m in _whole_line_pattern(phrase).finditer(text):
+                if m.start() > latest:
+                    latest = m.start()
+        if latest >= 0:
+            out[sid] = latest
+    return out
+
+
+def extract_s1_all_sections(text: str) -> dict[str, str]:
+    """Extract every detectable section from an S-1/F-1/424B prospectus.
+
+    Returns {section_id: section_text}. Sections capped at 300K chars to bound
+    a runaway last-section span.
+    """
+    body = _find_s1_body_positions(text)
+    if not body:
+        return {}
+    sorted_positions = sorted(body.values())
+    out: dict[str, str] = {}
+    for sid, start in body.items():
+        next_positions = [p for p in sorted_positions if p > start]
+        end = next_positions[0] if next_positions else len(text)
+        end = min(end, start + 300_000)
+        out[sid] = text[start:end].strip()
+    return out
+
+
+def extract_s1_section(text: str, section_id: str) -> str:
+    """Extract one named S-1 section by id. Returns '' if not found.
+
+    Valid section ids: see SECTION_CATALOG_S1.
+    """
+    valid_ids = {sid for sid, _ in SECTION_CATALOG_S1}
+    if section_id not in valid_ids:
+        choices = ", ".join(sid for sid, _ in SECTION_CATALOG_S1)
+        raise ValueError(f"Unknown S-1 section_id {section_id!r}; choose from: {choices}")
+    return extract_s1_all_sections(text).get(section_id, "")
+
+
+# ═══════════════════════════════════════════════════════════════
 # Risk-factor item splitting + Jaccard diff
 # ═══════════════════════════════════════════════════════════════
 
