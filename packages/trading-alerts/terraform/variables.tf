@@ -130,6 +130,12 @@ variable "insider_buying_schedule" {
   default     = "cron(30 13 ? * MON-FRI *)"
 }
 
+variable "watchdog_schedule" {
+  description = "EventBridge cron for the operational watchdog (default: daily 15:00 UTC = 11 AM ET in DST, after the morning EDGAR scans complete)"
+  type        = string
+  default     = "cron(0 15 ? * * *)"
+}
+
 variable "lambda_memory_mb" {
   description = "Lambda memory allocation in MB"
   type        = number

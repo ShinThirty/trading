@@ -163,6 +163,21 @@ data "aws_iam_policy_document" "lambda_permissions" {
     actions   = ["s3:GetObject"]
     resources = ["${aws_s3_bucket.state.arn}/${var.pipeline_state_key}"]
   }
+
+  # CloudWatch metrics — used by the watchdog watcher to detect missed
+  # EventBridge invocations and Lambda errors. CloudWatch metrics don't
+  # support resource-level perms.
+  statement {
+    actions   = ["cloudwatch:GetMetricData", "cloudwatch:GetMetricStatistics"]
+    resources = ["*"]
+  }
+
+  # DynamoDB describe — used by the watchdog watcher to confirm the alerts
+  # table is ACTIVE.
+  statement {
+    actions   = ["dynamodb:DescribeTable"]
+    resources = [aws_dynamodb_table.alerts.arn]
+  }
 }
 
 resource "aws_iam_role_policy" "lambda" {
@@ -632,6 +647,33 @@ resource "aws_lambda_permission" "insider_buying" {
   function_name = aws_lambda_function.dispatcher.function_name
   principal     = "events.amazonaws.com"
   source_arn    = aws_cloudwatch_event_rule.insider_buying.arn
+}
+
+# Operational watchdog — daily self-check covering Lambda errors, missed
+# EventBridge invocations, pipeline.json freshness, DynamoDB health. Posts
+# `[OPS]` AlertEvents to Discord when something is broken; silent otherwise.
+resource "aws_cloudwatch_event_rule" "watchdog" {
+  name                = "trading-alerts-watchdog"
+  description         = "trading-alerts operational watchdog (daily self-check)"
+  schedule_expression = var.watchdog_schedule
+
+  tags = {
+    Service = "trading-alerts"
+  }
+}
+
+resource "aws_cloudwatch_event_target" "watchdog" {
+  rule  = aws_cloudwatch_event_rule.watchdog.name
+  arn   = aws_lambda_function.dispatcher.arn
+  input = jsonencode({ trigger = "watchdog" })
+}
+
+resource "aws_lambda_permission" "watchdog" {
+  statement_id  = "AllowEventBridgeWatchdog"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.dispatcher.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.watchdog.arn
 }
 
 # --- Lambda — Discord interaction handler (mute buttons + slash commands) ---
