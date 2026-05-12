@@ -516,3 +516,347 @@ FILING_FORM4 = Endpoint(
     response_model=Form4Response,
     base_url=WWW_HOST,
 )
+
+
+# ═══════════════════════════════════════════════════════════════
+# Section extraction (10-Q / 10-K narrative)
+# ═══════════════════════════════════════════════════════════════
+#
+# After our HTML parser flattens the filing, sections are bounded by
+# Item-numbered headers ("Item 1A. Risk Factors", "Item 2.", etc.) or by
+# named subsection headers ("Management's Discussion and Analysis",
+# "Liquidity and Capital Resources"). The exact wording and capitalization
+# vary by issuer, so we anchor on flexible regex patterns.
+#
+# A 10-Q/10-K usually contains TWO matches for each Item header: one in the
+# table of contents at the top, and one at the actual section start. The TOC
+# entry is short (next sibling is right behind it); the body section is long.
+# We pick the candidate whose span is largest.
+
+
+@dataclass(frozen=True)
+class SectionAnchors:
+    """Anchor patterns for a named section within a 10-Q / 10-K."""
+
+    starts: tuple[str, ...]
+    ends: tuple[str, ...] = ()
+    max_len: int = 30_000
+
+
+SECTION_ANCHORS: dict[str, SectionAnchors] = {
+    "mda": SectionAnchors(
+        starts=(
+            "management's discussion and analysis",
+            "managements discussion and analysis",
+        ),
+        ends=(
+            "quantitative and qualitative disclosures about market risk",
+            "item 3. quantitative",
+            "item 7a.",
+            "item 4. controls and procedures",
+        ),
+        max_len=80_000,
+    ),
+    "risk_factors": SectionAnchors(
+        starts=(
+            "item 1a. risk factors",
+            "item 1a risk factors",
+        ),
+        ends=(
+            "item 1b.",
+            "item 2. properties",
+            "unresolved staff comments",
+        ),
+        max_len=200_000,
+    ),
+    "segments": SectionAnchors(
+        starts=(
+            "segment information",
+            "disaggregation of revenue",
+            "operating segments",
+            "reportable segments",
+        ),
+        max_len=10_000,
+    ),
+    "cash_flow": SectionAnchors(
+        starts=("liquidity and capital resources",),
+        ends=(
+            "critical accounting",
+            "off-balance sheet",
+            "contractual obligations",
+            "recent accounting pronouncements",
+            "item 3.",
+            "item 7a.",
+            "item 4. controls",
+        ),
+        max_len=20_000,
+    ),
+    "business": SectionAnchors(
+        starts=("item 1. business",),
+        ends=("item 1a.", "risk factors"),
+        max_len=80_000,
+    ),
+}
+
+
+def _section_pattern(phrase: str) -> re.Pattern[str]:
+    """Build a regex that tolerates whitespace variation between tokens."""
+    parts = [re.escape(t) for t in phrase.split()]
+    return re.compile(r"\s+".join(parts), re.IGNORECASE)
+
+
+def extract_section(text: str, section_id: str) -> str:
+    """Extract a named section from a 10-Q or 10-K's cleaned text.
+
+    Tries multiple start anchors. Among all (start, end) candidates, returns
+    the slice with the largest span — this skips TOC entries (where sibling
+    headers sit right next to each other) and selects the body section.
+    """
+    if section_id not in SECTION_ANCHORS:
+        choices = ", ".join(SECTION_ANCHORS)
+        raise ValueError(f"Unknown section_id {section_id!r}; choose from: {choices}")
+    cfg = SECTION_ANCHORS[section_id]
+
+    starts: list[tuple[int, int]] = []
+    for phrase in cfg.starts:
+        for m in _section_pattern(phrase).finditer(text):
+            starts.append((m.start(), m.end()))
+    if not starts:
+        return ""
+
+    end_patterns = [_section_pattern(p) for p in cfg.ends]
+
+    spans: list[tuple[int, int, int]] = []
+    for start_pos, after_match in starts:
+        end_pos = min(len(text), start_pos + cfg.max_len)
+        # Search end anchors strictly after the start match. For TOC matches
+        # this returns a tiny span (next sibling header is right behind), so
+        # the longest-span pick downstream prefers the body occurrence.
+        for ep in end_patterns:
+            m = ep.search(text, after_match)
+            if m and m.start() < end_pos:
+                end_pos = m.start()
+        spans.append((start_pos, end_pos, end_pos - start_pos))
+
+    best = max(spans, key=lambda s: s[2])
+    return text[best[0] : best[1]].strip()
+
+
+# ═══════════════════════════════════════════════════════════════
+# Risk-factor item splitting + Jaccard diff
+# ═══════════════════════════════════════════════════════════════
+
+
+@dataclass
+class RiskItem:
+    """One discrete risk factor parsed from Item 1A."""
+
+    headline: str
+    body: str
+
+    @property
+    def fingerprint(self) -> str:
+        return f"{self.headline}\n{self.body[:500]}"
+
+
+def split_risk_factor_items(text: str) -> list[RiskItem]:
+    """Split risk-factors text into items.
+
+    Heuristic: long paragraphs (>=400 chars) anchor item bodies. A short
+    paragraph (<400 chars, >=20 chars) immediately preceding a long one is
+    treated as the item's headline. Standalone long paragraphs use their
+    first sentence as the headline. Continuation paragraphs (mid-length)
+    after a body get folded in.
+
+    Issuer formatting varies — this is intentionally pragmatic, not perfect.
+    What matters is that the same company filed in the same style year over
+    year, so item boundaries align between current and prior 10-K.
+    """
+    paragraphs = [p.strip() for p in re.split(r"\n+", text) if p.strip()]
+    items: list[RiskItem] = []
+    i = 0
+    while i < len(paragraphs):
+        p = paragraphs[i]
+        if len(p) < 20:
+            i += 1
+            continue
+        if len(p) >= 400:
+            # Long paragraph standing on its own — extract first sentence as headline.
+            sentence = re.match(r"^[^.!?]{20,300}[.!?]", p)
+            headline = sentence.group(0).rstrip(".!?").strip() if sentence else p[:200]
+            body_parts = [p]
+            j = i + 1
+            while j < len(paragraphs) and 100 <= len(paragraphs[j]) < 400:
+                body_parts.append(paragraphs[j])
+                j += 1
+            items.append(RiskItem(headline=headline, body="\n".join(body_parts)))
+            i = j
+            continue
+        # Medium paragraph — treat as headline if next paragraph is body-length.
+        if i + 1 < len(paragraphs) and len(paragraphs[i + 1]) >= 400:
+            headline = p
+            body_parts = [paragraphs[i + 1]]
+            j = i + 2
+            while j < len(paragraphs) and 100 <= len(paragraphs[j]) < 400:
+                body_parts.append(paragraphs[j])
+                j += 1
+            items.append(RiskItem(headline=headline, body="\n".join(body_parts)))
+            i = j
+            continue
+        i += 1
+    return items
+
+
+_RISK_STOPWORDS: frozenset[str] = frozenset(
+    {
+        "the",
+        "and",
+        "for",
+        "that",
+        "with",
+        "this",
+        "our",
+        "not",
+        "from",
+        "may",
+        "can",
+        "are",
+        "its",
+        "was",
+        "were",
+        "have",
+        "has",
+        "had",
+        "but",
+        "such",
+        "any",
+        "all",
+        "also",
+        "including",
+        "which",
+        "other",
+        "more",
+        "than",
+        "into",
+        "their",
+        "these",
+        "those",
+        "when",
+        "could",
+        "would",
+        "should",
+        "will",
+        "been",
+        "being",
+        "there",
+        "upon",
+        "over",
+        "under",
+        "between",
+        "among",
+        "through",
+        "during",
+        "while",
+        "because",
+        "before",
+        "after",
+        "each",
+        "every",
+        "some",
+        "most",
+        "much",
+        "many",
+        "both",
+        "either",
+        "neither",
+    }
+)
+
+
+def _tokenize_for_diff(text: str) -> frozenset[str]:
+    """Lowercase 4+ char alphabetic tokens, stopwords removed."""
+    return frozenset(w for w in re.findall(r"[a-z]{4,}", text.lower()) if w not in _RISK_STOPWORDS)
+
+
+def _jaccard(a: frozenset[str], b: frozenset[str]) -> float:
+    if not a and not b:
+        return 1.0
+    if not a or not b:
+        return 0.0
+    return len(a & b) / len(a | b)
+
+
+@dataclass
+class RiskFactorDiff:
+    """Result of diffing two risk-factor item lists."""
+
+    added: list[RiskItem]
+    removed: list[RiskItem]
+    changed: list[tuple[RiskItem, RiskItem, float]]
+    unchanged_count: int
+
+    @property
+    def has_changes(self) -> bool:
+        return bool(self.added or self.removed or self.changed)
+
+
+def _pair_score(a: RiskItem, b: RiskItem) -> float:
+    """Weighted Jaccard: headlines weigh 0.6, bodies 0.4.
+
+    Headlines carry the topic; bodies carry the supporting language. Weighting
+    the headline higher means a same-topic item with substantially reworded
+    body still pairs (and gets bucketed as CHANGED), instead of being lost as
+    REMOVED + ADDED.
+    """
+    h = _jaccard(_tokenize_for_diff(a.headline), _tokenize_for_diff(b.headline))
+    body = _jaccard(_tokenize_for_diff(a.body[:500]), _tokenize_for_diff(b.body[:500]))
+    return 0.6 * h + 0.4 * body
+
+
+def diff_risk_factor_items(
+    current: list[RiskItem],
+    prior: list[RiskItem],
+    *,
+    match_threshold: float = 0.30,
+    change_threshold: float = 0.80,
+) -> RiskFactorDiff:
+    """Diff two risk-factor lists by greedy bipartite matching.
+
+    Each current item is matched to its best prior partner via _pair_score.
+    Pairs scoring >= match_threshold are matched (rest are ADDED / REMOVED).
+    Among matched pairs, those scoring < change_threshold are MATERIALLY
+    CHANGED; the rest are UNCHANGED.
+
+    Defaults are tuned for risk-factor reuse year-over-year: same-topic items
+    with reworded bodies still pair (combined >= 0.30 once headlines align),
+    and a material rewrite drops the combined score below 0.80.
+    """
+    pairs: list[tuple[int, int, float]] = []
+    used_pri: set[int] = set()
+    for ci, ct in enumerate(current):
+        best_pi = -1
+        best_score = 0.0
+        for pi, pt in enumerate(prior):
+            if pi in used_pri:
+                continue
+            s = _pair_score(ct, pt)
+            if s > best_score:
+                best_pi = pi
+                best_score = s
+        if best_pi >= 0 and best_score >= match_threshold:
+            pairs.append((ci, best_pi, best_score))
+            used_pri.add(best_pi)
+
+    paired_cur = {p[0] for p in pairs}
+    added = [current[i] for i in range(len(current)) if i not in paired_cur]
+    removed = [prior[i] for i in range(len(prior)) if i not in used_pri]
+    changed = [
+        (current[ci], prior[pi], score) for ci, pi, score in pairs if score < change_threshold
+    ]
+    unchanged_count = sum(1 for _, _, s in pairs if s >= change_threshold)
+    return RiskFactorDiff(
+        added=added,
+        removed=removed,
+        changed=changed,
+        unchanged_count=unchanged_count,
+    )

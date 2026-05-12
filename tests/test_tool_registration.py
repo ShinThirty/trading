@@ -57,6 +57,14 @@ EXPECTED_TOOLS: dict[str, set[str]] = {
         "get_earnings_transcript",
         "get_earnings_release",
     },
+    "trading_mcp.tools.edgar": {
+        "get_recent_filings",
+        "get_filing_content",
+        "get_filing_section",
+        "diff_risk_factors",
+        "get_8k_exhibit",
+        "scan_pipeline_filings",
+    },
     "trading_mcp.tools.eia": {
         "get_eia_petroleum",
     },

@@ -87,7 +87,8 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │           ├── factset.py           # FactsetEarningsInsightResponse — narrative + parsed S&P 500 metrics
 │   │           ├── tastytrade.py        # 5 endpoints (IV metrics, backtesting, watchlists, dividends)
 │   │           ├── fool.py              # 2 endpoints (monthly sitemap, transcript page)
-│   │           ├── edgar.py             # 4 endpoints (ticker map, submissions, filing index, doc)
+│   │           ├── edgar.py             # 5 endpoints (ticker map, submissions, filing index, doc, Form 4)
+│   │           │                        #   + section anchors, risk-factor splitter & Jaccard diff helpers
 │   │           ├── bls.py               # 2 endpoints (Employment Situation, CPI press releases)
 │   │           ├── bea.py               # 2 endpoints (current releases index, PCE press release)
 │   │           ├── fed.py               # 2 endpoints (FOMC calendar, FOMC statement)
@@ -143,6 +144,9 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │           ├── factset.py           # FactSet Earnings Insight (S&P 500 beat rates, blended growth, forward EPS, P/E, sector revisions)
 │   │           ├── backtest.py          # TastyTrade option strategy backtests
 │   │           ├── earnings.py          # Earnings call transcript (Fool) + press release (EDGAR 8-K)
+│   │           ├── edgar.py             # Generic EDGAR primitives: filings index, content fetch,
+│   │           │                        #   10-K/10-Q section extract, risk-factor diff, 8-K exhibit,
+│   │           │                        #   pipeline-wide filings sweep
 │   │           ├── signals.py           # Conviction, sizing, hedge, entry signals
 │   │           ├── pipeline.py          # Pipeline ticker CRUD
 │   │           ├── pipeline_catalysts.py # Pipeline catalyst CRUD
@@ -255,7 +259,7 @@ signature) handles button clicks (`mute:<seconds>:<dedup_key>`) and the
 | **TastyTrade** | IV rank/percentile, backtesting, watchlists, dividends | OAuth2 refresh token |
 | **Yahoo Finance** | Stock screener, institutional ownership | None (via yfinance) |
 | **Motley Fool** | Earnings call transcripts (scraped) | None |
-| **SEC EDGAR** | 8-K earnings press releases (Item 2.02 Exhibit 99.x) | None (User-Agent only) |
+| **SEC EDGAR** | All filings: tier-classified recent-filings index (10-Q/10-K/8-K/13D/Form 4/S-3/DEF 14A/etc.); cleaned section extraction (MD&A, risk factors, segments, cash-flow narrative, business overview); 10-K Item 1A risk-factor diff vs prior year; 8-K Ex 99.x exhibit fetch; pipeline-wide filings sweep | None (User-Agent only) |
 | **BLS** | Employment Situation / CPI press release narrative | None (User-Agent only) |
 | **BEA** | Personal Income and Outlays (PCE) press release narrative | None (User-Agent only) |
 | **Federal Reserve** | FOMC statements (latest + prior for language diff); Beige Book National Summary + 12 district highlights (8x/year, ~2 weeks pre-FOMC) | None (User-Agent only) |
