@@ -21,7 +21,7 @@ compute_hash() {
         find \
             "$REPO_ROOT/packages/trading-alerts/src" \
             "$REPO_ROOT/packages/trading-clients/src" \
-            -type f | sort | xargs sha256sum
+            -type f -name '*.py' | sort | xargs sha256sum
         sha256sum \
             "$REPO_ROOT/packages/trading-alerts/pyproject.toml" \
             "$REPO_ROOT/packages/trading-clients/pyproject.toml" \
