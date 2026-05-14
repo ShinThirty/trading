@@ -1,86 +1,55 @@
 """Earnings text artifacts: call transcripts and press releases.
 
 Sources:
-  - get_earnings_transcript: scraped from Motley Fool via monthly sitemap discovery.
+  - get_earnings_transcript: walks the PROVIDERS registry from
+    transcript_providers.py in preference order (Motley Fool → Morningstar →
+    future sources). Returns the first hit.
   - get_earnings_release: SEC EDGAR 8-K Exhibit 99.x (Item 2.02 filings).
 """
 
-from datetime import date
-
 from fastmcp import Context, FastMCP
 from trading_clients.endpoints import edgar as e
-from trading_clients.endpoints import fool as f
 
-from trading_mcp.helpers import _edgar, _exc_summary, _fool
+from trading_mcp.helpers import _edgar, _exc_summary
+from trading_mcp.tools.transcript_providers import PROVIDERS
 
 mcp = FastMCP("earnings-tools")
-
-
-def _month_offsets(today: date, n: int) -> list[tuple[int, int]]:
-    """Return [(year, month)] for current and n preceding months."""
-    out: list[tuple[int, int]] = []
-    y, m = today.year, today.month
-    for _ in range(n):
-        out.append((y, m))
-        m -= 1
-        if m == 0:
-            m = 12
-            y -= 1
-    return out
 
 
 @mcp.tool()
 async def get_earnings_transcript(ctx: Context, symbol: str) -> str:
     """Fetch the most recent earnings call transcript for a ticker.
 
-    Source: Motley Fool (scraped via their public monthly sitemap, then the
-    transcript page). Includes prepared remarks and Q&A. Free, no config.
+    Walks providers in preference order (Motley Fool → Morningstar → future
+    sources). Returns the first hit. If none has it, returns a message
+    describing what each provider tried.
 
     symbol: ticker symbol (e.g. 'AAPL'). Case-insensitive.
 
-    Returns the transcript text, or a message if none was found in the last 3 months.
-    Edge case: 0–2 days post-earnings before Fool publishes, this may return the prior
-    quarter's transcript — check the date in the returned content.
+    Edge case: 0–2 days post-earnings before any source publishes, the most
+    recent transcript may be the prior quarter's — check the date in the
+    returned content.
     """
-    fool = _fool(ctx)
     ticker = symbol.upper()
-    last_seen_path: str | None = None
 
-    sitemap_errors: list[str] = []
-    for year, month in _month_offsets(date.today(), 3):
-        try:
-            sitemap = await fool.get(f.MONTHLY_SITEMAP, f.MonthlySitemapRequest(year, month))
-        except Exception as ex:
-            sitemap_errors.append(_exc_summary(f"Fool sitemap {year}-{month:02d}", ex))
-            continue
-        path = sitemap.find_latest_transcript(ticker)
-        if path:
-            last_seen_path = path
-            break
-
-    if not last_seen_path:
-        if sitemap_errors:
-            errs = "\n  • ".join(sitemap_errors)
+    attempted: list[tuple[str, list[str]]] = []
+    for provider in PROVIDERS:
+        result = await provider(ctx, ticker)
+        if result.found:
             return (
-                f"⚠ Could not discover transcript URL for {ticker}. Sitemap fetch errors:\n"
-                f"  • {errs}"
+                f"# {ticker} earnings call transcript\nSource: {result.source_url}\n\n{result.text}"
             )
-        return f"No earnings transcript found for {ticker} in the last 3 months on fool.com"
+        attempted.append((provider.name, result.errors))
 
-    try:
-        transcript = await fool.get(f.TRANSCRIPT_PAGE, f.TranscriptPageRequest(last_seen_path))
-    except Exception as ex:
-        return (
-            f"⚠ Found transcript URL but page fetch failed: "
-            f"{_exc_summary('Fool transcript page', ex)}\n"
-            f"Discovered URL: https://www.fool.com{last_seen_path}"
-        )
-
-    return (
-        f"# {ticker} earnings call transcript\n"
-        f"Source: https://www.fool.com{last_seen_path}\n\n"
-        f"{transcript.to_output()}"
-    )
+    lines = [f"No earnings transcript found for {ticker}."]
+    for name, errors in attempted:
+        if errors:
+            lines.append(f"{name}:")
+            for err in errors:
+                lines.append(f"  • {err}")
+        else:
+            lines.append(f"{name}: no transcript available")
+    return "\n".join(lines)
 
 
 @mcp.tool()

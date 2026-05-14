@@ -19,7 +19,9 @@ from trading_clients.fool_client import FoolClient
 from trading_clients.fred_client import FredClient
 from trading_clients.freightos_client import FreightosClient
 from trading_clients.kalshi_client import KalshiClient
+from trading_clients.morningstar_client import MorningstarClient
 from trading_clients.naaim_client import NaaimClient
+from trading_clients.playwright_host import PlaywrightHost
 from trading_clients.polymarket_client import PolymarketClient
 from trading_clients.portwatch_client import PortwatchClient
 from trading_clients.reddit_client import RedditClient
@@ -103,14 +105,32 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
     ctx["squeeze_metrics"] = SqueezeMetricsClient()
     ctx["naaim"] = NaaimClient()
     ctx["factset"] = FactsetClient()
-    # Sentiment is optional — Playwright may fail to launch if the chromium
-    # binary isn't installed. Server should keep running without it.
-    sentiment = SentimentClient()
+    # Shared Chromium for all Playwright-backed scrapers (SentimentClient,
+    # MorningstarClient). One process, many isolated contexts. If Chromium
+    # can't launch (missing binary, sandbox issue), all Playwright clients
+    # are skipped and the server keeps running without them.
+    playwright_host: PlaywrightHost | None = PlaywrightHost()
     try:
-        await sentiment.startup()
-        ctx["sentiment"] = sentiment
+        await playwright_host.startup()
     except Exception:
-        await sentiment.close()
+        await playwright_host.close()
+        playwright_host = None
+
+    if playwright_host is not None:
+        sentiment = SentimentClient(playwright_host)
+        try:
+            await sentiment.startup()
+            ctx["sentiment"] = sentiment
+        except Exception:
+            await sentiment.close()
+        # Morningstar transcript fallback used by get_earnings_transcript when
+        # Motley Fool has no transcript for a ticker.
+        morningstar = MorningstarClient(playwright_host)
+        try:
+            await morningstar.startup()
+            ctx["morningstar"] = morningstar
+        except Exception:
+            await morningstar.close()
     db = open_db()
     init_pipeline_schema(db)
     init_roll_schema(db)
@@ -124,6 +144,9 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
         for v in ctx.values():
             if hasattr(v, "close") and callable(v.close) and v is not db:
                 await v.close()
+        # Shut Chromium down AFTER every client context has closed.
+        if playwright_host is not None:
+            await playwright_host.close()
 
 
 mcp = FastMCP("trading-mcp", lifespan=lifespan)

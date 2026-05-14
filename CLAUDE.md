@@ -53,6 +53,7 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │       ├── factset_client.py        # No auth, identifies via User-Agent (FactSet Earnings Insight PDF; pdfplumber)
 │   │       ├── tastytrade_client.py     # OAuth2 refresh token auth
 │   │       ├── fool_client.py           # No auth (Motley Fool sitemap+page scrape)
+│   │       ├── morningstar_client.py    # Playwright-based scraper (earnings transcripts; AWS WAF bypass via webdriver mask); takes PlaywrightHost
 │   │       ├── edgar_client.py          # No auth, identifies via User-Agent (SEC EDGAR)
 │   │       ├── bls_client.py            # No auth, identifies via User-Agent (BLS press releases)
 │   │       ├── bea_client.py            # No auth, identifies via User-Agent (BEA press releases)
@@ -68,7 +69,8 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │       ├── squeeze_metrics_client.py # No auth (SqueezeMetrics public DIX/GEX CSV)
 │   │       ├── naaim_client.py          # No auth (NAAIM since-inception XLSX history)
 │   │       ├── reddit_client.py         # No auth (Reddit JSON API — search, subreddit, post)
-│   │       ├── sentiment_client.py      # Playwright-based scraper (CBOE p/c, AAII, NAAIM)
+│   │       ├── playwright_host.py       # Shared Chromium process (one Browser, many isolated Contexts) used by all Playwright-backed clients
+│   │       ├── sentiment_client.py      # Playwright-based scraper (CBOE p/c, AAII); takes PlaywrightHost
 │   │       ├── bsm.py                   # Black-Scholes-Merton option pricing (pure math, no I/O)
 │   │       ├── btc_regime.py            # BTC macro regime classification (pure functions)
 │   │       ├── indicators.py            # Technical analysis indicators on OHLCV bars (pure functions)
@@ -87,6 +89,7 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │           ├── factset.py           # FactsetEarningsInsightResponse — narrative + parsed S&P 500 metrics
 │   │           ├── tastytrade.py        # 5 endpoints (IV metrics, backtesting, watchlists, dividends)
 │   │           ├── fool.py              # 2 endpoints (monthly sitemap, transcript page)
+│   │           ├── morningstar.py       # 1 endpoint (earnings call transcript by exchange + ticker)
 │   │           ├── edgar.py             # 5 endpoints (ticker map, submissions, filing index, doc, Form 4)
 │   │           │                        #   + 10-K/10-Q section anchors, risk-factor splitter & Jaccard diff
 │   │           │                        #   + S-1/F-1/424B catalog-driven section extractor (line-anchored,
@@ -145,7 +148,8 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │           ├── eia.py               # EIA Weekly Petroleum Status Report (stocks, refinery util, retail gasoline)
 │   │           ├── factset.py           # FactSet Earnings Insight (S&P 500 beat rates, blended growth, forward EPS, P/E, sector revisions)
 │   │           ├── backtest.py          # TastyTrade option strategy backtests
-│   │           ├── earnings.py          # Earnings call transcript (Fool) + press release (EDGAR 8-K)
+│   │           ├── earnings.py          # Earnings call transcript (walks PROVIDERS registry) + press release (EDGAR 8-K)
+│   │           ├── transcript_providers.py  # TranscriptProvider registry: Fool, Morningstar; add new providers here
 │   │           ├── edgar.py             # Generic EDGAR primitives: filings index, content fetch,
 │   │           │                        #   10-K/10-Q section extract, risk-factor diff, 8-K exhibit,
 │   │           │                        #   pipeline-wide filings sweep
@@ -263,7 +267,8 @@ signature) handles button clicks (`mute:<seconds>:<dedup_key>`) and the
 | **EIA** | Weekly Petroleum Status Report — crude/product stocks, refinery utilization, retail gasoline. WPSR Wed 10:30 ET. Used during oil-price / inflation events; informs CPI energy, consumer demand destruction, Fed policy path. | API key (free, [register](https://www.eia.gov/opendata/register.php)) |
 | **TastyTrade** | IV rank/percentile, backtesting, watchlists, dividends | OAuth2 refresh token |
 | **Yahoo Finance** | Stock screener, institutional ownership | None (via yfinance) |
-| **Motley Fool** | Earnings call transcripts (scraped) | None |
+| **Motley Fool** | Earnings call transcripts (scraped, primary source) | None |
+| **Morningstar** | Earnings call transcripts (Playwright fallback for tickers Fool misses — small caps, foreign issuers). URL is `/stocks/{xase\|xnys\|xnas}/{ticker}/earnings-transcript`; AWS WAF JS challenge requires headless-Chromium with `navigator.webdriver` mask. | None (Playwright) |
 | **SEC EDGAR** | All filings: tier-classified recent-filings index (10-Q/10-K/8-K/13D/Form 4/S-3/DEF 14A/etc.); cleaned section extraction (MD&A, risk factors, segments, cash-flow narrative, business overview); 10-K Item 1A risk-factor diff vs prior year; 8-K Ex 99.x exhibit fetch; pipeline-wide filings sweep | None (User-Agent only) |
 | **BLS** | Employment Situation / CPI press release narrative | None (User-Agent only) |
 | **BEA** | Personal Income and Outlays (PCE) press release narrative | None (User-Agent only) |

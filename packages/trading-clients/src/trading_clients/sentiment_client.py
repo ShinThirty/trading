@@ -4,10 +4,10 @@ Both sources require a real-browser context:
   - CBOE pages are Next.js client-rendered; static HTML carries no value.
   - AAII returns 403 Incapsula to non-browser User-Agents.
 
-A single chromium browser is launched at MCP server startup and reused across
-scrapes. We use one persistent context configured to look like real Chrome on
-Linux (realistic UA, viewport, locale, NY timezone, accept headers) — without
-this, AAII's WAF blocks. No stealth plugin needed.
+Browser is owned by a shared `PlaywrightHost` (see playwright_host.py); this
+client only owns its BrowserContext, configured with a realistic Chrome-on-
+Linux fingerprint (UA, viewport, locale, NY timezone, accept headers) —
+without these AAII's WAF blocks. No stealth plugin needed.
 
 NAAIM exposure used to live here but now lives in NaaimClient (httpx + XLSX);
 that gives the latest reading plus full history at no extra cost.
@@ -15,32 +15,14 @@ that gives the latest reading plus full history at no extra cost.
 The client is optional: if Playwright fails to start (browser binary missing,
 sandbox issue), the MCP server skips it and the regime tool falls back to its
 non-sentiment dimensions.
-
-Playwright is an optional dep of trading-clients (the `sentiment` extra).
-Importing this module without it raises a clear error so consumers like
-trading-alerts — which depend on plain `trading-clients` — never hit a
-confusing `ModuleNotFoundError: playwright` at import time.
 """
 
 import asyncio
 from typing import Any
 
-try:
-    from playwright.async_api import (
-        Browser,
-        BrowserContext,
-        Playwright,
-        async_playwright,
-    )
-except ImportError as e:  # pragma: no cover — exercised only without the extra
-    raise ImportError(
-        "sentiment_client requires Playwright. Install the optional extra: "
-        "pip install 'trading-clients[sentiment]' (or `uv sync --all-packages` "
-        "in this workspace, which installs it via trading-mcp)."
-    ) from e
-
 from trading_clients.cache import TTLCache
 from trading_clients.endpoint import Endpoint, ParamsRequest
+from trading_clients.playwright_host import BrowserContext, PlaywrightHost
 
 REAL_UA = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -63,27 +45,22 @@ HYDRATION_PAUSE_MS = 2000
 
 
 class SentimentClient:
-    _playwright: Playwright | None
-    _browser: Browser | None
     _context: BrowserContext | None
 
-    def __init__(self) -> None:
-        self._playwright = None
-        self._browser = None
+    def __init__(self, host: PlaywrightHost) -> None:
+        self._host = host
         self._context = None
         self._cache = TTLCache()
         self._started = False
 
     async def startup(self) -> None:
-        """Launch chromium and create the shared realistic-browser context.
+        """Create the realistic-browser context on the shared host.
 
         Idempotent: safe to call once at MCP lifespan startup.
         """
         if self._started:
             return
-        self._playwright = await async_playwright().start()
-        self._browser = await self._playwright.chromium.launch(headless=True)
-        self._context = await self._browser.new_context(
+        self._context = await self._host.new_context(
             user_agent=REAL_UA,
             viewport={"width": 1366, "height": 900},
             locale="en-US",
@@ -93,25 +70,14 @@ class SentimentClient:
         self._started = True
 
     async def close(self) -> None:
-        """Shut down browser + Playwright. Called from MCP lifespan teardown."""
+        """Close this client's context. The shared host stays up — its own
+        teardown shuts down the browser."""
         if self._context is not None:
             try:
                 await self._context.close()
             except Exception:
                 pass
             self._context = None
-        if self._browser is not None:
-            try:
-                await self._browser.close()
-            except Exception:
-                pass
-            self._browser = None
-        if self._playwright is not None:
-            try:
-                await self._playwright.stop()
-            except Exception:
-                pass
-            self._playwright = None
         self._started = False
 
     async def get(self, endpoint: Endpoint, request: ParamsRequest) -> Any:

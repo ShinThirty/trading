@@ -135,3 +135,19 @@ class _yfc:
             return yf.Ticker(s).get_analyst_price_targets() or {}
 
         return await _cached(_cache, f"targets:{symbol}", _TTL_FUNDAMENTALS, _uncached, symbol)
+
+    @staticmethod
+    async def exchange_code(symbol: str) -> str | None:
+        """Yahoo's internal exchange code for a ticker (e.g. 'ASE', 'NYQ',
+        'NMS'). Returns None on lookup failure or when Yahoo has no exchange
+        info. Cached for an hour — exchange listings rarely change."""
+
+        def _uncached(s: str) -> str | None:
+            try:
+                info = yf.Ticker(s).info or {}
+            except Exception:
+                return None
+            code = info.get("exchange")
+            return str(code).upper() if code else None
+
+        return await _cached(_cache, f"exchange:{symbol}", _TTL_FUNDAMENTALS, _uncached, symbol)

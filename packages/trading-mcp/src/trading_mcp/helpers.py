@@ -21,6 +21,7 @@ from trading_clients.fool_client import FoolClient
 from trading_clients.fred_client import FredClient
 from trading_clients.freightos_client import FreightosClient
 from trading_clients.kalshi_client import KalshiClient
+from trading_clients.morningstar_client import MorningstarClient
 from trading_clients.naaim_client import NaaimClient
 from trading_clients.polymarket_client import PolymarketClient
 from trading_clients.portwatch_client import PortwatchClient
@@ -179,6 +180,12 @@ def _sentiment(ctx: Context) -> SentimentClient | None:
     init (e.g. browser binary missing) — callers should treat the sentiment
     dimension as unavailable rather than erroring."""
     return ctx.lifespan_context.get("sentiment")
+
+
+def _morningstar(ctx: Context) -> MorningstarClient | None:
+    """Optional client. Returns None if Playwright failed to start at lifespan
+    init — callers should fall back to other transcript sources."""
+    return ctx.lifespan_context.get("morningstar")
 
 
 async def _check_market(ctx: Context, order_type: str, extended_hours: bool) -> None:
