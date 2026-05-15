@@ -50,6 +50,8 @@ For **pre-profit IPO candidates** (real revenue, GAAP losses, narrative-heavy st
 
 **Quick start:** Run `get_entry_signals` for all stock-level signals (conviction, IV, momentum) and circuit breaker detection in one call. Run `get_market_regime` for market-level context. See [market-regime.md](market-regime.md) for how each regime label maps to strategy preferences. Supplement with `get_company_news` for headwinds and `get_expected_move` for vol bets.
 
+**Valuation regime:** Run `get_equity_risk_premium` and `get_yield_curve_state` alongside `get_market_regime`. ERP tells you whether returns will come from earnings, multiples, or both. Curve regime tells you *what* is repricing (term premium vs Fed path vs duration bid). At Compressed or Compressed-Negative ERP, reduce one conviction tier on high-multiple names. See [valuation-regime.md](valuation-regime.md) for tier definitions and decision integration.
+
 Before any spread or roll, check liquidity via `get_iv_metrics` (Liq 3-4 = tight, Liq 1-2 = caution) and `get_option_chain` bid/ask spreads. Cross-check earnings dates from `get_iv_metrics` and `get_earnings_calendar`; if they disagree, use the later date.
 
 ### Active Macro Overhangs

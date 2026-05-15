@@ -25,7 +25,9 @@ For each **uncovered** equity position, check the CC overlay "When NOT to write"
 | **Deep underwater** | Current price >20% below cost basis? | Position cost vs last price |
 | **First 2 weeks** | Was this position entered within the last 14 days? | `get_order_history` or skip if unclear |
 
-Call `get_iv_metrics` in a single batch for all uncovered symbols to check IV Rank, earnings dates, and liquidity in one call.
+Call `get_iv_metrics` in a single batch for all uncovered symbols to check IV Rank, earnings dates, and liquidity in one call. **In parallel**, call `get_equity_risk_premium` and `get_yield_curve_state` — these flex Step 3 coverage and Step 4 strike aggressiveness. Note the ERP tier and curve regime; carry forward.
+
+**Valuation-regime relaxation on the IV Rank filter:** At **Compressed-Negative ERP** OR **Bear Steepener with long end leading**, the IV Rank < 25% filter is loosened — write even at lower IV. Reason: caps are protecting against likely downside, not just capping unlikely upside. Multiple expansion is mechanically improbable in those regimes, so writing thin-premium CCs still earns their keep. Keep the filter strict at **Generous ERP** / **Bull Steepener** (multiples have room — don't cap for low premium).
 
 Present the filter results as a table:
 
@@ -40,7 +42,12 @@ For each READY position:
 1. `get_entry_signals` for conviction, RSI, circuit breakers.
 2. Determine CC intent: thesis exit (oversized/timeline ending), growth with income (still bullish, want premium), or income generation (range-bound).
 3. Map conviction to coverage per CC Step 3 in [covered-call-overlay.md](../../docs/covered-call-overlay.md): 100% (exit) / 75-100% (neutral) / 50-75% (bullish) / 0-25% (high conviction breakout).
-4. If coverage 0%, skip.
+4. **Valuation-regime flex on coverage:**
+   - **Compressed-Negative ERP** OR **Bear Steepener (long end leading)** → shift one bucket *up* (e.g., bullish 50-75% → 75%; neutral 75-100% → 100%). Multiple expansion mechanically improbable; capping more upside is the right call.
+   - **Generous ERP** OR **Bull Steepener** → shift one bucket *down*. Multiples have room; don't cap a likely rally.
+   - **Tight / Fair ERP + Quiet / Mixed curve** → no shift; coverage stands per conviction.
+   - This is regime-conditional and explicitly inverts the `feedback_cc_loss_close.md` lesson when regime is hostile (no melt-up = caps are insurance, not opportunity cost).
+5. If coverage 0%, skip.
 
 ## Step 4: Strike and Expiry Selection
 
@@ -49,6 +56,12 @@ For each candidate with coverage > 0%:
 1. `get_option_expirations`.
 2. Pick expiry: post-earnings window → 30-45 DTE (best); earnings 3-6 weeks away → sell through to capture IV; otherwise 30-45 DTE (no 8+ month CCs).
 3. `get_option_chain` at chosen expiry, `strike_count=8`. Target delta: thesis exit → exit price; income → 15-20 delta; growth+income → 25-30 delta.
+
+   **Valuation-regime delta flex:**
+   - **Compressed-Negative ERP** OR **Bear Steepener (long end leading)** → bias *higher delta* within range (income → 20; growth+income → 30). Multiple expansion improbable; tighter strikes capture more premium without giving up much expected upside.
+   - **Generous ERP** OR **Bull Steepener** → bias *lower delta* within range (income → 15; growth+income → 25). Wider OTM preserves room for multiple expansion.
+   - **Tight / Fair ERP + Quiet / Mixed curve** → midpoint of range.
+   - See [valuation-regime.md](../../docs/valuation-regime.md) for the full framework.
 4. Present: premium (bid), delta, % OTM, annualized yield, earnings interaction.
 
 ## Step 5: Existing CC Check

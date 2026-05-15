@@ -37,6 +37,17 @@ If all three flat/easing, note "✅ no divergence, curve normalizing" and skip. 
    - **Crowded Short** (z < -1.5): squeeze fuel — physical tightness + short positioning is an explosive setup.
    - **Mixed/Neutral**: divergence is what price says, no positioning amplification.
 
+## Step 1a: Valuation Regime
+
+Call `get_equity_risk_premium` and `get_yield_curve_state` in parallel. Surface in 2 lines:
+
+- **ERP tier**: Generous / Fair / Tight / Compressed / Compressed-Negative + the bps value
+- **Curve regime**: Bear Steepener / Bear Flattener / Bull Steepener / Bull Flattener / Quiet / Mixed + leading tenor on 4w basis
+
+Most days these don't shift. Flag explicitly only when either crosses into a more hostile tier vs the prior briefing — **Compressed-Negative ERP** or **Bear Steepener with long end leading** — since both gate strategy weighting downstream. Bear Flattener is *less* hostile than Bear Steepener at the same yield level (Fed-path repricing vs term-premium expansion); don't conflate them.
+
+See [valuation-regime.md](../../docs/valuation-regime.md) for tier-to-strategy mapping. The tiers persist; the numbers don't — re-pull rather than recall.
+
 ## Step 1b: Macro Print Reaction (release days only)
 
 Call `get_upcoming_economic_releases`. The five prints with dedicated texture tools — exact `Release` column labels — are **`Employment Situation (NFP)`**, **`CPI`**, **`Personal Income and Outlays (PCE)`**, **`GDP`**, and **`FOMC Decision`**. Only these trigger Step 1b. If today's date matches none of them, **skip this section entirely** (but keep the tool output for Step 4's Watch list).

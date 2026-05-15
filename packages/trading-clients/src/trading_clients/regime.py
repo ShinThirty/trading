@@ -167,6 +167,101 @@ def classify_macro(
     return label, detail
 
 
+def classify_erp(erp_bps: float | None) -> tuple[str, str]:
+    """Classify the S&P 500 equity risk premium tier.
+
+    ERP = forward earnings yield − 10Y Treasury yield. Determines how much
+    equities compensate over risk-free for the volatility you take, and
+    therefore the rate at which earnings translate into multiples.
+
+    Tiers (contrarian / forward-return reading):
+    - Generous: ERP >= +500 bps. Equities cheap vs bonds (post-GFC 2010-19 norm).
+    - Fair: +200 ≤ ERP < +500 bps. Long-run historical middle.
+    - Tight: 0 ≤ ERP < +200 bps. Late-cycle valuation regime.
+    - Compressed: -100 ≤ ERP < 0 bps. Equities priced richer than bonds —
+      returns come from earnings only, no room for multiple expansion.
+    - Compressed-Negative: ERP < -100 bps. Dot-com-bubble territory; any
+      rate or earnings shock compresses multiples mechanically.
+
+    Returns (label, detail_string).
+    """
+    if erp_bps is None:
+        return "Unknown", "ERP data unavailable"
+    detail = f"ERP {erp_bps:+.0f} bps"
+    if erp_bps >= 500:
+        return "Generous", detail
+    if erp_bps >= 200:
+        return "Fair", detail
+    if erp_bps >= 0:
+        return "Tight", detail
+    if erp_bps >= -100:
+        return "Compressed", detail
+    return "Compressed-Negative", detail
+
+
+def classify_curve_regime(
+    dy_2y_bps: float | None,
+    dy_10y_bps: float | None,
+    dy_30y_bps: float | None,
+    move_threshold_bps: float = 10.0,
+) -> tuple[str, str]:
+    """Classify yield-curve regime from 4-week tenor changes.
+
+    Four canonical regimes based on whether yields are rising or falling and
+    whether the long end (10Y/30Y avg) or the short end (2Y) is leading the
+    move. The leading-tenor diagnostic is the load-bearing piece: a bear
+    steepener (long end up faster than short end) is term-premium expansion
+    or supply/inflation repricing; a bear flattener (short end leading) is
+    Fed-path repricing.
+
+    Five-tier output:
+    - Bear Steepener: yields rising, long end (10Y/30Y) leading
+    - Bear Flattener: yields rising, short end (2Y) leading
+    - Bull Steepener: yields falling, short end (2Y) leading (Fed-cut priced)
+    - Bull Flattener: yields falling, long end leading (recession/duration bid)
+    - Quiet: |all moves| < threshold (no meaningful repricing)
+    - Mixed: directions disagree across tenors (no coherent regime)
+
+    All inputs are 4-week basis-point changes; threshold defaults to 10 bps.
+
+    Returns (label, detail_string).
+    """
+    parts: list[str] = []
+    if dy_2y_bps is not None:
+        parts.append(f"2Y {dy_2y_bps:+.0f}")
+    if dy_10y_bps is not None:
+        parts.append(f"10Y {dy_10y_bps:+.0f}")
+    if dy_30y_bps is not None:
+        parts.append(f"30Y {dy_30y_bps:+.0f}")
+    detail_changes = " | ".join(parts) + " bps (4w)" if parts else ""
+
+    if dy_2y_bps is None or dy_10y_bps is None or dy_30y_bps is None:
+        return "Unknown", detail_changes or "insufficient tenor data"
+
+    long_end_avg = (dy_10y_bps + dy_30y_bps) / 2
+
+    moves = (dy_2y_bps, dy_10y_bps, dy_30y_bps)
+    if all(abs(m) < move_threshold_bps for m in moves):
+        return "Quiet", detail_changes
+
+    signs = [1 if m > 0 else (-1 if m < 0 else 0) for m in moves]
+    nonzero_signs = {s for s in signs if s != 0}
+    if len(nonzero_signs) > 1:
+        return "Mixed", detail_changes
+
+    # All meaningful moves point the same direction.
+    rising = sum(moves) > 0
+    long_leads = abs(long_end_avg) > abs(dy_2y_bps)
+
+    if rising and long_leads:
+        return "Bear Steepener", f"{detail_changes} — long end leading (term premium / supply)"
+    if rising and not long_leads:
+        return "Bear Flattener", f"{detail_changes} — short end leading (Fed-path repricing)"
+    if not rising and not long_leads:
+        return "Bull Steepener", f"{detail_changes} — short end leading (cut priced)"
+    return "Bull Flattener", f"{detail_changes} — long end leading (duration bid / recession)"
+
+
 def detect_uninversion_trap(
     spread_history: list[float],
     current_spread: float | None,

@@ -17,7 +17,13 @@ Present as carry-forward items before starting any analysis.
 
 1. Call `get_market_regime` — verdict + all dimensions (Vol/Trend/Breadth/Macro/Sectors/Credit/Tape/Sentiment/Positioning/Policy) + ⚠ flags. Also call `get_cot_extremes` for crowded positioning across SPX/NDX/VIX/10Y/Gold/WTI, and `get_naaim_history` for the active-manager exposure gauge (52w z-score, percentile, 8-week trend, multi-window context). NAAIM pairs with CFTC COT and the AAII/CBOE p/c readings inside the regime Sentiment dimension — together they triangulate crowding (extreme long → bearish-forward; extreme defensive → squeeze setup). If FOMC within 4 weeks, call `get_prediction_market` for what's priced.
 
-2. **Recent macro prints (last 14 days).** The five prints with dedicated texture tools are **NFP**, **CPI**, **PCE**, **GDP**, and **FOMC Decision**. Use today's date and known release schedules to determine which are fresh, then call the appropriate texture tool for each:
+2. **Valuation regime.** Call `get_equity_risk_premium` and `get_yield_curve_state` in parallel — the two reads of how risk-free rates translate into equity multiples. Read in this order:
+   - **ERP tier** (Generous / Fair / Tight / Compressed / Compressed-Negative): tells you whether multiples have room to expand or returns will come from earnings only. The historical-P/E decomposition rows (implied ERP at 5y / 10y / quarter-end P/E with current DGS10) say where compression is coming from — multiples vs rates. Compression from multiples is the most fragile; it unwinds with sentiment shifts, not just rate moves.
+   - **Curve regime** (Bear/Bull × Steepener/Flattener): the leading-tenor diagnostic over 4w tells you *what* is repricing. Bear Steepener (long end leading) is term-premium / inflation / supply — mechanical multiple compression on long-duration names. Bear Flattener (short end leading) is Fed-path repricing — less hostile to duration but tightens financial conditions. Don't conflate the two; same yield rise, very different implications.
+   - **Strategy-weighting feed** — Compressed or below ERP downshifts conviction on high-multiple names (cap accumulate at moderate, prefer CSP over direct buy); Compressed-Negative routes new accumulate to skip. Curve regime shifts strategy weights per the table in [valuation-regime.md](../../docs/valuation-regime.md). Use these to gate Section 2 (oversized name sizing) and Section 5 (new pipeline entries).
+   - **Cross-reference** with item 1's Macro dimension (T10Y2Y) and item 10's forward P/E (same FactSet data feeds the ERP tool — the cache means no duplicate fetch). When the un-inversion trap (item 1) AND a Bear Steepener regime fire simultaneously: maximum-defensive posture, both items pointing the same direction.
+
+3. **Recent macro prints (last 14 days).** The five prints with dedicated texture tools are **NFP**, **CPI**, **PCE**, **GDP**, and **FOMC Decision**. Use today's date and known release schedules to determine which are fresh, then call the appropriate texture tool for each:
 
    - **NFP** (first Friday of each month): `get_jobs_report_texture` — headline + industry mix + U-6/participation/hours/household-vs-establishment divergence + BLS narrative including revisions.
    - **CPI** (~12th of each month): `get_cpi_report_texture` — headline + core + shelter/services/goods/supercore + subcategory detail + tape reaction.
@@ -27,11 +33,11 @@ Present as carry-forward items before starting any analysis.
 
    Retrospective read for each: what was the headline vs consensus, what was the tape reaction, and does it shift any active thesis? Surface divergences (headline vs underneath, revisions to prior months, two surveys disagreeing) — do not pre-bake interpretation. If no major print dropped in the past 14 days, skip this item.
 
-3. **Beige Book read.** Call `get_beige_book` (defaults to latest release). Surface period label + which Reserve Bank prepared it + cutoff date. Read the National Summary (Overall Activity / Labor Markets / Prices) and scan the 12 district highlights for divergence (e.g. Dallas energy strength vs San Francisco tech contraction). The Beige Book publishes 8x/year ~2 weeks before each FOMC — so the same release usually carries across 1-2 biweekly reviews. **Two checks:**
+4. **Beige Book read.** Call `get_beige_book` (defaults to latest release). Surface period label + which Reserve Bank prepared it + cutoff date. Read the National Summary (Overall Activity / Labor Markets / Prices) and scan the 12 district highlights for divergence (e.g. Dallas energy strength vs San Francisco tech contraction). The Beige Book publishes 8x/year ~2 weeks before each FOMC — so the same release usually carries across 1-2 biweekly reviews. **Two checks:**
    - **New release since last review?** If so, call `get_beige_book release=prior` and explicitly read the language delta. Fed staff make small but deliberate shifts ("modest growth" → "slight" → "flat" → "declining"). A tone shift in the National Summary often pre-prints the next FOMC's stance.
    - **Same release as last review?** Skip the prior-release call. The Beige Book is qualitative context — re-reading the same paragraphs adds no new information. Note period token + move on.
 
-4. **Treasury QRA read (release windows only).** The Quarterly Refunding Announcement publishes 4x/year — Wednesday 8:30 AM in early Feb / May / Aug / Nov. Same cadence-vs-review math as the Beige Book: most biweekly reviews will land on a stale QRA. **Two checks:**
+5. **Treasury QRA read (release windows only).** The Quarterly Refunding Announcement publishes 4x/year — Wednesday 8:30 AM in early Feb / May / Aug / Nov. Same cadence-vs-review math as the Beige Book: most biweekly reviews will land on a stale QRA. **Two checks:**
    - **New QRA since last review?** Call `get_qra_texture`. The tool returns latest + prior Policy Statements in one call so language deltas are inspectable. Read in this order:
      - **Auction sizes table** — bill-vs-coupon mix shift is the trade. Coupon increases absorb duration on dealer balance sheets and pressure the long end (Aug 2023 canonical); bill-skew releases duration and supports risk assets (Yellen 2023-24 canonical).
      - **Forward guidance language** — diff "anticipates maintaining auction sizes for at least the next several quarters" (status quo) vs "anticipates increasing" (duration absorption ahead). The phrase change is more important than the size change in any single quarter.
@@ -40,24 +46,24 @@ Present as carry-forward items before starting any analysis.
    - Cross-reference the yield curve table the tool prints (DTB3/DGS2/5/10/30/T10Y2Y) with any rate-sensitive positions. A QRA-day move >5bp at the long end vs a flat front is the typical "duration repricing" tell.
    - **Same QRA as last review?** Skip the call. The statement is immutable and the texture-tool output adds nothing new mid-quarter. Note next QRA date + move on.
 
-5. **Container freight signals — geopolitical-risk confirmation (conditional).** Only call `get_freight_signals` when an active maritime headline is in play (Red Sea / Houthi / Bab el-Mandeb, Strait of Hormuz / Iran tensions, Panama Canal drought, Bosporus / Black Sea, Suez incident). The chokepoint deviation table is mostly noise when nothing is happening — skip the call to avoid context bloat. **When you do call it, read in this order:**
+6. **Container freight signals — geopolitical-risk confirmation (conditional).** Only call `get_freight_signals` when an active maritime headline is in play (Red Sea / Houthi / Bab el-Mandeb, Strait of Hormuz / Iran tensions, Panama Canal drought, Bosporus / Black Sea, Suez incident). The chokepoint deviation table is mostly noise when nothing is happening — skip the call to avoid context bloat. **When you do call it, read in this order:**
    - **Most-stressed chokepoint headline.** If |Δ%| ≥ 25% on the chokepoint matching the active headline, the rerouting is real (not just news cycle). If headline is loud but chokepoint Δ is small, the disruption is rhetorical, not physical — fade the panic.
    - **Confirming triplet for a Red Sea event:** Suez/Bab el-Mandeb collapsing + Cape of Good Hope surging + FBX13 China-Med + FBX11 China-N Europe spiking 1w/4w. All three required to call it confirmed; any one in isolation is noise.
    - **FBX 1w/4w/8w deltas.** Sustained 4w spike on Suez-routed lanes (FBX03/11/13) is the price-confirmation; cross-reference 8w to distinguish genuine regime shift from short-cover squeeze.
    - **Trade implications:** confirmed disruption = bullish XRT/retailer margin pressure (10-14 day reroute eats into Q-end inventory), bullish ZIM/MATX (rate spike = revenue), bearish goods-CPI deceleration narrative. Note in retro whether positioned trades validated.
 
-6. **DIX/GEX overlay (experimental).** Call `get_dix_gex` — surfaces dark-pool accumulation (DIX) + dealer gamma posture (GEX) with the 2x2 regime cell, divergence flag (10-day SPX vs DIX), 10-day micro trend, and 1m/3m/6m/1y percentile context. Treat as texture, not a verdict — overlay onto the regime call:
+7. **DIX/GEX overlay (experimental).** Call `get_dix_gex` — surfaces dark-pool accumulation (DIX) + dealer gamma posture (GEX) with the 2x2 regime cell, divergence flag (10-day SPX vs DIX), 10-day micro trend, and 1m/3m/6m/1y percentile context. Treat as texture, not a verdict — overlay onto the regime call:
    - **Divergence flag present?** This is the highest-signal pattern (distribution into strength or accumulation into weakness). Cross-reference with `get_market_regime` Tape/Sentiment dimensions.
    - **Regime cell** informs structure preferences for the next 2 weeks: DIX-high/GEX-positive favors CSPs+IC; DIX-low/GEX-negative favors hedges over new long-delta. Use this to gate CC writing aggressiveness and CSP strike distance.
    - Note in retro whether the cell call matched the next 2 weeks of price action — track utility over a few cycles before deciding to keep or drop.
 
-7. **TSMC monthly revenue.** Call `get_tsmc_monthly_revenue months=13`. TSMC publishes consolidated monthly revenue around the 10th of each month — a clean leading indicator for the global semi cycle (NVDA / AMD / AVGO / MRVL / ASML / AMAT all foundry-downstream). Biweekly cadence usually catches a fresh print between cycles. Read in this order:
+8. **TSMC monthly revenue.** Call `get_tsmc_monthly_revenue months=13`. TSMC publishes consolidated monthly revenue around the 10th of each month — a clean leading indicator for the global semi cycle (NVDA / AMD / AVGO / MRVL / ASML / AMAT all foundry-downstream). Biweekly cadence usually catches a fresh print between cycles. Read in this order:
    - **Freshness line** — if `⏰ awaiting print` (latest row older than prior calendar month), note that and continue; the tool still surfaces the prior 12 months' trajectory.
    - **Latest YoY + MoM** — surprise vs the prior 3-month run-rate is the signal. Positive YoY surprise ahead of NVDA / AMD reports is bullish for the semi tape; YoY decel >5pp is a warning for short-dated long-semi exposure.
    - **12-month trajectory** — phase pattern (acceleration vs roll-over) matters more than any single print. Cross-check against the active semi cycle thesis in memory (Phase 1c / Phase 3 timing).
-   - Cross-reference any active semi positions and pipeline names from Section 2 / Section 5. This is the single highest-frequency leading indicator we have for that sleeve and should explicitly inform item 11's semi-cycle assessment.
+   - Cross-reference any active semi positions and pipeline names from Section 2 / Section 5. This is the single highest-frequency leading indicator we have for that sleeve and should explicitly inform item 12's semi-cycle assessment.
 
-8. **EIA Weekly Petroleum Status Report.** Call `get_eia_petroleum`. WPSR publishes Wednesday 10:30 ET — biweekly cadence catches a fresh print every cycle. Highest-frequency read on the US oil/products complex; informs CPI energy, consumer demand destruction, and Fed policy path simultaneously. Read in this order:
+9. **EIA Weekly Petroleum Status Report.** Call `get_eia_petroleum`. WPSR publishes Wednesday 10:30 ET — biweekly cadence catches a fresh print every cycle. Highest-frequency read on the US oil/products complex; informs CPI energy, consumer demand destruction, and Fed policy path simultaneously. Read in this order:
    - **Consumer pump** — US regular gasoline $/gal with WoW + YoY. A YoY >25% or a single WoW >$0.20 is the canonical "shows up in next CPI energy line + dents discretionary" signal. Cross-reference with restaurants/airlines/XRT in pipeline (MCD-class Q-end commentary catches it first).
    - **SPR move** — sustained draws (>3 mbbl/wk) at high oil = political response to disruption; sustained refills at low oil = strategic buying. The level is a policy signal, not a market signal.
    - **Crude trade balance** — net imports (imp − exp) WoW. Collapsed exports with steady imports = "US holding barrels at home." Confirms or contradicts the freight tool's chokepoint reading: real Hormuz disruption shows up here as imports falling alongside the chokepoint deviation.
@@ -65,7 +71,7 @@ Present as carry-forward items before starting any analysis.
    - **8-week trend table** — phase pattern matters more than any single print; cross-reference active oil/Iran/Hormuz thesis in memory.
    - **Trade implications:** rising pump = bearish discretionary/airlines/restaurants/XRT, bullish XLE/OIH, bearish duration (energy-led inflation tightens Fed reaction).
 
-9. **FactSet Earnings Insight — earnings season pulse.** Call `get_earnings_season_pulse`. FactSet publishes the Earnings Insight PDF every Friday afternoon ET — biweekly cadence catches one or two fresh prints per cycle. This is the institutional benchmark for "what is earnings season actually saying" — S&P 500 aggregate beat rates, surprise magnitudes, blended growth (current + forward quarters + CY), forward 12M P/E with 5y/10y context, and sector-level revision direction since quarter-end. Read in this order:
+10. **FactSet Earnings Insight — earnings season pulse.** Call `get_earnings_season_pulse`. FactSet publishes the Earnings Insight PDF every Friday afternoon ET — biweekly cadence catches one or two fresh prints per cycle. This is the institutional benchmark for "what is earnings season actually saying" — S&P 500 aggregate beat rates, surprise magnitudes, blended growth (current + forward quarters + CY), forward 12M P/E with 5y/10y context, and sector-level revision direction since quarter-end. Read in this order:
    - **Beat rate texture** — % of S&P 500 reported, % beating EPS / revenue with 5y averages. Beat rates running well above the 5y average means analysts entered the season too cautious; well below means earnings are missing the mark broadly.
    - **EPS surprise magnitude** — aggregate surprise % vs 5y avg. A large surprise that isn't being rewarded (cross-reference reaction asymmetry below) is the late-cycle tell.
    - **Blended growth + revision delta** — current YoY growth vs the quarter-end estimate. Big positive revisions during the season = analysts were too pessimistic; big negative = guidance cuts dominating.
@@ -76,14 +82,14 @@ Present as carry-forward items before starting any analysis.
    - **Sector revisions** — which sectors moved blended growth up or down since quarter-end, ranked by magnitude. Identifies where surprise positive (or negative) flows concentrated. Cross-reference with active positions and pipeline names from Section 2 / Section 5.
    - **Trade implications:** beat-and-rewarded sectors with rising forward growth = momentum-friendly for new entries; beat-but-punished broad tape = late-cycle, prefer credit spreads / harvest mode over new long-delta; specific sector with big downward revisions while the index revises up = single-name shorting/avoidance window.
 
-10. Call `get_btc_entry_signals` — present the composite score and recommended DCA rate:
+11. Call `get_btc_entry_signals` — present the composite score and recommended DCA rate:
    - 0.25x Strongly Unfavorable
    - 0.5x Unfavorable
    - 1x Mixed
    - 1.5x Favorable
    - 2x Strongly Favorable
 
-11. Assess:
+12. Assess:
    - Semi cycle thesis: any capex guidance changes? Phase timing still on track?
    - Sector rotation: who's leading, who's lagging?
    - Any macro shifts that affect CC expiry timing or coverage ratios?

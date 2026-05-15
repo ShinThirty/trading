@@ -38,7 +38,7 @@ Run the complete post-screening decision framework for **$ARGUMENTS.symbol**. Ex
 
 ## Step 2: Read the Signals
 
-1. Call `get_market_regime` for full macro context (Vol/Trend/Breadth/Macro/Sectors/Credit/Tape/Sentiment/Positioning/Policy + ⚠ Extended/Sentiment). For commodity-linked names, also call `get_cot_positioning` on the relevant contract. For event-driven names (FOMC-sensitive, election, FDA, M&A), call `get_prediction_market` for what's priced.
+1. Call `get_market_regime`, `get_equity_risk_premium`, and `get_yield_curve_state` in parallel for full macro context (regime: Vol/Trend/Breadth/Macro/Sectors/Credit/Tape/Sentiment/Positioning/Policy + ⚠ Extended/Sentiment; ERP tier; curve regime). For commodity-linked names, also call `get_cot_positioning` on the relevant contract. For event-driven names (FOMC-sensitive, election, FDA, M&A), call `get_prediction_market` for what's priced.
 
 2. Cross-reference the market regime with the stock-level signals from Step 1. Note:
    - IV environment: Is IV Rank high (>50%, sell premium) or low (<30%, buy premium)?
@@ -47,7 +47,15 @@ Run the complete post-screening decision framework for **$ARGUMENTS.symbol**. Ex
    - Earnings proximity: How close is the next earnings date?
    - Liquidity: Liq rating 1-2 (tight, good) or 3-4 (wide, caution)?
 
-3. If there are signal conflicts, apply the priority hierarchy: fundamentals > IV environment > technicals.
+3. **Valuation-regime adjustment.** Apply the ERP tier to the intent from Step 1:
+   - **Generous / Fair**: no adjustment, intent stands.
+   - **Tight**: no automatic adjustment; flag if $ARGUMENTS.symbol is a high-multiple name (P/E > sector average) — reduce concentration on entry.
+   - **Compressed**: if intent is Accumulate, downshift to Enter at discount (prefer CSP over direct buy). If Directional leverage, prefer Defined-risk exposure.
+   - **Compressed-Negative**: skip new Accumulate entirely. Speculative-growth gate routes to skip. Pre-existing positions: hold, but no new adds.
+
+   Curve regime feeds Step 3 strategy weighting (Bear Steepener is hostile to long-duration multiples; Bear Flattener less so; Bull Steepener opens multiple-expansion room). Per [valuation-regime.md](../../docs/valuation-regime.md).
+
+4. If there are signal conflicts, apply the priority hierarchy: fundamentals > IV environment > technicals.
 
 ## Step 3: Choose Strategy
 

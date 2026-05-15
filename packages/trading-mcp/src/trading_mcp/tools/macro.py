@@ -9,13 +9,14 @@ from trading_clients import regime
 from trading_clients.endpoints import bea, bls, cftc, fed, fmp, fred, polymarket, sentiment
 from trading_clients.endpoints import tastytrade as tt
 from trading_clients.endpoints import tradier as t
-from trading_clients.table_helpers import kv_table
+from trading_clients.table_helpers import kv_table, md_table
 
 from trading_mcp.helpers import (
     _bea,
     _bls,
     _cftc,
     _exc_summary,
+    _factset,
     _fed,
     _fmp,
     _fred,
@@ -88,6 +89,258 @@ async def get_sector_performance(ctx: Context, date: str, exchange: str = "NYSE"
     return (
         await _fmp(ctx).get(fmp.SECTOR_PERFORMANCE, fmp.SectorPerformanceRequest(date, exchange))
     ).to_output()
+
+
+@mcp.tool()
+async def get_equity_risk_premium(ctx: Context) -> str:
+    """Get the current S&P 500 equity risk premium with valuation-regime tier.
+
+    ERP = forward earnings yield − 10Y Treasury yield. Determines how much
+    equities compensate over risk-free, and therefore the rate at which
+    earnings translate into multiples. A compressed or negative ERP means
+    returns come from earnings only — any rate or earnings shock compresses
+    multiples mechanically.
+
+    Combines:
+      - FactSet Earnings Insight forward 12-month P/E (Friday weekly PDF)
+      - FRED DGS10 (10Y Treasury constant-maturity yield)
+
+    Returns ERP in bps, regime tier (Generous / Fair / Tight / Compressed /
+    Compressed-Negative), and 5y / 10y / quarter-end forward P/E context
+    so the reader can decompose how much compression is from multiples vs
+    rate level (the implied-ERP-at-historical-P/E rows).
+
+    Cache bottleneck is the weekly FactSet refresh; daily polling adds nothing.
+    Best fit: biweekly review, plus any week with a major rate or earnings shock.
+
+    Requires [fred] section in ~/.tradingrc. FactSet uses no auth.
+    """
+    fred_client = _fred(ctx)
+    factset_client = _factset(ctx)
+
+    results = await asyncio.gather(
+        factset_client.get_earnings_insight(),
+        fred_client.get(fred.OBSERVATIONS, fred.GetObservationsRequest("DGS10", 2)),
+        return_exceptions=True,
+    )
+
+    warnings: list[str] = []
+    fs_resp = results[0] if not isinstance(results[0], BaseException) else None
+    if fs_resp is None:
+        warnings.append(_exc_summary("FactSet Earnings Insight", results[0]))
+    fred_resp = results[1] if not isinstance(results[1], BaseException) else None
+    if fred_resp is None:
+        warnings.append(_exc_summary("FRED DGS10", results[1]))
+
+    out: list[str] = []
+    out.extend(_warnings_section(warnings))
+
+    if fs_resp is None or fred_resp is None:
+        out.append("(insufficient data — both FactSet Earnings Insight and FRED DGS10 required)")
+        return "\n".join(out)
+
+    fwd_pe = fs_resp.forward_pe
+    fwd_pe_5y = fs_resp.forward_pe_5y_avg
+    fwd_pe_10y = fs_resp.forward_pe_10y_avg
+    fwd_pe_qe = fs_resp.forward_pe_quarter_end
+    publish_date = fs_resp.publish_date
+
+    dgs10, dgs10_date = regime.parse_fred_value(fred_resp.observations)
+
+    if fwd_pe is None:
+        out.append("(FactSet forward 12M P/E not parsed from latest PDF — see narrative)")
+        return "\n".join(out)
+    if dgs10 is None:
+        out.append("(FRED DGS10 value unavailable for latest observation)")
+        return "\n".join(out)
+
+    earnings_yield = 100.0 / fwd_pe  # percent
+    erp_bps = (earnings_yield - dgs10) * 100
+    label, _ = regime.classify_erp(erp_bps)
+
+    out.append("## Equity Risk Premium (S&P 500)")
+    out.append("")
+    out.append(f"**Regime: {label}** — ERP {erp_bps:+.0f} bps")
+    meta_parts: list[str] = []
+    if publish_date:
+        meta_parts.append(f"FactSet {publish_date}")
+    if dgs10_date:
+        meta_parts.append(f"DGS10 {dgs10_date}")
+    if meta_parts:
+        out.append(f"*{' • '.join(meta_parts)}*")
+    out.append("")
+
+    headline = {
+        "Forward 12M P/E": f"{fwd_pe:.2f}",
+        "Forward earnings yield": f"{earnings_yield:.2f}%",
+        "10Y Treasury (DGS10)": f"{dgs10:.2f}%",
+        "ERP": f"{erp_bps:+.0f} bps",
+    }
+    out.append(kv_table(headline, key_header="Component"))
+
+    # Decomposition: hold DGS10 fixed, swap P/E for historical anchors.
+    # Tells the reader how much current compression is from multiples vs rates.
+    context_rows: dict[str, str] = {}
+    for label_, pe in (
+        ("Fwd P/E 5y avg", fwd_pe_5y),
+        ("Fwd P/E 10y avg", fwd_pe_10y),
+        ("Fwd P/E quarter-end", fwd_pe_qe),
+    ):
+        if pe is None:
+            continue
+        delta_pct = (fwd_pe / pe - 1) * 100
+        implied_erp_bps = (100.0 / pe - dgs10) * 100
+        context_rows[label_] = (
+            f"{pe:.1f} (current {delta_pct:+.0f}%) • "
+            f"implied ERP at this P/E: {implied_erp_bps:+.0f} bps"
+        )
+    if context_rows:
+        out.append("")
+        out.append("**Context** (hold DGS10 fixed, swap P/E for historical anchor):")
+        out.append(kv_table(context_rows, key_header="Anchor"))
+
+    return "\n".join(out)
+
+
+def _obs_value_at(obs: list[dict], idx: int) -> float | None:
+    """Read FRED obs[idx], walking forward past '.' (missing) values."""
+    n = len(obs)
+    for i in range(idx, n):
+        v = obs[i].get("value", ".")
+        if v == ".":
+            continue
+        try:
+            return float(v)
+        except (ValueError, TypeError):
+            continue
+    return None
+
+
+@mcp.tool()
+async def get_yield_curve_state(ctx: Context) -> str:
+    """Get current Treasury yield curve state with regime classification.
+
+    Fetches 2Y / 10Y / 30Y constant-maturity yields from FRED (DGS2 / DGS10 /
+    DGS30), reports current levels and 4-week / 12-week changes, computes
+    2s10s and 10s30s spreads, and classifies the curve regime:
+
+    - **Bear Steepener**: yields rising, long end leading. Term-premium expansion
+      or supply/inflation repricing (May 2026 pattern). Pressures equity multiples
+      mechanically — discount rate up faster than earnings.
+    - **Bear Flattener**: yields rising, short end leading. Fed-path repricing
+      (hawkish hikes priced).
+    - **Bull Steepener**: yields falling, short end leading. Fed cuts priced.
+    - **Bull Flattener**: yields falling, long end leading. Duration bid /
+      recession trade.
+    - **Quiet**: |all moves| < 10 bps over 4w.
+    - **Mixed**: tenor moves don't agree on direction.
+
+    The leading-tenor diagnostic is the load-bearing piece: it tells you
+    *what* is repricing (term premium vs Fed path vs duration bid) — not just
+    that yields moved.
+
+    Requires [fred] section in ~/.tradingrc.
+    """
+    fred_client = _fred(ctx)
+
+    # 65 daily obs covers ~13 weeks of trading days with slack for missing values.
+    series = [("DGS2", "2Y"), ("DGS10", "10Y"), ("DGS30", "30Y")]
+    results = await asyncio.gather(
+        *(
+            fred_client.get(fred.OBSERVATIONS, fred.GetObservationsRequest(sid, 65))
+            for sid, _ in series
+        ),
+        return_exceptions=True,
+    )
+
+    warnings: list[str] = []
+    obs_by_id: dict[str, list[dict]] = {}
+    for (sid, _), r in zip(series, results, strict=True):
+        if isinstance(r, BaseException):
+            warnings.append(_exc_summary(f"FRED {sid}", r))
+        else:
+            obs_by_id[sid] = r.observations or []
+
+    out: list[str] = []
+    out.extend(_warnings_section(warnings))
+
+    # 4w ≈ 20 trading days, 12w ≈ 60 trading days. Newest-first.
+    LOOKBACK_4W = 20
+    LOOKBACK_12W = 60
+
+    levels: dict[str, float | None] = {}
+    changes_4w: dict[str, float | None] = {}
+    changes_12w: dict[str, float | None] = {}
+    latest_date = ""
+
+    for sid, _ in series:
+        obs = obs_by_id.get(sid, [])
+        cur = _obs_value_at(obs, 0)
+        prior_4w = _obs_value_at(obs, LOOKBACK_4W) if len(obs) > LOOKBACK_4W else None
+        prior_12w = _obs_value_at(obs, LOOKBACK_12W) if len(obs) > LOOKBACK_12W else None
+        levels[sid] = cur
+        changes_4w[sid] = (
+            (cur - prior_4w) * 100 if cur is not None and prior_4w is not None else None
+        )
+        changes_12w[sid] = (
+            (cur - prior_12w) * 100 if cur is not None and prior_12w is not None else None
+        )
+        if obs and not latest_date:
+            latest_date = obs[0].get("date", "")
+
+    if all(v is None for v in levels.values()):
+        out.append("(no FRED Treasury data available — DGS2/DGS10/DGS30 all empty)")
+        return "\n".join(out)
+
+    label, detail = regime.classify_curve_regime(
+        changes_4w.get("DGS2"), changes_4w.get("DGS10"), changes_4w.get("DGS30")
+    )
+
+    out.append("## Yield Curve State")
+    out.append("")
+    out.append(f"**Regime: {label}** — {detail}")
+    if latest_date:
+        out.append(f"*as of {latest_date}*")
+    out.append("")
+
+    def _fmt_bps(b: float | None) -> str:
+        return f"{b:+.0f} bps" if b is not None else "—"
+
+    def _fmt_pct(p: float | None) -> str:
+        return f"{p:.2f}%" if p is not None else "—"
+
+    rows = [
+        [tenor, _fmt_pct(levels[sid]), _fmt_bps(changes_4w[sid]), _fmt_bps(changes_12w[sid])]
+        for sid, tenor in series
+    ]
+    out.append(md_table(["Tenor", "Yield", "4w Δ", "12w Δ"], rows))
+
+    # Spreads
+    spread_rows: list[list[str]] = []
+
+    def _spread_row(name: str, long_sid: str, short_sid: str) -> None:
+        long_lvl = levels[long_sid]
+        short_lvl = levels[short_sid]
+        if long_lvl is None or short_lvl is None:
+            return
+        cur_spread_bps = (long_lvl - short_lvl) * 100
+        long_4w = changes_4w[long_sid]
+        short_4w = changes_4w[short_sid]
+        delta_4w = (
+            f"{long_4w - short_4w:+.0f} bps"
+            if long_4w is not None and short_4w is not None
+            else "—"
+        )
+        spread_rows.append([name, f"{cur_spread_bps:+.0f} bps", delta_4w])
+
+    _spread_row("2s10s", "DGS10", "DGS2")
+    _spread_row("10s30s", "DGS30", "DGS10")
+    if spread_rows:
+        out.append("")
+        out.append("**Spreads:**")
+        out.append(md_table(["Spread", "Current", "4w Δ"], spread_rows))
+
+    return "\n".join(out)
 
 
 # Industry employment subseries from FRED. Display order matches BLS Table B-1

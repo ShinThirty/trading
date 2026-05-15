@@ -120,3 +120,12 @@ Some combinations are more actionable than others:
 | Crisis + Inverted + Risk-Off | Recession unfolding | Cash is a position. Only deploy on highest conviction. |
 | Normal vol + Sideways + Rotation | Quiet chop | Harvest premium — iron condors, calendars |
 | Elevated vol + Uptrend + Risk-On | Climbing a wall of worry | Accumulate with CSP-heavy hybrids (rich premium + bullish trend) |
+
+## Companion regime reads
+
+`get_market_regime` covers the tape, breadth, credit, vol, sentiment, and positioning dimensions. Two additional tools cover the **valuation regime** — how risk-free rates translate to equity multiples:
+
+- **`get_equity_risk_premium`** — forward earnings yield − DGS10. Tier (Generous / Fair / Tight / Compressed / Compressed-Negative) determines whether multiples have room to expand and how much of returns will come from earnings vs multiples.
+- **`get_yield_curve_state`** — 2Y / 10Y / 30Y levels and 4w / 12w changes, classified as Bear Steepener / Bear Flattener / Bull Steepener / Bull Flattener / Quiet / Mixed. Tells you which tenor is leading — i.e., *what* is repricing (term premium, Fed path, or duration bid).
+
+See [valuation-regime.md](valuation-regime.md) for tier definitions and how these feed Step 1/2/3 of the decision framework.
