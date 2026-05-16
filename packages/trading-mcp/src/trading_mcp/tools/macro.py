@@ -1,7 +1,7 @@
 """Macro and market-wide context: economic series, sector performance, market regime."""
 
 import asyncio
-from datetime import date
+from datetime import date, datetime
 
 from fastmcp import Context, FastMCP
 from trading_clients import indicators as ta
@@ -168,6 +168,19 @@ async def get_equity_risk_premium(ctx: Context) -> str:
         meta_parts.append(f"DGS10 {dgs10_date}")
     if meta_parts:
         out.append(f"*{' • '.join(meta_parts)}*")
+
+    # Warn if FactSet and DGS10 dates have decoupled — ERP loses meaning when
+    # the rate side has moved meaningfully since the P/E snapshot was published.
+    fs_d = _parse_factset_publish_date(publish_date) if publish_date else None
+    fred_d = _safe_iso_date(dgs10_date) if dgs10_date else None
+    if fs_d and fred_d:
+        gap_days = abs((fs_d - fred_d).days)
+        if gap_days > 7:
+            out.append(
+                f"⚠ FactSet ({publish_date}) and DGS10 ({dgs10_date}) differ by "
+                f"{gap_days} days — ERP read may have decoupled from current rates. "
+                "Re-pull when next FactSet PDF lands."
+            )
     out.append("")
 
     headline = {
@@ -202,8 +215,29 @@ async def get_equity_risk_premium(ctx: Context) -> str:
     return "\n".join(out)
 
 
+def _parse_factset_publish_date(s: str) -> date | None:
+    """Parse FactSet 'Month D, YYYY' (e.g. 'May 15, 2026'). Returns None on failure."""
+    try:
+        return datetime.strptime(s, "%B %d, %Y").date()
+    except (ValueError, TypeError):
+        return None
+
+
+def _safe_iso_date(s: str) -> date | None:
+    """Parse 'YYYY-MM-DD'. Returns None on failure."""
+    try:
+        return date.fromisoformat(s)
+    except (ValueError, TypeError):
+        return None
+
+
 def _obs_value_at(obs: list[dict], idx: int) -> float | None:
-    """Read FRED obs[idx], walking forward past '.' (missing) values."""
+    """Read FRED obs[idx], walking forward past '.' (missing) values.
+
+    Note: the lookback is approximate — if obs[idx] is missing (holiday), this
+    returns obs[idx+1] etc., so a holiday-heavy window reads slightly farther
+    back than requested. Acceptable drift for regime classification windows.
+    """
     n = len(obs)
     for i in range(idx, n):
         v = obs[i].get("value", ".")
@@ -243,11 +277,12 @@ async def get_yield_curve_state(ctx: Context) -> str:
     """
     fred_client = _fred(ctx)
 
-    # 65 daily obs covers ~13 weeks of trading days with slack for missing values.
+    # 80 daily obs covers ~13 weeks of trading days with comfortable slack for
+    # holiday clusters (Memorial Day, Thanksgiving) and any FRED publishing lag.
     series = [("DGS2", "2Y"), ("DGS10", "10Y"), ("DGS30", "30Y")]
     results = await asyncio.gather(
         *(
-            fred_client.get(fred.OBSERVATIONS, fred.GetObservationsRequest(sid, 65))
+            fred_client.get(fred.OBSERVATIONS, fred.GetObservationsRequest(sid, 80))
             for sid, _ in series
         ),
         return_exceptions=True,

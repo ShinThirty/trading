@@ -238,20 +238,26 @@ def classify_curve_regime(
     if dy_2y_bps is None or dy_10y_bps is None or dy_30y_bps is None:
         return "Unknown", detail_changes or "insufficient tenor data"
 
-    long_end_avg = (dy_10y_bps + dy_30y_bps) / 2
+    # Apply the noise threshold uniformly: sub-threshold moves are treated as zero
+    # for both Quiet detection and direction-agreement (Mixed) detection. Otherwise
+    # a +3 bps 2Y noise gets called Bear Steepener while a -3 bps 2Y noise gets
+    # called Mixed against the same long-end move.
+    eff_2y = 0.0 if abs(dy_2y_bps) < move_threshold_bps else dy_2y_bps
+    eff_10y = 0.0 if abs(dy_10y_bps) < move_threshold_bps else dy_10y_bps
+    eff_30y = 0.0 if abs(dy_30y_bps) < move_threshold_bps else dy_30y_bps
+    moves = (eff_2y, eff_10y, eff_30y)
 
-    moves = (dy_2y_bps, dy_10y_bps, dy_30y_bps)
-    if all(abs(m) < move_threshold_bps for m in moves):
+    if all(m == 0 for m in moves):
         return "Quiet", detail_changes
 
-    signs = [1 if m > 0 else (-1 if m < 0 else 0) for m in moves]
-    nonzero_signs = {s for s in signs if s != 0}
+    nonzero_signs = {1 if m > 0 else -1 for m in moves if m != 0}
     if len(nonzero_signs) > 1:
         return "Mixed", detail_changes
 
-    # All meaningful moves point the same direction.
+    # All meaningful (above-threshold) moves point the same direction.
+    long_end_avg = (eff_10y + eff_30y) / 2
     rising = sum(moves) > 0
-    long_leads = abs(long_end_avg) > abs(dy_2y_bps)
+    long_leads = abs(long_end_avg) > abs(eff_2y)
 
     if rising and long_leads:
         return "Bear Steepener", f"{detail_changes} — long end leading (term premium / supply)"

@@ -44,7 +44,7 @@ Call `get_equity_risk_premium` and `get_yield_curve_state` in parallel. Surface 
 - **ERP tier**: Generous / Fair / Tight / Compressed / Compressed-Negative + the bps value
 - **Curve regime**: Bear Steepener / Bear Flattener / Bull Steepener / Bull Flattener / Quiet / Mixed + leading tenor on 4w basis
 
-Most days these don't shift. Flag explicitly only when either crosses into a more hostile tier vs the prior briefing — **Compressed-Negative ERP** or **Bear Steepener with long end leading** — since both gate strategy weighting downstream. Bear Flattener is *less* hostile than Bear Steepener at the same yield level (Fed-path repricing vs term-premium expansion); don't conflate them.
+Most days these don't shift. Expand explicitly when either **currently sits in or crosses into** a hostile tier — **Compressed-Negative ERP** or **Bear Steepener with long end leading** — since both gate strategy weighting downstream. ("Currently in" matters: a regime that's been hostile for weeks still gates today's decisions; don't suppress just because it didn't flip overnight.) Bear Flattener is *less* hostile than Bear Steepener at the same yield level (Fed-path repricing vs term-premium expansion); don't conflate them.
 
 See [valuation-regime.md](../../docs/valuation-regime.md) for tier-to-strategy mapping. The tiers persist; the numbers don't — re-pull rather than recall.
 
