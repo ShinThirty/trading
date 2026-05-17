@@ -52,6 +52,8 @@ For **pre-profit IPO candidates** (real revenue, GAAP losses, narrative-heavy st
 
 **Valuation regime:** Run `get_equity_risk_premium` and `get_yield_curve_state` alongside `get_market_regime`. ERP tells you whether returns will come from earnings, multiples, or both. Curve regime tells you *what* is repricing (term premium vs Fed path vs duration bid). At Compressed or Compressed-Negative ERP, reduce one conviction tier on high-multiple names. See [valuation-regime.md](valuation-regime.md) for tier definitions and decision integration.
 
+**Bear regime score:** Run `get_bear_regime_score` for the composite 0-10 synthesis across 9 dimensions (curve, ERP, credit, positioning, sentiment, vol, technicals, breadth, dealer flow). Tier label (Clear / Watchful / Building / Defensive / Crisis) gates portfolio-level actions per [bear-regime-playbook.md](bear-regime-playbook.md). Surfaced daily in `/briefing` Step 1f; full action review biweekly in `/review` Section 1 item 2a. Tier transitions matter more than absolute level — a move from Watchful to Building inside a week is the actionable event.
+
 Before any spread or roll, check liquidity via `get_iv_metrics` (Liq 3-4 = tight, Liq 1-2 = caution) and `get_option_chain` bid/ask spreads. Cross-check earnings dates from `get_iv_metrics` and `get_earnings_calendar`; if they disagree, use the later date.
 
 ### Active Macro Overhangs

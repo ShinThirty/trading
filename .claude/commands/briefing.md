@@ -111,6 +111,22 @@ Triggers (read z-score and exposure from tool output):
 
 NAAIM is weekly so the same trigger may fire several days in a row until the print updates or the value drifts back inside the band — that persistence is itself informative ("still crowded"). Cross-reference with Step 1's Sentiment dimension and any vol-sensitive positions in Step 2. Full surfacing (WoW change, 8-week trend, multi-window context) lives in the biweekly review.
 
+## Step 1f: Bear Regime Score
+
+Call `get_bear_regime_score` daily. Composite 0-10 across 9 dimensions (curve, ERP, credit, positioning, sentiment, vol, technicals, breadth, dealer flow) with tier label. This is the synthesis — Steps 1 and 1a give the dimensional reads; this gives the single decision checkpoint.
+
+**Always surface the score line** (one line: tier + score + top 2 firing dims). Unlike the conditional sections above, the score's persistence at a tier is itself informative.
+
+**Tier-gated additional action** (per [bear-regime-playbook.md](../../docs/bear-regime-playbook.md)):
+
+- **Clear (0-1.99)**: surface score line only. Move to Step 2.
+- **Watchful (2-3.99)**: surface score line + list firing dimensions. Flag "verify hedge sized" if `/hedge` hasn't run this month.
+- **Building (4-5.99)** or higher: trigger the **position cross-reference loop** in Step 2 — use the playbook's per-tier action template against actual positions. Surface the trim/CC/freeze list as part of Step 4 summary.
+
+**Tier transition flag**: if today's tier differs from yesterday's (track via decision_list or by re-running the tool), call that out explicitly — transitions are more actionable than absolute level.
+
+**Override conditions**: do not auto-derisk on a Building+ reading if (a) the score reflects single-dimension flicker without breadth/credit/curve confirmation, OR (b) an active macro overhang in memory already drives a more conservative posture. See playbook "When to override" section.
+
 ## Step 2: Position Alerts
 
 1. Ask the user if they have fresh Fidelity CSVs to include (exported from Fidelity Positions page to ~/Downloads/fidelity). Call `get_portfolio_summary` with `fidelity_folder` if provided, otherwise Webull-only.
@@ -121,6 +137,13 @@ NAAIM is weekly so the same trigger may fire several days in a row until the pri
    - **Short options approaching strike** (ITM or <3% OTM): flag for roll or assignment prep
    - **Positions down >15%**: one-line thesis check — still valid or deteriorating?
    - **Positions up >30%**: flag for trim/CC overlay consideration
+
+2b. **Bear regime cross-reference (tier ≥ Building only).** Skip if Step 1f returned Clear or Watchful. Per [bear-regime-playbook.md](../../docs/bear-regime-playbook.md) per-position rules:
+   - For Building+: identify high-multiple cohort (P/S >12 OR PEG >3 — fetch via `get_basic_financials` or `get_key_metrics` on positions not already known); pause new accumulation, surface extended winners (above 50d + RSI >70) as aggressive-CC candidates
+   - For Defensive+: add trim candidates (high-multiple cohort + >30% from cost), oversized-position flags (>15% concentration), and tail-hedge upsize recommendation
+   - For Crisis: add freeze-all-new-entries flag and reduce-gross plan
+
+   Use existing fundamentals tools — do not invent new ones. If a metric is unavailable for a position, skip rather than block. Surface only the actionable items, not the full scan.
 
 3. Call `roll_list` with status "PLANNED" or "WORKING" to check pending rolls.
 

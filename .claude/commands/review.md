@@ -23,6 +23,20 @@ Present as carry-forward items before starting any analysis.
    - **Strategy-weighting feed** — Compressed or below ERP downshifts conviction on high-multiple names (cap accumulate at moderate, prefer CSP over direct buy); Compressed-Negative routes new accumulate to skip. Curve regime shifts strategy weights per the table in [valuation-regime.md](../../docs/valuation-regime.md). Use these to gate Section 2 (oversized name sizing) and Section 5 (new pipeline entries).
    - **Cross-reference** with item 1's Macro dimension (T10Y2Y) and item 10's forward P/E (same FactSet data feeds the ERP tool — the cache means no duplicate fetch). When the un-inversion trap (item 1) AND a Bear Steepener regime fire simultaneously: maximum-defensive posture, both items pointing the same direction.
 
+2a. **Bear regime score — composite synthesis.** Call `get_bear_regime_score`. This is the composite read across the 9 dimensions covered by items 1-2 (curve, ERP, credit, positioning, sentiment, vol, technicals, breadth, dealer flow) — the single 0-10 decision checkpoint. Surface tier + score + the firing dimensions (top contributors).
+
+   **Trajectory matters more than absolute.** Compare to the score from the last review (track via decisions or by noting in retro):
+   - Rising tier (Watchful → Building → Defensive over 2-4 weeks) = late-cycle deterioration confirming; act per playbook even if not at Crisis yet
+   - Falling tier (Defensive → Building → Watchful) = stress easing; recover normal accumulation cadence per pipeline
+   - Flat tier across 2+ reviews = composite is stable; no escalation needed
+
+   **At tier ≥ Building, run the full position-level action review** per [bear-regime-playbook.md](../../docs/bear-regime-playbook.md). For each position from Section 2:
+   - Building+: pause-new-accumulation list (P/S >12 OR PEG >3 cohort)
+   - Defensive+: trim list (high-multiple cohort + >30% from cost) + tail hedge upsize
+   - Crisis: freeze-all-new + reduce-gross plan
+
+   Cross-reference firing dimensions with the dimensional reads from items 1-2 (regime/ERP/curve) — verify they agree before acting. A Building score driven entirely by Positioning + Sentiment (both contrarian indicators that can stay extreme for months) is weaker evidence than one driven by Credit + Breadth + Curve. **Override conditions** in the playbook ("When to override" section) — single-dimension flicker, active macro overhang in memory, recent whipsaw.
+
 3. **Recent macro prints (last 14 days).** The five prints with dedicated texture tools are **NFP**, **CPI**, **PCE**, **GDP**, and **FOMC Decision**. Use today's date and known release schedules to determine which are fresh, then call the appropriate texture tool for each:
 
    - **NFP** (first Friday of each month): `get_jobs_report_texture` — headline + industry mix + U-6/participation/hours/household-vs-establishment divergence + BLS narrative including revisions.
@@ -161,6 +175,7 @@ No triggers + hedge exists → **"Hedge healthy, hold."**
    - Any single-tranche entries that should have been scaled?
    - Any entries without full Step 1-4 analysis?
    - Any sells into recovery (survived, not won)?
+   - **Bear regime score adherence**: if Section 1 item 2a returned Building+, did the trades executed since last review respect the tier's action template? (E.g., did you open a new position in a high-multiple name during a Defensive tier? Surface as a pattern flag, not a self-flagellation — was the override justified?)
 
 3. Present a final **Action Items** list:
    - Positions to exit or trim

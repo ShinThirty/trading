@@ -1,12 +1,22 @@
 """Macro and market-wide context: economic series, sector performance, market regime."""
 
 import asyncio
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from fastmcp import Context, FastMCP
 from trading_clients import indicators as ta
 from trading_clients import regime
-from trading_clients.endpoints import bea, bls, cftc, fed, fmp, fred, polymarket, sentiment
+from trading_clients.endpoints import (
+    bea,
+    bls,
+    cftc,
+    fed,
+    fmp,
+    fred,
+    polymarket,
+    sentiment,
+    squeeze_metrics,
+)
 from trading_clients.endpoints import tastytrade as tt
 from trading_clients.endpoints import tradier as t
 from trading_clients.table_helpers import kv_table, md_table
@@ -23,13 +33,14 @@ from trading_mcp.helpers import (
     _naaim,
     _polymarket,
     _sentiment,
+    _squeeze_metrics,
     _tradier,
     _year_ago,
 )
 
 mcp = FastMCP("macro-tools")
 
-HISTORY_SYMBOLS = ["SPY", "SMH", "IWM", *regime.SECTOR_ETFS]
+HISTORY_SYMBOLS = ["SPY", "SMH", "IWM", "RSP", *regime.SECTOR_ETFS]
 
 
 @mcp.tool()
@@ -954,9 +965,15 @@ async def get_market_regime(ctx: Context) -> str:
     iwm_closes = closes.get("IWM", [])
     xlu_closes = closes.get("XLU", [])
     xly_closes = closes.get("XLY", [])
+    rsp_closes = closes.get("RSP", []) or None
     if spy_closes and iwm_closes and xlu_closes and xly_closes:
         label, detail = regime.classify_breadth(
-            spy_closes, iwm_closes, spy_volumes, xlu_closes, xly_closes
+            spy_closes,
+            iwm_closes,
+            spy_volumes,
+            xlu_closes,
+            xly_closes,
+            rsp_closes=rsp_closes,
         )
         labels["breadth"] = label
         data["Breadth"] = f"{label} ({detail})"
@@ -1116,6 +1133,753 @@ async def get_market_regime(ctx: Context) -> str:
             data["⚠ Extended"] = f"{ext_detail} — size down new entries"
 
     return f"## Market Regime\n\n**Verdict: {verdict}**  \n*Why: {evidence}*\n\n{kv_table(data)}"
+
+
+def _parse_obs_dated(obs: list[dict]) -> tuple[list[date], list[float]]:
+    """Parse FRED observations into (dates, values), oldest-first."""
+    pairs: list[tuple[date, float]] = []
+    for o in obs or []:
+        v = o.get("value", ".")
+        if v == ".":
+            continue
+        try:
+            d = datetime.strptime(o["date"], "%Y-%m-%d").date()
+            pairs.append((d, float(v)))
+        except (ValueError, KeyError, TypeError):
+            continue
+    pairs.sort(key=lambda p: p[0])
+    return [p[0] for p in pairs], [p[1] for p in pairs]
+
+
+def _parse_bars_dated(resp) -> tuple[list[date], list[float], list[float]]:
+    """Parse Tradier history response into (dates, closes, volumes), oldest-first."""
+    if not resp or not resp.days:
+        return [], [], []
+    pairs: list[tuple[date, float, float]] = []
+    for bar in resp.days:
+        try:
+            d = datetime.strptime(bar["date"], "%Y-%m-%d").date()
+            pairs.append((d, float(bar["close"]), float(bar.get("volume") or 0)))
+        except (ValueError, KeyError, TypeError):
+            continue
+    pairs.sort(key=lambda p: p[0])
+    return [p[0] for p in pairs], [p[1] for p in pairs], [p[2] for p in pairs]
+
+
+def _score_bear_at_asof(
+    asof: date,
+    *,
+    spread: tuple[list[date], list[float]],
+    ff: tuple[list[date], list[float]],
+    credit: tuple[list[date], list[float]],
+    dgs2: tuple[list[date], list[float]],
+    dgs10: tuple[list[date], list[float]],
+    dgs30: tuple[list[date], list[float]],
+    vix_bars: tuple[list[date], list[float], list[float]],
+    spy_bars: tuple[list[date], list[float], list[float]],
+    iwm_bars: tuple[list[date], list[float], list[float]],
+    xlu_bars: tuple[list[date], list[float], list[float]],
+    xly_bars: tuple[list[date], list[float], list[float]],
+    rsp_bars: tuple[list[date], list[float], list[float]],
+    naaim_pairs: list[tuple[date, float]],
+    dix_triplets: list[tuple[date, float, float]],
+    cot_by_key: dict[str, list[tuple[date, float]]],
+    factset_resp,
+) -> float:
+    """Re-score the composite at a historical as-of date using sliced inputs.
+
+    Returns composite 0-10. Reuses every score_bear_* function so the math
+    is identical to the live `Today` reading; only the inputs are sliced.
+    """
+    from bisect import bisect_right
+
+    def _slice(dates: list[date], vals: list[float]) -> list[float]:
+        return vals[: bisect_right(dates, asof)]
+
+    def _slice2(
+        dates: list[date], a: list[float], b: list[float]
+    ) -> tuple[list[float], list[float]]:
+        i = bisect_right(dates, asof)
+        return a[:i], b[:i]
+
+    # Curve
+    spread_vals = _slice(*spread)
+    ff_vals = _slice(*ff)
+    ff_val = ff_vals[-1] if ff_vals else None
+    prev_ff = ff_vals[-2] if len(ff_vals) > 1 else None
+    spread_val = spread_vals[-1] if spread_vals else None
+    dgs2_vals = _slice(*dgs2)
+    dgs10_vals = _slice(*dgs10)
+    dgs30_vals = _slice(*dgs30)
+
+    def _curve_4w(vals: list[float]) -> float | None:
+        if len(vals) < 21:
+            return None
+        return (vals[-1] - vals[-21]) * 100
+
+    curve_label: str | None = None
+    if dgs2_vals or dgs10_vals or dgs30_vals:
+        curve_label, _ = regime.classify_curve_regime(
+            _curve_4w(dgs2_vals), _curve_4w(dgs10_vals), _curve_4w(dgs30_vals)
+        )
+    uninversion = regime.detect_uninversion_trap(spread_vals, spread_val, ff_val, prev_ff)
+    score_curve = regime.score_bear_curve(curve_label, uninversion, spread_vals)
+
+    # Valuation (ERP) — FactSet PDF is current-snapshot; available only at today
+    score_val = regime.BearScoreComponent(
+        "Valuation (ERP)", 0.0, "Unknown", "PDF not historized", False
+    )
+
+    # Credit
+    credit_vals = _slice(*credit)
+    current_credit = credit_vals[-1] if credit_vals else None
+    credit_hist_newest = list(reversed(credit_vals[-30:]))
+    credit_trap = regime.detect_credit_trap(current_credit, credit_hist_newest)
+    score_cred = regime.score_bear_credit(current_credit, credit_hist_newest, credit_trap)
+
+    # Positioning (COT)
+    contract_zs: dict[str, float | None] = {}
+    for key, pairs in cot_by_key.items():
+        idx = bisect_right([p[0] for p in pairs], asof)
+        sample = [p[1] for p in pairs[max(0, idx - 53) : idx]]
+        if len(sample) < 8:
+            contract_zs[key] = None
+            continue
+        mu = sum(sample) / len(sample)
+        sd = (sum((s - mu) ** 2 for s in sample) / len(sample)) ** 0.5
+        contract_zs[key] = (sample[-1] - mu) / sd if sd > 0 else None
+    positioning_label: str | None = None
+    if any(z is not None for z in contract_zs.values()):
+        positioning_label, _ = regime.classify_positioning(contract_zs)
+    score_pos = regime.score_bear_positioning(positioning_label)
+
+    # Sentiment — NAAIM only at as-of (CBOE p/c, AAII are current-snapshot only)
+    naaim_idx = bisect_right([p[0] for p in naaim_pairs], asof)
+    naaim_val = naaim_pairs[naaim_idx - 1][1] if naaim_idx > 0 else None
+    sentiment_label: str | None = None
+    if naaim_val is not None:
+        sentiment_label, _ = regime.classify_sentiment(None, naaim_val, None)
+    score_sent = regime.score_bear_sentiment(sentiment_label)
+
+    # Volatility
+    vix_dates, vix_closes_full, _ = vix_bars
+    vix_closes_sl = _slice(vix_dates, vix_closes_full)
+    vix_val = vix_closes_sl[-1] if vix_closes_sl else None
+    score_v = regime.score_bear_volatility(vix_val, None, vix_closes_sl)
+
+    # Technicals
+    spy_dates, spy_closes_full, spy_vols_full = spy_bars
+    spy_closes_sl, spy_vols_sl = _slice2(spy_dates, spy_closes_full, spy_vols_full)
+    spy_rsi: float | None = None
+    sma200: float | None = None
+    if spy_closes_sl:
+        rsi_vals = ta.rsi(spy_closes_sl)
+        sma200_vals = ta.sma(spy_closes_sl, 200)
+        if rsi_vals:
+            spy_rsi = rsi_vals[-1]
+        if sma200_vals:
+            sma200 = sma200_vals[-1]
+    score_tech = regime.score_bear_technicals(spy_closes_sl, spy_vols_sl, spy_rsi, sma200)
+
+    # Breadth
+    _, iwm_closes_sl, _ = (
+        (iwm_bars[0], _slice(iwm_bars[0], iwm_bars[1]), []) if iwm_bars[0] else ([], [], [])
+    )
+    _, xlu_closes_sl, _ = (
+        (xlu_bars[0], _slice(xlu_bars[0], xlu_bars[1]), []) if xlu_bars[0] else ([], [], [])
+    )
+    _, xly_closes_sl, _ = (
+        (xly_bars[0], _slice(xly_bars[0], xly_bars[1]), []) if xly_bars[0] else ([], [], [])
+    )
+    rsp_closes_sl: list[float] | None = None
+    if rsp_bars[0]:
+        rsp_closes_sl = _slice(rsp_bars[0], rsp_bars[1]) or None
+    breadth_label: str | None = None
+    breadth_detail: str | None = None
+    if spy_closes_sl and iwm_closes_sl and xlu_closes_sl and xly_closes_sl:
+        breadth_label, breadth_detail = regime.classify_breadth(
+            spy_closes_sl,
+            iwm_closes_sl,
+            spy_vols_sl,
+            xlu_closes_sl,
+            xly_closes_sl,
+            rsp_closes=rsp_closes_sl,
+        )
+    score_b = regime.score_bear_breadth(breadth_label, breadth_detail)
+
+    # Dealer flow
+    if not dix_triplets:
+        score_d = regime.BearScoreComponent(
+            "Dealer Flow (DIX/GEX)", 0.0, "Unknown", "no DIX history", False
+        )
+    else:
+        idx = bisect_right([t[0] for t in dix_triplets], asof)
+        if idx == 0:
+            score_d = regime.BearScoreComponent(
+                "Dealer Flow (DIX/GEX)", 0.0, "Unknown", "pre-SqueezeMetrics history", False
+            )
+        else:
+            current_dix = dix_triplets[idx - 1][1]
+            current_gex = dix_triplets[idx - 1][2]
+            gex_hist = [t[2] for t in dix_triplets[max(0, idx - 252) : idx]]
+            score_d = regime.score_bear_dealer_flow(current_dix, current_gex, gex_hist)
+
+    components = [
+        score_curve,
+        score_val,
+        score_cred,
+        score_pos,
+        score_sent,
+        score_v,
+        score_tech,
+        score_b,
+        score_d,
+    ]
+    composite, _, _, _ = regime.synthesize_bear_regime(components)
+    return composite
+
+
+def _tier_for_score(score: float) -> str:
+    if score < 2.0:
+        return "Clear"
+    if score < 4.0:
+        return "Watchful"
+    if score < 6.0:
+        return "Building"
+    if score < 8.0:
+        return "Defensive"
+    return "Crisis"
+
+
+def _tier_rank(tier: str) -> int:
+    return {"Clear": 0, "Watchful": 1, "Building": 2, "Defensive": 3, "Crisis": 4}.get(
+        tier.split(" (")[0], -1
+    )
+
+
+def _bear_regime_trend(
+    current_composite: float,
+    current_tier: str,
+    *,
+    spread_obs,
+    ff_obs,
+    credit_obs,
+    dgs2_obs,
+    dgs10_obs,
+    dgs30_obs,
+    vix_closes: list[float],
+    spy_hist,
+    iwm_hist,
+    xlu_hist,
+    xly_hist,
+    rsp_hist,
+    naaim_entries,
+    dix_rows,
+    cot_weeklies: dict,
+    factset_resp,
+) -> list[str]:
+    """Build the trend section lines: Δ7d, Δ30d, last-below-tier lookback.
+
+    Uses already-fetched historized inputs (re-sliced per as-of date) so no
+    additional network calls. Approximations: CBOE p/c, AAII, FactSet ERP
+    are current-only — at historical as-of dates these dims fall through to
+    available=False and are excluded from the normalized composite.
+    """
+    # Parse everything into dated form once
+    spread = _parse_obs_dated(spread_obs)
+    ff = _parse_obs_dated(ff_obs)
+    credit = _parse_obs_dated(credit_obs)
+    dgs2 = _parse_obs_dated(dgs2_obs)
+    dgs10 = _parse_obs_dated(dgs10_obs)
+    dgs30 = _parse_obs_dated(dgs30_obs)
+    # VIX in the live tool comes from history; reuse the closes list with synthetic dates
+    # by matching against SPY bar dates (same trading calendar). Use SPY's dates.
+    spy_bars = _parse_bars_dated(spy_hist)
+    vix_dates_aligned: list[date]
+    if len(vix_closes) == len(spy_bars[0]):
+        vix_dates_aligned = spy_bars[0]
+    else:
+        # Length mismatch (likely fewer VIX history days); align to the tail of SPY dates
+        n = min(len(vix_closes), len(spy_bars[0]))
+        vix_dates_aligned = spy_bars[0][-n:]
+        vix_closes = vix_closes[-n:]
+    vix_bars: tuple[list[date], list[float], list[float]] = (
+        vix_dates_aligned,
+        list(vix_closes),
+        [],
+    )
+    iwm_bars = _parse_bars_dated(iwm_hist)
+    xlu_bars = _parse_bars_dated(xlu_hist)
+    xly_bars = _parse_bars_dated(xly_hist)
+    rsp_bars = _parse_bars_dated(rsp_hist)
+    naaim_pairs = sorted(((e.week_ending, e.exposure) for e in naaim_entries), key=lambda p: p[0])
+    dix_triplets = sorted(((r.date, r.dix, r.gex) for r in dix_rows), key=lambda p: p[0])
+    cot_by_key: dict[str, list[tuple[date, float]]] = {}
+    from trading_clients.endpoints.cftc import _spec_net
+
+    for key, resp in cot_weeklies.items():
+        if resp is None:
+            cot_by_key[key] = []
+            continue
+        pairs: list[tuple[date, float]] = []
+        for rec in resp.weekly:
+            raw = rec.get("report_date_as_yyyy_mm_dd", "")[:10]
+            try:
+                d = datetime.strptime(raw, "%Y-%m-%d").date()
+            except (ValueError, TypeError):
+                continue
+            n = _spec_net(rec)
+            if n is None:
+                continue
+            pairs.append((d, n))
+        pairs.sort(key=lambda p: p[0])
+        cot_by_key[key] = pairs
+
+    # Pick "today" as the latest SPY bar date (anchors to actual trading calendar)
+    if not spy_bars[0]:
+        return []
+    today_anchor = spy_bars[0][-1]
+
+    def _score_at(asof: date) -> float:
+        return _score_bear_at_asof(
+            asof,
+            spread=spread,
+            ff=ff,
+            credit=credit,
+            dgs2=dgs2,
+            dgs10=dgs10,
+            dgs30=dgs30,
+            vix_bars=vix_bars,
+            spy_bars=spy_bars,
+            iwm_bars=iwm_bars,
+            xlu_bars=xlu_bars,
+            xly_bars=xly_bars,
+            rsp_bars=rsp_bars,
+            naaim_pairs=naaim_pairs,
+            dix_triplets=dix_triplets,
+            cot_by_key=cot_by_key,
+            factset_resp=factset_resp,
+        )
+
+    score_7d = _score_at(today_anchor - timedelta(days=7))
+    score_30d = _score_at(today_anchor - timedelta(days=30))
+    delta_7d = current_composite - score_7d
+    delta_30d = current_composite - score_30d
+
+    lines: list[str] = []
+    lines.append(
+        f"(Δ7d: {delta_7d:+.1f} from {score_7d:.1f}, Δ30d: {delta_30d:+.1f} from {score_30d:.1f})"
+    )
+
+    # Last-below-tier lookback — walk back weekly up to 26 weeks (6 months)
+    cur_rank = _tier_rank(current_tier)
+    if cur_rank > 0:
+        found_below: date | None = None
+        prior_rank: int | None = None
+        for weeks_back in range(7, 7 + 26 * 7, 7):
+            asof = today_anchor - timedelta(days=weeks_back)
+            sc = _score_at(asof)
+            r = _tier_rank(_tier_for_score(sc))
+            if r < cur_rank:
+                found_below = asof
+                prior_rank = r
+                break
+        if found_below is not None:
+            days_in_tier = (today_anchor - found_below).days
+            prior_tier_name = ["Clear", "Watchful", "Building", "Defensive", "Crisis"][
+                prior_rank or 0
+            ]
+            lines.append("")
+            lines.append(
+                f"_Score has been at ≥ {current_tier.split(' (')[0]} for ≥{days_in_tier} days "
+                f"(last {prior_tier_name} reading: {found_below})._"
+            )
+        else:
+            lines.append("")
+            lines.append(
+                f"_Score has held at ≥ {current_tier.split(' (')[0]} for ≥182 days "
+                f"(no lower reading in lookback window)._"
+            )
+
+    return lines
+
+
+@mcp.tool()
+async def get_bear_regime_score(ctx: Context) -> str:
+    """Composite 0-10 bear-regime risk score across 9 dimensions.
+
+    Aggregates yield curve regime, valuation (ERP), HY credit spreads,
+    CFTC speculator positioning, retail/active-manager sentiment, VIX
+    structure, SPY technicals, market-internals breadth (SPY/IWM +
+    XLY/XLU + volume + SPY/RSP concentration), and SqueezeMetrics dealer
+    flow (DIX/GEX) into a single 0-10 score with tier label and
+    per-dimension breakdown.
+
+    Tiers:
+      0-1.99 Clear     — no special action, normal accumulation OK
+      2-3.99 Watchful  — verify tail hedge sized, prefer CCs on extended winners
+      4-5.99 Building  — pause new entries in high-multiple names
+      6-7.99 Defensive — trim high-multiple, raise tail hedge delta, write CCs on winners
+      8-10   Crisis    — freeze new entries, max tail hedge, sell rallies
+
+    Score is *normalized over available dimensions* — missing data is
+    excluded rather than counted as Safe. When <60% of dimensions are
+    available the tier line is suffixed "(incomplete data)" so the reader
+    can flag low-confidence reads.
+
+    Designed as a decision checkpoint for `/briefing` (top section) and
+    `/review` (action plan trigger). Position cross-reference logic lives
+    in the skills, not this tool — the tool emits the macro read, the
+    skill decides which positions are exposed.
+
+    Breadth reuses classify_breadth (the same definition surfaced by
+    get_market_regime) — SPY/IWM divergence + XLY/XLU rotation + SPY
+    volume trend + SPY/RSP equal-weight concentration — rather than
+    introducing a competing "% SPX above 200dma" measure that would
+    require iterating constituents. v1 weights are educated guesses;
+    expect to retune after a few months of live observation against
+    historical episodes.
+
+    Requires [fred] and [tradier] sections in ~/.tradingrc. FactSet,
+    CFTC, NAAIM, SqueezeMetrics are no-auth public sources;
+    [sentiment] (CBOE p/c + AAII) requires Playwright.
+    """
+    fred_client = _fred(ctx)
+    tradier = _tradier(ctx)
+    factset_client = _factset(ctx)
+    sentiment_client = _sentiment(ctx)
+    cftc_client = _cftc(ctx)
+    naaim_client = _naaim(ctx)
+    squeeze_client = _squeeze_metrics(ctx)
+
+    start = _year_ago(date.today()).isoformat()
+    tasks: list = [
+        # 0: VIX + VIX3M quotes (vol regime + backwardation)
+        tradier.get(t.QUOTES, t.GetQuotesRequest("VIX,VIX3M")),
+        # 1: T10Y2Y spread history (for un-inversion trap + deep-inversion check)
+        fred_client.get(fred.OBSERVATIONS, fred.GetObservationsRequest("T10Y2Y", 130)),
+        # 2: Fed funds (for un-inversion trap direction)
+        fred_client.get(fred.OBSERVATIONS, fred.GetObservationsRequest("FEDFUNDS", 2)),
+        # 3: HY OAS (credit spread regime)
+        fred_client.get(fred.OBSERVATIONS, fred.GetObservationsRequest("BAMLH0A0HYM2", 30)),
+        # 4-6: DGS2/10/30 for curve regime 4w change classification
+        fred_client.get(fred.OBSERVATIONS, fred.GetObservationsRequest("DGS2", 80)),
+        fred_client.get(fred.OBSERVATIONS, fred.GetObservationsRequest("DGS10", 80)),
+        fred_client.get(fred.OBSERVATIONS, fred.GetObservationsRequest("DGS30", 80)),
+        # 7: VIX history (complacency tier needs 60d avg)
+        tradier.get(t.HISTORY, t.GetHistoryRequest("VIX", "daily", start=start)),
+        # 8: SPY history (technicals — SMA200, RSI, distribution days + breadth)
+        tradier.get(t.HISTORY, t.GetHistoryRequest("SPY", "daily", start=start)),
+        # 9: FactSet weekly PDF (forward 12M P/E for ERP)
+        factset_client.get_earnings_insight(),
+        # 10: SqueezeMetrics DIX/GEX history
+        squeeze_client.get(squeeze_metrics.DIX_HISTORY, squeeze_metrics.EmptyRequest()),
+        # 11: NAAIM exposure (one of three sentiment inputs)
+        naaim_client.get_history(),
+        # 12-15: IWM / XLU / XLY / RSP for breadth (SPY/IWM divergence + XLY/XLU
+        # rotation + SPY/RSP equal-weight concentration)
+        tradier.get(t.HISTORY, t.GetHistoryRequest("IWM", "daily", start=start)),
+        tradier.get(t.HISTORY, t.GetHistoryRequest("XLU", "daily", start=start)),
+        tradier.get(t.HISTORY, t.GetHistoryRequest("XLY", "daily", start=start)),
+        tradier.get(t.HISTORY, t.GetHistoryRequest("RSP", "daily", start=start)),
+    ]
+
+    cboe_idx: int | None = None
+    aaii_idx: int | None = None
+    if sentiment_client is not None:
+        cboe_idx = len(tasks)
+        tasks.append(sentiment_client.get(sentiment.CBOE_EQUITY_PC, sentiment.EmptyRequest()))
+        aaii_idx = len(tasks)
+        tasks.append(sentiment_client.get(sentiment.AAII_SENTIMENT, sentiment.EmptyRequest()))
+
+    cftc_keys = list(cftc.CONTRACTS.keys())
+    cftc_offset = len(tasks)
+    for key in cftc_keys:
+        report_key, pattern, _ = cftc.CONTRACTS[key]
+        tasks.append(cftc_client.get(cftc.REPORTS[report_key], cftc.GetCotRequest(pattern)))
+
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    def _ok(i: int):
+        return results[i] if not isinstance(results[i], BaseException) else None
+
+    # Aggregate any fetch failures as warnings; missing dims fall through to
+    # `available=False` via the scoring functions.
+    warnings: list[str] = []
+    source_names = {
+        0: "Tradier VIX quotes",
+        1: "FRED T10Y2Y",
+        2: "FRED FEDFUNDS",
+        3: "FRED HY OAS",
+        4: "FRED DGS2",
+        5: "FRED DGS10",
+        6: "FRED DGS30",
+        7: "Tradier VIX history",
+        8: "Tradier SPY history",
+        9: "FactSet Earnings Insight",
+        10: "SqueezeMetrics DIX/GEX",
+        11: "NAAIM history",
+        12: "Tradier IWM history",
+        13: "Tradier XLU history",
+        14: "Tradier XLY history",
+        15: "Tradier RSP history",
+    }
+    if cboe_idx is not None:
+        source_names[cboe_idx] = "CBOE equity p/c"
+    if aaii_idx is not None:
+        source_names[aaii_idx] = "AAII sentiment"
+    for i, key in enumerate(cftc_keys):
+        source_names[cftc_offset + i] = f"CFTC COT {key}"
+    for i, r in enumerate(results):
+        if isinstance(r, BaseException):
+            warnings.append(_exc_summary(source_names.get(i, f"task {i}"), r))
+
+    # === Parse fetched data ===
+    vix_quotes_resp = _ok(0)
+    spread_resp = _ok(1)
+    ff_resp = _ok(2)
+    credit_resp = _ok(3)
+    dgs2_resp = _ok(4)
+    dgs10_resp = _ok(5)
+    dgs30_resp = _ok(6)
+    vix_hist_resp = _ok(7)
+    spy_hist_resp = _ok(8)
+    factset_resp = _ok(9)
+    squeeze_resp = _ok(10)
+    naaim_resp = _ok(11)
+    iwm_hist_resp = _ok(12)
+    xlu_hist_resp = _ok(13)
+    xly_hist_resp = _ok(14)
+    rsp_hist_resp = _ok(15)
+
+    def _obs_history(obs: list[dict]) -> list[float]:
+        out: list[float] = []
+        for o in obs:
+            v = o.get("value", ".")
+            if v == ".":
+                continue
+            try:
+                out.append(float(v))
+            except (ValueError, TypeError):
+                pass
+        return out
+
+    def _curve_4w_change(obs: list[dict]) -> float | None:
+        cur = _obs_value_at(obs, 0)
+        prior = _obs_value_at(obs, 20) if len(obs) > 20 else None
+        if cur is None or prior is None:
+            return None
+        return (cur - prior) * 100
+
+    # === Volatility ===
+    vix_val: float | None = None
+    vix3m_val: float | None = None
+    if vix_quotes_resp and vix_quotes_resp.quotes:
+        for q in vix_quotes_resp.quotes:
+            sym = q.get("symbol", "")
+            if sym == "VIX":
+                vix_val = q.get("last")
+            elif sym == "VIX3M":
+                vix3m_val = q.get("last")
+    vix_closes: list[float] = []
+    if vix_hist_resp and vix_hist_resp.days:
+        vix_closes = [float(b["close"]) for b in vix_hist_resp.days]
+    score_vol = regime.score_bear_volatility(vix_val, vix3m_val, vix_closes)
+
+    # === Curve ===
+    spread_obs = spread_resp.observations if spread_resp else []
+    spread_history = _obs_history(spread_obs)
+    spread_val, _ = regime.parse_fred_value(spread_obs)
+    ff_obs = ff_resp.observations if ff_resp else []
+    ff_val, _ = regime.parse_fred_value(ff_obs)
+    prev_ff_val, _ = regime.parse_fred_value(ff_obs[1:] if len(ff_obs) > 1 else [])
+    uninversion_warning = regime.detect_uninversion_trap(
+        spread_history, spread_val, ff_val, prev_ff_val
+    )
+    dgs2_obs = dgs2_resp.observations if dgs2_resp else []
+    dgs10_obs = dgs10_resp.observations if dgs10_resp else []
+    dgs30_obs = dgs30_resp.observations if dgs30_resp else []
+    curve_label: str | None = None
+    if dgs2_obs or dgs10_obs or dgs30_obs:
+        curve_label, _ = regime.classify_curve_regime(
+            _curve_4w_change(dgs2_obs),
+            _curve_4w_change(dgs10_obs),
+            _curve_4w_change(dgs30_obs),
+        )
+    score_curve = regime.score_bear_curve(curve_label, uninversion_warning, spread_history)
+
+    # === Valuation (ERP) ===
+    erp_bps: float | None = None
+    if factset_resp and dgs10_obs:
+        fwd_pe = factset_resp.forward_pe
+        dgs10_val, _ = regime.parse_fred_value(dgs10_obs)
+        if fwd_pe and dgs10_val is not None:
+            earnings_yield = 100.0 / fwd_pe
+            erp_bps = (earnings_yield - dgs10_val) * 100
+    score_valuation = regime.score_bear_valuation(erp_bps)
+
+    # === Credit ===
+    credit_obs = credit_resp.observations if credit_resp else []
+    credit_val, _ = regime.parse_fred_value(credit_obs)
+    credit_history = _obs_history(credit_obs)
+    credit_trap = regime.detect_credit_trap(credit_val, credit_history)
+    score_credit = regime.score_bear_credit(credit_val, credit_history, credit_trap)
+
+    # === Sentiment ===
+    cboe_resp = _ok(cboe_idx) if cboe_idx is not None else None
+    aaii_resp = _ok(aaii_idx) if aaii_idx is not None else None
+    cboe_pc = cboe_resp.value if cboe_resp is not None else None
+    naaim_val = naaim_resp.latest_exposure if naaim_resp is not None else None
+    aaii_spread_val = aaii_resp.spread if aaii_resp is not None else None
+    sentiment_label: str | None = None
+    if any(v is not None for v in (cboe_pc, naaim_val, aaii_spread_val)):
+        sentiment_label, _ = regime.classify_sentiment(cboe_pc, naaim_val, aaii_spread_val)
+    score_sentiment = regime.score_bear_sentiment(sentiment_label)
+
+    # === Positioning ===
+    contract_zs: dict[str, float | None] = {}
+    for i, key in enumerate(cftc_keys):
+        cot_resp = _ok(cftc_offset + i)
+        contract_zs[key] = cot_resp.z_score if cot_resp is not None else None
+    positioning_label: str | None = None
+    if any(z is not None for z in contract_zs.values()):
+        positioning_label, _ = regime.classify_positioning(contract_zs)
+    score_positioning = regime.score_bear_positioning(positioning_label)
+
+    # === Technicals ===
+    spy_closes: list[float] = []
+    spy_volumes: list[float] = []
+    if spy_hist_resp and spy_hist_resp.days:
+        spy_closes = [float(b["close"]) for b in spy_hist_resp.days]
+        spy_volumes = [float(b["volume"]) for b in spy_hist_resp.days]
+    spy_rsi: float | None = None
+    sma200: float | None = None
+    if spy_closes:
+        rsi_vals = ta.rsi(spy_closes)
+        sma200_vals = ta.sma(spy_closes, 200)
+        if rsi_vals:
+            spy_rsi = rsi_vals[-1]
+        if sma200_vals:
+            sma200 = sma200_vals[-1]
+    score_technicals = regime.score_bear_technicals(spy_closes, spy_volumes, spy_rsi, sma200)
+
+    # === Breadth ===
+    # Reuses classify_breadth: SPY/IWM divergence + XLY/XLU rotation + SPY
+    # volume trend + SPY/RSP equal-weight concentration.
+    iwm_closes: list[float] = []
+    xlu_closes: list[float] = []
+    xly_closes: list[float] = []
+    rsp_closes: list[float] = []
+    if iwm_hist_resp and iwm_hist_resp.days:
+        iwm_closes = [float(b["close"]) for b in iwm_hist_resp.days]
+    if xlu_hist_resp and xlu_hist_resp.days:
+        xlu_closes = [float(b["close"]) for b in xlu_hist_resp.days]
+    if xly_hist_resp and xly_hist_resp.days:
+        xly_closes = [float(b["close"]) for b in xly_hist_resp.days]
+    if rsp_hist_resp and rsp_hist_resp.days:
+        rsp_closes = [float(b["close"]) for b in rsp_hist_resp.days]
+    breadth_label: str | None = None
+    breadth_detail: str | None = None
+    if spy_closes and iwm_closes and xlu_closes and xly_closes:
+        breadth_label, breadth_detail = regime.classify_breadth(
+            spy_closes,
+            iwm_closes,
+            spy_volumes,
+            xlu_closes,
+            xly_closes,
+            rsp_closes=rsp_closes or None,
+        )
+    score_breadth = regime.score_bear_breadth(breadth_label, breadth_detail)
+
+    # === Dealer flow ===
+    current_dix: float | None = None
+    current_gex: float | None = None
+    gex_history: list[float] = []
+    if squeeze_resp and squeeze_resp.rows:
+        latest = squeeze_resp.rows[-1]
+        current_dix = latest.dix
+        current_gex = latest.gex
+        gex_history = [r.gex for r in squeeze_resp.rows[-252:]]
+    score_dealer = regime.score_bear_dealer_flow(current_dix, current_gex, gex_history)
+
+    components = [
+        score_curve,
+        score_valuation,
+        score_credit,
+        score_positioning,
+        score_sentiment,
+        score_vol,
+        score_technicals,
+        score_breadth,
+        score_dealer,
+    ]
+    composite, tier, top_contributors, missing = regime.synthesize_bear_regime(components)
+
+    # === Trend snapshots (Phase 4) ===
+    # Re-score the composite at 7d-ago and 30d-ago using already-fetched
+    # historized inputs. Walks back weekly to find when the score last sat
+    # below the current tier — surfaces persistence vs whipsaw.
+    trend_lines = _bear_regime_trend(
+        composite,
+        tier,
+        spread_obs=spread_obs,
+        ff_obs=ff_obs,
+        credit_obs=credit_obs,
+        dgs2_obs=dgs2_obs,
+        dgs10_obs=dgs10_obs,
+        dgs30_obs=dgs30_obs,
+        vix_closes=vix_closes,
+        spy_hist=spy_hist_resp,
+        iwm_hist=iwm_hist_resp,
+        xlu_hist=xlu_hist_resp,
+        xly_hist=xly_hist_resp,
+        rsp_hist=rsp_hist_resp,
+        naaim_entries=naaim_resp.entries if naaim_resp is not None else [],
+        dix_rows=squeeze_resp.rows if squeeze_resp is not None else [],
+        cot_weeklies={k: _ok(cftc_offset + i) for i, k in enumerate(cftc_keys)},
+        factset_resp=factset_resp,
+    )
+
+    # === Format output ===
+    out: list[str] = []
+    out.extend(_warnings_section(warnings))
+    out.append("## Bear Regime Score")
+    out.append("")
+    headline = f"**{composite:.1f} / 10 — {tier}**"
+    if trend_lines:
+        # trend_lines[0] is the inline delta suffix; remaining entries are
+        # block-level (persistence note).
+        out.append(headline + " " + trend_lines[0].strip())
+        for extra in trend_lines[1:]:
+            out.append(extra)
+    else:
+        out.append(headline)
+    out.append("")
+
+    if top_contributors:
+        out.append("**Top contributors:**")
+        for c in top_contributors:
+            out.append(f"- **{c.name}** ({c.score:.1f}, {c.label}) — {c.detail}")
+        out.append("")
+    else:
+        out.append("*No dimensions firing — all available signals at Safe.*")
+        out.append("")
+
+    out.append("**All dimensions:**")
+    rows: list[list[str]] = []
+    for c in components:
+        if c.available:
+            rows.append([c.name, f"{c.score:.1f}", c.label, c.detail])
+        else:
+            rows.append([c.name, "—", "Unknown", c.detail])
+    out.append(md_table(["Dimension", "Score", "Label", "Detail"], rows))
+
+    if missing:
+        out.append("")
+        names = ", ".join(c.name for c in missing)
+        out.append(f"*Missing: {names}*")
+
+    return "\n".join(out)
 
 
 # PCE component price indexes (level series; MoM/YoY computed from levels).
