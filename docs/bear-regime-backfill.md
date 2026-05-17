@@ -302,15 +302,11 @@ forward predictor.
    Crisis as confirmation-the-hedge-program-should-be-firing rather than
    an independent gate.
 6. **Exogenous-shock drawdowns get coincident, not leading, signals.**
-   Per the 2024-meltup walk, when a drawdown is triggered by a single
-   policy/event shock rather than macro deterioration, the score's
-   leading dims (Curve, Positioning, Sentiment) stay quiet — only
-   Tech/Vol/Credit fire, all coincident with the move. Building still
-   crosses but with little lead time (April 2025: +47d after peak, +1d
-   before bottom). Don't expect the same -25pp avoided-downside the
-   macro-driven episodes delivered. Treat sudden shock-drawdowns as a
-   regime the composite under-warns on; use the active-overhang memory
-   files for forward visibility instead.
+   When a drawdown is policy/event-driven rather than macro-driven, the
+   leading dims (Curve, Positioning, Sentiment) stay quiet — Building
+   only crosses when Tech/Vol/Credit confirm (April 2025: +1d before
+   bottom). Use active-overhang memory files for forward visibility on
+   shock regimes; the composite under-warns.
 
 ## Melt-up false-positive check (2024 H2 → 2025 H1)
 
@@ -334,20 +330,10 @@ full melt-up from $545 → $613, the composite never reached Building
 - Watchful (2-3.99): 11 snapshots (33%)
 - Building+: 0 snapshots
 
-**Watchful prints all had real drivers — not noise:**
-- 2024-08-05 (3.8, briefly highest): yen carry unwind, VIX spike to 38,
-  SPY -15.6%. Real vol event; score correctly fired and de-escalated
-  the next week.
-- 2024-08-19 / 08-26 (2.5): Tech + Breadth still recovering from August
-  shock — appropriate elevated read.
-- 2024-11-04 (2.5): Tech + Curve + Positioning convergence pre-election.
-- 2024-12-30 → 2025-01-27 (2.5-3.8): Breadth + Tech + Curve cluster
-  during the January pullback from December's highs. Real correction
-  signal (SPY -5% peak-to-trough in early January), correctly read.
-
-**Read:** Watchful is whipsawy but **earns** its prints. Every Watchful
-crossing in the melt-up had an identifiable real driver. None bled into
-Building, validating Building's threshold as the action gate.
+Watchful fired at the Aug 2024 yen-carry vol spike (3.8, VIX 38), the
+August aftermath, pre-election convergence in early November, and the
+January 2025 pullback (2.5-3.8) — each had an identifiable real driver
+and none bled into Building. Watchful is whipsawy but earns its prints.
 
 ### Phase 2 — tariff drawdown (2025-02-19 → 2025-04-08)
 
@@ -386,20 +372,10 @@ the move — and by then the bottom was a day away.
 sitting at 0.0 with SPY back to new highs at $618. No lingering
 Watchful prints, no false-positive elevation post-recovery.
 
-### Calibration takeaways from the melt-up walk
-
-1. **Building threshold is well-calibrated as the action gate** — zero
-   false crossings in 12 months of mixed melt-up + correction.
-2. **Watchful tier earns its prints** in melt-up regimes — each crossing
-   had a real driver. The 1-week persistence rule still applies for
-   whipsaws but Watchful is not pure noise.
-3. **The composite has a known blindspot for exogenous-shock drawdowns**
-   — when the trigger is a single policy/event shock rather than macro
-   deterioration, leading dims don't fire. Building only crosses
-   coincident with the bottom. Memory-tracked active overhangs are the
-   appropriate forward-visibility tool for this regime.
-4. **De-escalation is clean** — once the shock resolves, the score
-   returns to Clear cleanly rather than staying stuck Watchful.
+**Net read:** Building threshold validated as the action gate (zero false
+crossings in 12 months); exogenous-shock drawdowns are a known blindspot
+(use active-overhang memory for forward visibility); de-escalation is
+clean (no stuck-Watchful residue).
 
 ## Per-episode walks (raw output)
 

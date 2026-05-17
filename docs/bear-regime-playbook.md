@@ -120,9 +120,8 @@ Tier transitions remain **soft signals** — re-pull `get_market_regime` and `ge
 - Score **decays in grind-down bears** (2022: Building fired at the peak then drifted back to Watchful while SPY went -25%). De-escalation ≠ all-clear; hold Building-tier playbook actions in place even if the score drops.
 
 **Melt-up false-positive check (2026-05-17, see `bear-regime-backfill.md` "Melt-up false-positive check" section):**
-- 12-month walk 2024-07 → 2025-06: **zero false Building crossings** in the melt-up phase. Watchful prints all had real drivers (Aug 2024 yen-carry vol spike, January 2025 pullback). Building threshold cleanly separates real risk from melt-up noise.
-- April 2025 tariff drawdown (-19% in 7 weeks) surfaced a new failure mode: **exogenous-shock drawdowns get coincident, not leading, signals.** Building fired +47 days after the peak and +1 day before the bottom — leading dims (Curve, Positioning, Sentiment) stayed quiet because the dislocation was policy-driven not macro-driven. Lag-only fires from Tech/Vol/Credit.
-- **Implication:** when a known active overhang is in memory (capex collapse, tariff escalation, geopolitical event), don't wait for the composite to elevate — memory-tracked overhangs are the appropriate forward-visibility tool for shock regimes. The score is reliable for macro-driven bears, lagging for event-driven ones.
+- 12-month walk 2024-07 → 2025-06: **zero false Building crossings** in the melt-up phase; Watchful prints all had real drivers (Aug 2024 yen-carry, Jan 2025 pullback). Building threshold cleanly separates real risk from melt-up noise.
+- April 2025 tariff drawdown (-19% in 7 weeks) surfaced a new failure mode: **exogenous-shock drawdowns get coincident, not leading, signals.** Building fired +47 days after the peak and +1 day before the bottom — leading dims (Curve, Positioning, Sentiment) stayed quiet because the dislocation was policy- not macro-driven. For known active overhangs in memory (tariff escalation, capex collapse, geopolitical event), defer to those memory files for forward visibility rather than waiting for the composite to elevate.
 
 ## Companion reads
 
