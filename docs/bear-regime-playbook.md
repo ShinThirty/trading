@@ -19,8 +19,8 @@ The score will produce **false negatives** at exotic patterns the dimensions don
 | **Clear** | 0-1.99 | Normal accumulation. No special action. | No |
 | **Watchful** | 2-3.99 | Verify hedge sized. Prefer CCs on extended winners. | Lightweight (check overlaps with firing dims only) |
 | **Building** | 4-5.99 | Pause new entries in high-multiple names. Check CC coverage. | Full scan |
-| **Defensive** | 6-7.99 | Trim high-multiple. Raise tail hedge delta. Write CCs on winners. | Full scan + concrete trim list |
-| **Crisis** | 8-10 | Freeze new entries. Max tail hedge. Sell rallies. | Full scan + reduce-gross plan |
+| **Defensive** | 6-6.99 | Trim high-multiple. Raise tail hedge delta. Write CCs on winners. | Full scan + concrete trim list |
+| **Crisis** | 7-10 | Freeze new entries. Max tail hedge. Sell rallies. | Full scan + reduce-gross plan |
 
 Tier transitions matter as much as absolute level. A move from Watchful to Building inside a week (driven by 2+ new dimensions flipping to Warning) is the actionable event — the score crossing 4.0 alone, when it has been hovering at 3.8 for a month, is not.
 
@@ -49,7 +49,7 @@ All Watchful actions, plus:
 - For new pipeline entries (any intent): prefer credit spreads over direct buy / long calls. Lower vega exposure.
 - Re-check `get_valuation_regime` — if ERP also compressed, the Building tier signal is reinforced
 
-### Defensive (6-7.99)
+### Defensive (6-6.99)
 
 All Building actions, plus:
 
@@ -59,7 +59,7 @@ All Building actions, plus:
 - Freeze new accumulate entries; harvest premium only via wheel accounts
 - For any position >15% portfolio concentration: surface as oversized; consider trim
 
-### Crisis (8-10)
+### Crisis (7-10)
 
 All Defensive actions, plus:
 
@@ -105,10 +105,11 @@ The score is mechanistic. Override when:
 
 ## Calibration status
 
-v1 weights are educated guesses. Phase 4 progress:
+v1 weights are educated guesses. Phase 4 + Phase 5 progress:
 - ✅ SPY vs RSP equal-weight divergence added to `classify_breadth` as a 4th sub-signal — SPY beating RSP by >2.5pp over 20d fires a "megacap concentration" warning. Catches the 2000 / late-2024 pattern that IWM divergence misses. Both `get_market_regime` and `get_bear_regime_score` consume the same classifier.
-- ✅ Historical backfill across 2007 H2 / 2018 Q4 / 2020 Q1 / 2022 Q1 — see [bear-regime-backfill.md](bear-regime-backfill.md) for full per-episode walks and calibration findings. Headline: Building tier is the actionable signal (fires within 3 weeks of peak across all 4 episodes, 20-280d lead time to bottom); Defensive fires only in crisis-magnitude events (2008, briefly 2020); Crisis (≥8.0) is effectively unreachable with v1 weights even at 2008 lows; v1 thresholds shipping unchanged.
+- ✅ Historical backfill across 2007 H2 / 2018 Q4 / 2020 Q1 / 2022 Q1 — see [bear-regime-backfill.md](bear-regime-backfill.md) for full per-episode walks and calibration findings. Headline: Building tier is the actionable signal (fires within 3 weeks of peak across all 4 episodes, 20-280d lead time to bottom); Defensive fires only in crisis-magnitude events (2008, briefly 2020).
 - ✅ Score trend + last-below-tier lookback in tool output. Headline now reads e.g. `**3.4 / 10 — Watchful** (Δ7d: +0.4 from 3.0, Δ30d: +1.5 from 1.9)` followed by `_Score has been at ≥ Watchful for ≥21 days (last Clear reading: 2026-04-25)._` when tier ≥ Watchful. The trend re-scores the composite at 7d/30d ago using already-fetched historized inputs (no extra network calls); FactSet ERP + CBOE p/c + AAII are current-snapshot and fall to `available=False` at historical points, which the normalized-composite math handles cleanly. Lookback walks back weekly up to 26 weeks.
+- ✅ Crisis threshold lowered 8.0 → 7.0 (2026-05-16). Backfill showed Crisis was unreachable in any historical episode (2008 peaked 6.0, 2020 peaked 6.4) with v1 weights and v1 coverage. The threshold cut is forward-looking: ERP/Valuation is permanently missing in backfill, but live runs with a Compressed-Negative ERP add ~0.5-1.0 to peaks (estimated 2020 → ~6.9-7.4, 2008 → ~6.5-7.0). Threshold 7.0 gives Crisis a real chance of firing in a future 2020-magnitude event; 8.0 was effectively dead. Defensive band tightens to 6-6.99.
 
 Tier transitions remain **soft signals** — re-pull `get_market_regime` and `get_equity_risk_premium` to confirm before any irreversible action. The backfill validates that Building+1-week-persistence is the right action trigger; Watchful alone is too whipsawy to act on. Use the new persistence note to validate "is this regime sticky or noise?" — a Watchful reading that has held for ≥14 days is meaningfully different from one that just crossed.
 

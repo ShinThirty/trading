@@ -1346,7 +1346,7 @@ def _tier_for_score(score: float) -> str:
         return "Watchful"
     if score < 6.0:
         return "Building"
-    if score < 8.0:
+    if score < 7.0:
         return "Defensive"
     return "Crisis"
 
@@ -1519,8 +1519,8 @@ async def get_bear_regime_score(ctx: Context) -> str:
       0-1.99 Clear     — no special action, normal accumulation OK
       2-3.99 Watchful  — verify tail hedge sized, prefer CCs on extended winners
       4-5.99 Building  — pause new entries in high-multiple names
-      6-7.99 Defensive — trim high-multiple, raise tail hedge delta, write CCs on winners
-      8-10   Crisis    — freeze new entries, max tail hedge, sell rallies
+      6-6.99 Defensive — trim high-multiple, raise tail hedge delta, write CCs on winners
+      7-10   Crisis    — freeze new entries, max tail hedge, sell rallies
 
     Score is *normalized over available dimensions* — missing data is
     excluded rather than counted as Safe. When <60% of dimensions are

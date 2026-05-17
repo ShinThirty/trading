@@ -1469,8 +1469,8 @@ def synthesize_bear_regime(
         0-1.99  Clear      — no special action
         2-3.99  Watchful   — verify tail hedge, prefer CCs on extended winners
         4-5.99  Building   — pause new entries in high-multiple names
-        6-7.99  Defensive  — trim high-multiple, raise tail hedge delta
-        8-10    Crisis     — freeze new entries, max tail hedge, sell rallies
+        6-6.99  Defensive  — trim high-multiple, raise tail hedge delta
+        7-10    Crisis     — freeze new entries, max tail hedge, sell rallies
 
     Returns (composite_0_10, tier, top_contributors, missing).
     top_contributors is sorted by score desc, capped at 5, only includes
@@ -1492,7 +1492,7 @@ def synthesize_bear_regime(
         tier = "Watchful"
     elif composite < 6.0:
         tier = "Building"
-    elif composite < 8.0:
+    elif composite < 7.0:
         tier = "Defensive"
     else:
         tier = "Crisis"

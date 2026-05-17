@@ -57,6 +57,11 @@ Data gaps discovered during the backfill:
 
 ## Tier-crossing summary
 
+Crossings shown at v1 thresholds in effect when this run was captured
+(Crisis was 8.0; lowered to 7.0 on 2026-05-16). Crisis "never" entries
+remain accurate at the new 7.0 threshold for this backfill — peak scores
+were 6.0 (2008) and 6.4 (2020), still under 7.0 without ERP.
+
 | Episode | Watchful | Building | Defensive | Crisis | Peak | Bottom |
 |---------|----------|----------|-----------|--------|------|--------|
 | 2007 H2 | 2007-06-22 (-109d peak) | 2007-08-03 (-67d peak) | 2008-01-18 (+101d peak, -416d bottom) | never | 2007-10-09 | 2009-03-09 |
@@ -92,27 +97,30 @@ that did the most work were:
 
 ### What needs tuning
 
-**Crisis tier (≥8.0) is effectively dead.** Never crossed in any episode,
-including at the 2008 panic lows (peak score 6.0) and the 2020 COVID
-trough (peak score 6.4). With v1 weights and v1 coverage, Crisis is
-unreachable. Two reasons:
+**Crisis tier (originally ≥8.0) was unreachable. Lowered to ≥7.0 on
+2026-05-16.** Never crossed at 8.0 in any episode, including at the 2008
+panic lows (peak score 6.0) and the 2020 COVID trough (peak score 6.4).
+With v1 weights and v1 coverage, 8.0 is unreachable. Two reasons:
 
 1. The composite is normalized over available dims; even when 4-5 dims
    are Risk (1.0) simultaneously, the other dims at Safe (0.0) pull the
    normalized average down. To hit 8.0 you'd need 8/9 dims at Risk
    simultaneously, which is closer to "1987-style sudden derivatives
    crash" than to any of the historical bears in the backfill.
-2. ERP/Valuation is currently always missing (omitted). When live, a
-   Compressed-Negative ERP at the 2007 / late-2024 megacap-multiple
-   condition would add another Risk (1.0) — bringing peak scores up by
-   ~0.5-1.0 — but still wouldn't cross 8.0 without ≥7 other Risk dims.
+2. ERP/Valuation is currently always missing in backfill (omitted). When
+   live, a Compressed-Negative ERP at the 2007 / late-2024 megacap-
+   multiple condition would add another Risk (1.0) — bringing peak
+   scores up by ~0.5-1.0 (estimated 2020 → ~6.9-7.4, 2008 → ~6.5-7.0).
 
-**Recommendation:** Either (a) lower Crisis threshold from 8.0 to 7.0
-to make it reachable in 2008/2020-magnitude events, or (b) accept Crisis
-as reserved for events beyond historical precedent and rely on Defensive
-+ `/hedge` Trigger 2 (vol Crisis) as the practical max-action gate.
-Option (b) is consistent with the playbook's posture that the score is a
-decision checkpoint, not an auto-derisk trigger.
+**Resolution:** Crisis threshold lowered from 8.0 → 7.0 on 2026-05-16
+to make Crisis reachable in future 2020-magnitude events when ERP is
+live. Defensive band tightens to 6-6.99. The decision is forward-looking:
+backfill itself can't validate (ERP gap persists in historical runs), but
+ERP-adjusted peak estimates put 2020 and 2008 within reach of the new
+threshold. If a future sub-2008-magnitude bear hits sustained Defensive
+without ever crossing 7.0, revisit with a further cut to 6.5 (which
+would break the symmetric 2-point spacing, so prefer keeping 7.0 unless
+data forces otherwise).
 
 **Defensive tier (≥6.0) only fires in crisis-magnitude events.** Hit in
 2008 (sustained 6.0 for 6+ months) and briefly in 2020 (one snapshot at
@@ -147,11 +155,14 @@ needed.
 
 ## Practical recommendations
 
-1. **Keep v1 thresholds as shipped.** Building (4.0) and Defensive (6.0)
-   are well-calibrated. Crisis (8.0) is symbolically appropriate even if
-   unreachable in 2008/2020-magnitude events — the structural-hedge program
-   has its own vol-Crisis gate (`/hedge` Trigger 2) that does the work
-   Crisis tier would otherwise do.
+1. **v1.1 thresholds: Building 4.0, Defensive 6.0, Crisis 7.0.** Building
+   and Defensive are well-calibrated from backfill. Crisis was lowered
+   from 8.0 → 7.0 on 2026-05-16 to make it reachable in future
+   2020-magnitude events once ERP/Valuation is contributing (ERP-adjusted
+   peak estimates put 2020 at ~6.9-7.4 and 2008 at ~6.5-7.0). The
+   structural-hedge program's vol-Crisis gate (`/hedge` Trigger 2)
+   remains the practical max-action trigger regardless of where Crisis
+   sits — Crisis tier reinforces, doesn't replace, that gate.
 2. **Don't act on Watchful alone.** Re-confirm crossings hold for ≥1 week
    before adjusting positions, per the playbook's "Recent score whipsaw"
    override condition.
