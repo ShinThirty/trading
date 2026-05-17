@@ -1,8 +1,10 @@
 # Bear Regime Score — Historical Backfill
 
 Validation of the `get_bear_regime_score` composite (v1 weights) against
-four historical bear-precursor episodes: 2007 H2 / 2008 GFC, 2018 Q4
-correction, 2020 COVID crash, 2022 H1 bear setup.
+historical episodes: four bear-precursor walks (2007 H2 / 2008 GFC, 2018
+Q4 correction, 2020 COVID crash, 2022 H1 bear setup) plus a melt-up
+false-positive check (2024 H2 → 2025 H1, which also captures the April
+2025 tariff drawdown).
 
 Script: `packages/trading-mcp/scripts/backfill_bear_regime.py` (one-shot,
 not a recurring tool). Run with `--episode <key>` for one or `--episode all`.
@@ -26,6 +28,7 @@ tier label is suffixed `(incomplete data — N/9 dimensions)`.
 | 2018 Q4 | 8/9 (89%) | Valuation (ERP) |
 | 2020 Q1 | 8/9 (89%) | Valuation (ERP) |
 | 2022 Q1 | 8/9 (89%) | Valuation (ERP) |
+| 2024-meltup | 8/9 (89%) | Valuation (ERP) |
 | 2007 H2 | 5/9 (56%) | Valuation, Credit (HY OAS), Breadth, Dealer Flow |
 
 Data gaps discovered during the backfill:
@@ -68,6 +71,7 @@ were 6.0 (2008) and 6.4 (2020), still under 7.0 without ERP.
 | 2018 Q4 | 2018-08-03 (-48d peak) | 2018-10-12 (+22d peak, -73d bottom) | never | never | 2018-09-20 | 2018-12-24 |
 | 2020 Q1 | 2019-10-08 (-134d peak) | 2020-03-03 (+13d peak, -20d bottom) | 2020-03-17 (+27d peak, -6d bottom) | never | 2020-02-19 | 2020-03-23 |
 | 2022 Q1 | 2021-09-01 (-124d peak) | 2022-01-05 (+2d peak, -280d bottom) | never | never | 2022-01-03 | 2022-10-12 |
+| 2024-meltup | 2024-08-05 (-198d peak) | 2025-04-07 (+47d peak, -1d bottom) | never | never | 2025-02-19 | 2025-04-08 |
 
 ## Calibration findings
 
@@ -142,12 +146,11 @@ needed.
 
 ### What we still don't know
 
-- **2024 H1 melt-up** — the bear regime score would have been Watchful
-  through this period (consistent with the live readings we've been
-  taking). The backfill doesn't extend through 2024-25 because that's
-  not a bear precursor; it's a melt-up. Future work: walk 2024 H2 →
-  2025 H1 to check the "score persisting at Watchful for a long time
-  in a melt-up" failure mode.
+- ✅ **2024 H2 → 2025 H1 melt-up + tariff drawdown** — done 2026-05-17. See
+  "Melt-up false-positive check" section below. Headline: zero false
+  Building crossings in the 12-month walk; April 2025 tariff drawdown
+  surfaced a new failure mode (exogenous-shock drawdowns get coincident
+  not leading signals).
 - **2015-16 China devaluation scare** — not in the backfill but a known
   Watchful-tier false positive period in equities. Worth a future spot check.
 - **Late 2018** — the backfill captures the Q4 correction but not the
@@ -191,6 +194,7 @@ while price was actually moving* — not just "did the threshold cross" but
 | 2018 Q4 | -5.6% (22d after peak) | never | 4.3 | -17.6% | +3d |
 | 2020 Q1 | -11.3% (13d after peak) | -25.3% (27d after peak) | 6.4 | -25.3% | +6d |
 | 2022 H1 | **-2.0%** (2d after peak) | never | 5.0 | -2.0% | +280d |
+| 2024-meltup | -17.7% (47d after peak) | never | 5.0 | -17.7% | +1d |
 
 ### What the price overlay reveals
 
@@ -252,14 +256,19 @@ re-print isn't an all-clear, it's the regime not having a vol spike.
 | 2018 Q4 | -14pp (-6% → -20%) | n/a |
 | 2020 Q1 | -23pp (-11% → -34%) | -9pp (-25% → -34%) |
 | 2022 H1 | -23pp* (-2% → -25% by Oct) | n/a |
+| 2024-meltup | -1pp (-17.7% → -19.0%) | n/a |
 
 \*2022 Building cross to October 2022 bottom, beyond the walk window.
 
-**Average additional drawdown after Building cross: ~25pp.** This is the
-empirical "what does Building actually predict" answer — historically,
-selling rallies or pausing accumulation at Building has avoided a further
-~25% of downside on average across these four episodes. Smallest was
-2018's -14pp; largest was 2007's -41pp.
+**Average additional drawdown after Building cross: ~20pp** (excluding
+2024-meltup) / **~16pp including 2024-meltup**. The four bear episodes
+gave Building meaningful lead time — pausing accumulation at the cross
+historically avoided ~25% additional downside on average. The 2024-meltup
+result (Building fired 1 day before the actual bottom) drags the average
+down and reflects the new failure mode documented below: exogenous-shock
+drawdowns don't supply the macro deterioration the score's leading
+dimensions (Curve, Positioning) track, so Building only fires coincident
+once Tech/Vol/Credit confirm the move.
 
 **Average additional drawdown after Defensive cross: ~21pp** (only 2007
 and 2020 fired). Skewed by 2007's -33pp; 2020 was only -9pp because the
@@ -292,6 +301,105 @@ forward predictor.
    would have crossed 7.0 (with ERP wired) and only momentarily. Treat
    Crisis as confirmation-the-hedge-program-should-be-firing rather than
    an independent gate.
+6. **Exogenous-shock drawdowns get coincident, not leading, signals.**
+   Per the 2024-meltup walk, when a drawdown is triggered by a single
+   policy/event shock rather than macro deterioration, the score's
+   leading dims (Curve, Positioning, Sentiment) stay quiet — only
+   Tech/Vol/Credit fire, all coincident with the move. Building still
+   crosses but with little lead time (April 2025: +47d after peak, +1d
+   before bottom). Don't expect the same -25pp avoided-downside the
+   macro-driven episodes delivered. Treat sudden shock-drawdowns as a
+   regime the composite under-warns on; use the active-overhang memory
+   files for forward visibility instead.
+
+## Melt-up false-positive check (2024 H2 → 2025 H1)
+
+Added 2026-05-17. The first four backfill episodes were all real bears;
+this walk tests the inverse — does the score false-alarm during a
+sustained melt-up, and what does it do during the exogenous shock
+drawdown that punctuated it?
+
+**Walk window:** 2024-07-01 → 2025-06-30 (12 months)
+**Local peak:** 2025-02-19 ($612.93)
+**Local bottom:** 2025-04-08 ($496.48, -19.0% peak-to-trough)
+
+### Phase 1 — melt-up (2024-07-01 → 2025-02-19)
+
+**Zero Building crossings.** Across 33 weekly snapshots covering the
+full melt-up from $545 → $613, the composite never reached Building
+(≥4.0). This is the cleanest possible false-positive result.
+
+**Score distribution during melt-up:**
+- Clear (0-1.99): 22 snapshots (67%)
+- Watchful (2-3.99): 11 snapshots (33%)
+- Building+: 0 snapshots
+
+**Watchful prints all had real drivers — not noise:**
+- 2024-08-05 (3.8, briefly highest): yen carry unwind, VIX spike to 38,
+  SPY -15.6%. Real vol event; score correctly fired and de-escalated
+  the next week.
+- 2024-08-19 / 08-26 (2.5): Tech + Breadth still recovering from August
+  shock — appropriate elevated read.
+- 2024-11-04 (2.5): Tech + Curve + Positioning convergence pre-election.
+- 2024-12-30 → 2025-01-27 (2.5-3.8): Breadth + Tech + Curve cluster
+  during the January pullback from December's highs. Real correction
+  signal (SPY -5% peak-to-trough in early January), correctly read.
+
+**Read:** Watchful is whipsawy but **earns** its prints. Every Watchful
+crossing in the melt-up had an identifiable real driver. None bled into
+Building, validating Building's threshold as the action gate.
+
+### Phase 2 — tariff drawdown (2025-02-19 → 2025-04-08)
+
+The April 2025 tariff drawdown is a new pattern the four-bear backfill
+didn't capture: a fast, exogenous-shock-driven -19% drawdown not
+preceded by macro deterioration.
+
+**Score timeline during the drawdown:**
+
+| Date | DD | Score | Tier | What fired |
+|------|----|----|------|-----------|
+| 2025-02-24 | -2.6% | 1.2 | Clear | Breadth only |
+| 2025-03-03 | -4.8% | 2.5 | Watchful | Tech + Breadth |
+| 2025-03-10 | -8.5% | 3.8 | Watchful | Tech + Breadth + Vol |
+| 2025-03-31 | -8.7% | 2.5 | Watchful | Tech + Curve + Breadth |
+| **2025-04-07** | **-17.7%** | **5.0** | **Building** | **Credit + Vol + Tech** |
+| 2025-04-08 | -19.0% (bottom) | — | — | — |
+| 2025-04-21 | -16.2% | 5.0 | Building | Credit + Tech + Breadth (re-test) |
+
+**Building fired +47 days after the peak and +1 day before the bottom.**
+Compare to the four-bear backfill where Building averaged ~10 days
+after peak with weeks-to-months of lead time. The 2025 drawdown gave
+essentially zero forward warning at the action threshold.
+
+**Why the score lagged:** the dims that *lead* (Curve, Positioning,
+Sentiment) stayed quiet because the dislocation wasn't macro-driven.
+Tariff announcement → equity sell-off was a policy-channel shock, not
+a credit/curve/positioning unwind. The composite waited until *Credit*
+(HY OAS spike), *Vol* (VIX surge), and *Tech* (SMA200 break) confirmed
+the move — and by then the bottom was a day away.
+
+### Phase 3 — recovery (2025-04-08 → 2025-06-30)
+
+**Score de-escalated cleanly.** From 5.0 (Building, 2025-04-21) to 0.0
+(Clear, 2025-05-12) in 3 weeks. By the end of the walk, score was
+sitting at 0.0 with SPY back to new highs at $618. No lingering
+Watchful prints, no false-positive elevation post-recovery.
+
+### Calibration takeaways from the melt-up walk
+
+1. **Building threshold is well-calibrated as the action gate** — zero
+   false crossings in 12 months of mixed melt-up + correction.
+2. **Watchful tier earns its prints** in melt-up regimes — each crossing
+   had a real driver. The 1-week persistence rule still applies for
+   whipsaws but Watchful is not pure noise.
+3. **The composite has a known blindspot for exogenous-shock drawdowns**
+   — when the trigger is a single policy/event shock rather than macro
+   deterioration, leading dims don't fire. Building only crosses
+   coincident with the bottom. Memory-tracked active overhangs are the
+   appropriate forward-visibility tool for this regime.
+4. **De-escalation is clean** — once the shock resolves, the score
+   returns to Clear cleanly rather than staying stuck Watchful.
 
 ## Per-episode walks (raw output)
 

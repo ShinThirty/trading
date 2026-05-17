@@ -95,6 +95,18 @@ EPISODES: dict[str, Episode] = {
         bottom=date(2022, 10, 12),
         walk_end=date(2022, 7, 1),
     ),
+    "2024-meltup": Episode(
+        # False-positive check: 2024 H2 melt-up into Feb 2025 ATH,
+        # then Feb→Apr 2025 tariff drawdown, then recovery. Tests
+        # whether the score fires false alarms in the rip-up phase
+        # and how it responds to the real correction that followed.
+        "2024-meltup",
+        "2024 H2 melt-up / 2025 tariff drawdown",
+        walk_start=date(2024, 7, 1),
+        peak=date(2025, 2, 19),
+        bottom=date(2025, 4, 8),
+        walk_end=date(2025, 6, 30),
+    ),
 }
 
 
