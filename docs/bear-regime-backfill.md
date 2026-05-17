@@ -176,9 +176,128 @@ needed.
    for any future backfill. Consider wiring a substitute series (ICE BofA
    direct, or CDX HY proxy) if backfill validation becomes a recurring need.
 
+## Price-action cross-check
+
+The backfill script overlays SPY close / drawdown-from-peak / days-from-peak
+on every weekly snapshot. This validates *what the score was telling you
+while price was actually moving* — not just "did the threshold cross" but
+"what was SPY doing when it did".
+
+### Tier crossing vs drawdown
+
+| Episode | Building cross DD | Defensive cross DD | Max score | Max-score DD | Days max→bottom |
+|---------|-------------------|--------------------|-----------|--------------|-----------------|
+| 2007 H2 | **-8.1%** (67d before peak) | -15.6% (101d after peak) | 6.0 (saturated) | -15.6% | +416d |
+| 2018 Q4 | -5.6% (22d after peak) | never | 4.3 | -17.6% | +3d |
+| 2020 Q1 | -11.3% (13d after peak) | -25.3% (27d after peak) | 6.4 | -25.3% | +6d |
+| 2022 H1 | **-2.0%** (2d after peak) | never | 5.0 | -2.0% | +280d |
+
+### What the price overlay reveals
+
+**Building tier fires at small drawdowns and is the actionable signal.**
+Across all four episodes Building fired between -2% and -11% from peak:
+
+- 2007 fired *before the peak* at -8% from a prior high (caught the
+  deteriorating internals during the topping process)
+- 2022 fired at the actual peak with SPY -2% — *the cleanest top-tick of
+  the four*, beating any human framework
+- 2020 fired at -11%, 20 days before the COVID bottom
+- 2018 fired at -5.6%, 73 days before the December low
+
+This validates "Building = pause new entries" as a real-money signal —
+the score is calling regime change while there's still room to act, not
+in the rear-view.
+
+**Defensive tier is coincident with capitulation, not leading.** When
+Defensive fires it's typically in the meat of the crash, not before:
+
+- 2008: fired at -15.6% (Jan 2008), then SPY went to -49% (additional
+  -33pp damage). Useful lead, but actionable months earlier from Building.
+- 2020: fired at -25.3%, just **6 days before the actual bottom**. By the
+  time Defensive triggered, most of the COVID move was done.
+- 2018 / 2022: never fired despite -19.8% drawdowns. The composite needs
+  panic vol or multi-dim convergence to escalate past Building; slow
+  bears don't supply that.
+
+**Read:** Defensive is the "this is bad now" gate, not the "this will get
+worse" gate. The lead-time value is at Building; Defensive justifies the
+heavier playbook actions (hedge ramp, trim plan) once they're already
+warranted by price action.
+
+**Score saturates in real crashes.** The 2007/2008 walk is the most
+striking: score sat at 6.0 (Defensive) continuously from January 2008
+through year-end at *every* drawdown level from -15% to -49%. There's no
+information past Defensive in a sustained crash because Curve + Vol +
+Technicals are all already firing at max — additional price damage
+doesn't add new dimensions. Implication: **don't expect the score to
+"keep going up" as the bear deepens** — once it hits Defensive in a real
+crisis, the signal is sticky-flat, not progressive.
+
+**Grind-down bears whipsaw the score.** 2022 is the canonical failure
+mode: Building fired 2 days after the January peak (a perfect top-tick
+signal), then *decayed* through the actual bear. By June, with SPY at
+-21% and still 105 days from the eventual October bottom, the score
+was back to 3.6 (Watchful). The grind-down regime doesn't generate the
+panic vol or breadth capitulation that escalates the composite — so the
+score *de-escalates* even while price continues lower. Implication:
+**once Building fires in a grind-down setup, the right action is to
+maintain posture even if the score decays** — the absence of a Defensive
+re-print isn't an all-clear, it's the regime not having a vol spike.
+
+### Additional drawdown after tier cross (forward-return proxy)
+
+| Episode | Future DD from Building cross | Future DD from Defensive cross |
+|---------|-------------------------------|---------------------------------|
+| 2007 H2 | -41pp (-8% → -49%) | -33pp (-16% → -49%) |
+| 2018 Q4 | -14pp (-6% → -20%) | n/a |
+| 2020 Q1 | -23pp (-11% → -34%) | -9pp (-25% → -34%) |
+| 2022 H1 | -23pp* (-2% → -25% by Oct) | n/a |
+
+\*2022 Building cross to October 2022 bottom, beyond the walk window.
+
+**Average additional drawdown after Building cross: ~25pp.** This is the
+empirical "what does Building actually predict" answer — historically,
+selling rallies or pausing accumulation at Building has avoided a further
+~25% of downside on average across these four episodes. Smallest was
+2018's -14pp; largest was 2007's -41pp.
+
+**Average additional drawdown after Defensive cross: ~21pp** (only 2007
+and 2020 fired). Skewed by 2007's -33pp; 2020 was only -9pp because the
+crash was nearly over. Treat Defensive as confirmation-of-bear, not
+forward predictor.
+
+## Practical decision rules — updated from cross-check
+
+1. **Building cross = act.** Across all 4 episodes, Building fired at a
+   drawdown where meaningful action was still possible (-2% to -11% from
+   peak) and historically avoided ~25pp of further downside. The 1-week
+   persistence rule still applies for whipsaws, but treat persistent
+   Building as a real decision checkpoint, not a yellow flag.
+2. **Defensive cross = execute hedge ramp + trim, but don't expect to
+   sell the top.** Defensive historically fires in the meat of the crash
+   (sometimes within days of the bottom). The action is right (trim,
+   raise hedge); the timing expectation should be "limit further damage"
+   not "exit at favorable prices".
+3. **Score saturation ≠ regime topping.** If the score sits flat at
+   6.0-7.0 for weeks while price continues lower, that's the composite
+   maxing out — not a sign the bear is exhausted. Use price action and
+   the `/hedge` Trigger 2 (vol Crisis) gate for capitulation timing, not
+   the composite level.
+4. **Score decay in grind-down bears ≠ all-clear.** If Building fires
+   and then the score decays back to Watchful while SPY is still
+   trending down, hold the Building-tier playbook actions in place. The
+   absence of vol/breadth re-print doesn't reset the regime — it's just
+   a slow-bear pattern the composite under-weights.
+5. **Crisis tier at the new 7.0 threshold:** in this backfill, only 2020
+   would have crossed 7.0 (with ERP wired) and only momentarily. Treat
+   Crisis as confirmation-the-hedge-program-should-be-firing rather than
+   an independent gate.
+
 ## Per-episode walks (raw output)
 
 Run `uv run --package trading-mcp python packages/trading-mcp/scripts/backfill_bear_regime.py`
-to regenerate. Per-snapshot table is in the script's stdout; for the most
-recent dated capture, see git history (this doc is updated when weights
-change, not on every script run).
+to regenerate. Per-snapshot tables now include SPY close, drawdown from
+peak, and days-from-peak columns; each episode ends with a
+"Price-action alignment" summary. For the most recent dated capture, see
+git history (this doc is updated when weights change or new findings land,
+not on every script run).

@@ -546,22 +546,61 @@ def find_tier_crossings(rows: list[tuple[date, float, str, list]]) -> dict[str, 
     return seen
 
 
-def format_episode_report(episode: Episode, rows: list[tuple[date, float, str, list]]) -> str:
+def _close_on_or_before(bars: DatedBars, target: date) -> tuple[date | None, float | None]:
+    """SPY (or other ETF) close on `target` if it's a trading day; otherwise the
+    closest prior trading day's close. Returns (resolved_date, close) or (None, None)."""
+    if not bars.dates:
+        return None, None
+    idx = bisect_right(bars.dates, target)
+    if idx == 0:
+        return None, None
+    return bars.dates[idx - 1], bars.closes[idx - 1]
+
+
+def format_episode_report(
+    episode: Episode,
+    rows: list[tuple[date, float, str, list]],
+    spy_bars: DatedBars,
+) -> str:
+    _, peak_close = _close_on_or_before(spy_bars, episode.peak)
+    _, bottom_close = _close_on_or_before(spy_bars, episode.bottom)
+
     lines = [
         f"## {episode.name}",
         "",
         f"- Walk window: {episode.walk_start} → {episode.walk_end}",
         f"- Peak: {episode.peak} | Bottom: {episode.bottom}",
-        "",
-        "| Date       | Score | Tier      | Top contributors |",
-        "|------------|-------|-----------|-------------------|",
     ]
+    if peak_close is not None:
+        lines.append(f"- SPY peak: ${peak_close:.2f}")
+    if bottom_close is not None and peak_close is not None:
+        total_dd = (bottom_close / peak_close - 1) * 100
+        lines.append(f"- SPY bottom: ${bottom_close:.2f} ({total_dd:+.1f}% from peak)")
+    lines.extend(
+        [
+            "",
+            "| Date       | Score | Tier      | SPY     | DD vs peak | Days from peak | Top contributors |",  # noqa: E501
+            "|------------|-------|-----------|---------|------------|----------------|-------------------|",  # noqa: E501
+        ]
+    )
     for asof, score, tier, top in rows:
         if top:
             contrib = ", ".join(f"{c.name} {c.score:.1f}" for c in top[:3])
         else:
             contrib = "(none)"
-        lines.append(f"| {asof.isoformat()} | {score:4.1f}  | {tier:<9} | {contrib} |")
+        _, spy_close = _close_on_or_before(spy_bars, asof)
+        if spy_close is not None and peak_close is not None:
+            spy_str = f"${spy_close:.2f}"
+            dd_str = f"{(spy_close / peak_close - 1) * 100:+.1f}%"
+        else:
+            spy_str = "—"
+            dd_str = "—"
+        dfp = (asof - episode.peak).days
+        dfp_str = f"{dfp:+d}d"
+        lines.append(
+            f"| {asof.isoformat()} | {score:4.1f}  | {tier:<9} | {spy_str:>7} | "
+            f"{dd_str:>10} | {dfp_str:>14} | {contrib} |"
+        )
 
     crossings = find_tier_crossings(rows)
     lines.extend(["", "**Tier crossings:**"])
@@ -579,6 +618,64 @@ def format_episode_report(episode: Episode, rows: list[tuple[date, float, str, l
             lines.append(f"- **{tier}** first reached {d} ({ctx})")
         else:
             lines.append(f"- **{tier}** not reached during walk")
+
+    lines.append(format_alignment_summary(episode, rows, spy_bars, peak_close, bottom_close))
+    return "\n".join(lines)
+
+
+def format_alignment_summary(
+    episode: Episode,
+    rows: list[tuple[date, float, str, list]],
+    spy_bars: DatedBars,
+    peak_close: float | None,
+    bottom_close: float | None,
+) -> str:
+    if peak_close is None or not rows:
+        return "\n_SPY price data unavailable; skipping alignment summary._"
+
+    lines = ["", "**Price-action alignment:**", ""]
+    crossings = find_tier_crossings(rows)
+    for tier in ("Building", "Defensive", "Crisis"):
+        if tier not in crossings:
+            lines.append(f"- {tier}: not reached")
+            continue
+        d = crossings[tier]
+        _, close = _close_on_or_before(spy_bars, d)
+        if close is None:
+            continue
+        dd_at = (close / peak_close - 1) * 100
+        days_to_bottom = (episode.bottom - d).days
+        days_from_peak = (d - episode.peak).days
+        lines.append(
+            f"- **{tier} fired** {d}: SPY ${close:.2f} ({dd_at:+.1f}% from peak), "
+            f"{days_from_peak:+d}d from peak, {days_to_bottom:+d}d to bottom"
+        )
+
+    max_row = max(rows, key=lambda r: r[1])
+    max_asof, max_score, max_tier, _ = max_row
+    _, max_close = _close_on_or_before(spy_bars, max_asof)
+    if max_close is not None:
+        dd_at_max = (max_close / peak_close - 1) * 100
+        days_max_to_bottom = (episode.bottom - max_asof).days
+        lines.append(
+            f"- **Max score** {max_score:.1f} ({max_tier}) on {max_asof}: "
+            f"SPY ${max_close:.2f} ({dd_at_max:+.1f}%), {days_max_to_bottom:+d}d to bottom"
+        )
+
+    bottom_snapshot = None
+    for r in rows:
+        if r[0] <= episode.bottom:
+            bottom_snapshot = r
+        else:
+            break
+    if bottom_snapshot is not None and bottom_close is not None:
+        bs_date, bs_score, bs_tier, _ = bottom_snapshot
+        days_to_bottom = (episode.bottom - bs_date).days
+        lines.append(
+            f"- **At/near bottom** ({bs_date}, {days_to_bottom}d before bottom): "
+            f"score {bs_score:.1f} — {bs_tier}"
+        )
+
     return "\n".join(lines)
 
 
@@ -613,7 +710,7 @@ async def run_episodes(episode_keys: list[str]) -> None:
             )
             print(f"[walk] {episode.name} ...", flush=True)
             rows = walk_episode(episode, inputs)
-            outputs.append(format_episode_report(episode, rows))
+            outputs.append(format_episode_report(episode, rows, inputs.spy))
             outputs.append("")
         print("\n".join(outputs))
     finally:

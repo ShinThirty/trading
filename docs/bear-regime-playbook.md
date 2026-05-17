@@ -113,6 +113,12 @@ v1 weights are educated guesses. Phase 4 + Phase 5 progress:
 
 Tier transitions remain **soft signals** — re-pull `get_market_regime` and `get_equity_risk_premium` to confirm before any irreversible action. The backfill validates that Building+1-week-persistence is the right action trigger; Watchful alone is too whipsawy to act on. Use the new persistence note to validate "is this regime sticky or noise?" — a Watchful reading that has held for ≥14 days is meaningfully different from one that just crossed.
 
+**Price-action cross-check (2026-05-16, see `bear-regime-backfill.md` for full tables):**
+- Building fires across all 4 episodes at -2% to -11% drawdown — historically avoids ~25pp of further downside on average. Real action signal.
+- Defensive fires coincident with capitulation (e.g. 2020 at -25%, just 6 days before the bottom), not as a forward lead. Right action; timing expectation is "limit further damage" not "sell the top".
+- Score **saturates flat** in real crashes (2008 sat at 6.0 from Jan→Dec 2008 across the entire -15% to -49% drawdown range). Don't expect monotonic ramp as a bear deepens.
+- Score **decays in grind-down bears** (2022: Building fired at the peak then drifted back to Watchful while SPY went -25%). De-escalation ≠ all-clear; hold Building-tier playbook actions in place even if the score drops.
+
 ## Companion reads
 
 - [decision-framework.md](decision-framework.md) — Step 2 Read the Signals integration
