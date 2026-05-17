@@ -835,9 +835,15 @@ async def get_market_regime(ctx: Context) -> str:
       (CFTC COT 52w z-score across SPX, NDX, VIX, 10Y, Gold, WTI; contrarian
       polarity — crowded long = bearish-forward, crowded short = squeeze risk).
     - Policy: Hold Priced / Cut Priced / Hike Priced / Cut Bias / Hike Bias /
-      Uncertain — Polymarket's next-FOMC outcome probabilities aggregated into
-      hold/cut/hike buckets. Tells you what's already priced so directional
-      bets can be benchmarked against consensus.
+      Uncertain — path-aware classifier built from three Polymarket event
+      classes under the `fed` tag:
+        1. "Fed Decision in <month>?" — next-meeting hold/cut/hike (headline)
+        2. "Fed rate hike by ...?" / "...cut by..." — cumulative path by month
+        3. "What will the Fed rate be at the end of <year>?" — year-end mode
+      When the next meeting is Hold Priced, the label adds a tail qualifier
+      ("Hawkish Tail" / "Dovish Tail" / "Balanced Tails") whenever the
+      cumulative rails diverge by ≥10pp. Detail string surfaces the latest
+      hike-by / cut-by readings and the year-end modal rate.
     - ⚠ Extended (verdict=Expansion only): fires when 2+ of RSI>70,
       sector dispersion>25pp 30d, SPY 5d>+3% — mean-reversion warning,
       not a verdict change
@@ -891,10 +897,13 @@ async def get_market_regime(ctx: Context) -> str:
         tasks.append(cftc_client.get(cftc.REPORTS[report_key], cftc.GetCotRequest(pattern)))
 
     fed_events_idx = len(tasks)
+    # limit=40 keeps room for both per-meeting and calendar-rollup events
+    # (`Fed rate hike by ...?`, `Fed rate cut by ...?`, year-end rate distribution)
+    # under the same `fed` tag.
     tasks.append(
         polymarket_client.get(
             polymarket.LIST_EVENTS_BY_TAG,
-            polymarket.ListEventsByTagRequest(tag_slug="fed", limit=20),
+            polymarket.ListEventsByTagRequest(tag_slug="fed", limit=40),
         )
     )
 
@@ -1073,22 +1082,56 @@ async def get_market_regime(ctx: Context) -> str:
             )
             data["⚠ Positioning"] = f"{label} — strong contrarian signal ({note})"
 
-    # Policy — next FOMC implied probabilities from Polymarket. We pull all
-    # tagged Fed events and pick the earliest "Fed Decision in <month>?" by
-    # end date, since that's the one with hold/cut/hike outcome structure.
+    # Policy — path-aware classifier. We pull all fed-tagged Polymarket events
+    # and feed three classes into synthesize_policy_path:
+    #   1. "Fed Decision in <month>?"            — next-meeting hold/cut/hike
+    #   2. "Fed rate hike by ...?" / "...cut..." — cumulative path by month
+    #   3. "What will the Fed rate be at the end of <year>?" — year-end dist.
+    # The headline label adds a tail qualifier (Hawkish/Dovish/Balanced) when
+    # the next meeting is Hold Priced but the cumulative rails diverge.
     fed_events_resp = _ok(fed_events_idx)
     next_fomc = None
+    hike_by_event = None
+    cut_by_event = None
+    year_end_event = None
     if fed_events_resp is not None and fed_events_resp.events:
-        candidates = [
-            e for e in fed_events_resp.events if e.title.lower().startswith("fed decision in ")
-        ]
-        candidates.sort(key=lambda e: e.end_date or "9999-99-99")
-        if candidates:
-            next_fomc = candidates[0]
+        per_meeting_candidates = []
+        for ev in fed_events_resp.events:
+            tl = ev.title.lower()
+            if tl.startswith("fed decision in "):
+                per_meeting_candidates.append(ev)
+            elif tl.startswith("fed rate hike by"):
+                hike_by_event = ev
+            elif tl.startswith("fed rate cut by"):
+                cut_by_event = ev
+            elif tl.startswith("what will the fed rate be at the end of"):
+                year_end_event = ev
+        per_meeting_candidates.sort(key=lambda e: e.end_date or "9999-99-99")
+        if per_meeting_candidates:
+            next_fomc = per_meeting_candidates[0]
     if next_fomc is not None and next_fomc.outcomes:
-        outcome_pairs = [(o.label, o.implied_prob) for o in next_fomc.outcomes]
-        label, detail = regime.classify_policy(outcome_pairs)
-        labels["policy"] = label
+        next_pairs = [(o.label, o.implied_prob) for o in next_fomc.outcomes]
+        hike_pairs = (
+            [(o.label, o.implied_prob) for o in hike_by_event.outcomes]
+            if hike_by_event
+            else None
+        )
+        cut_pairs = (
+            [(o.label, o.implied_prob) for o in cut_by_event.outcomes]
+            if cut_by_event
+            else None
+        )
+        ye_pairs = (
+            [(o.label, o.implied_prob) for o in year_end_event.outcomes]
+            if year_end_event
+            else None
+        )
+        label, detail = regime.synthesize_policy_path(
+            next_pairs, hike_pairs, cut_pairs, ye_pairs
+        )
+        # Surface only the base label (without tail qualifier) to the verdict
+        # synthesizer; the tail nuance lives in the detail string for humans.
+        labels["policy"] = label.split(" — ")[0]
         meta = (
             f" — {next_fomc.title}, resolves {next_fomc.end_date}"
             if next_fomc.end_date
