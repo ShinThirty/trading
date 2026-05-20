@@ -238,16 +238,18 @@ See [bearish-framework.md](bearish-framework.md) for the full bearish analysis p
 
 ## Intent: Hedge (existing positions)
 
+See [protective-put-collar-playbook.md](protective-put-collar-playbook.md) for the full single-name framework: intent matrix, the "sizing is the cheapest hedge" gate, strike/expiry selection by intent, collar variations (net-debit / zero-cost / net-credit), and management rules. For portfolio-level structural tail hedging (deep OTM index puts), see [tail-hedge-playbook.md](tail-hedge-playbook.md). This section covers strategy mechanics; the playbooks cover when and why.
+
 **Strategies:**
 
 | Strategy | Mechanics | When to prefer | Capital required |
 |----------|-----------|---------------|-----------------|
-| **Protective put** | Buy put on existing shares | Direct insurance | Premium paid |
+| **Protective put** | Buy put on existing shares | Direct insurance on a single name | Premium paid |
 | **Put spread** (as hedge) | Buy put + sell lower put | Cheaper insurance, capped protection | Net debit |
-| **Collar** | Own shares + buy put + sell call | Funded hedge — CC premium pays for put | Net credit/debit |
-| **Index puts** (SPY/QQQ) | Buy OTM puts on broad index | Portfolio-wide protection | Premium paid |
+| **Collar** | Own shares + buy put + sell call | Funded hedge — CC premium offsets put cost | Net credit/debit |
+| **Index puts** (SPY/QQQ) | Buy OTM puts on broad index | Portfolio-wide systemic protection | Premium paid |
 
-**When to use:** Approaching profit target but not ready to sell (tax, thesis intact), macro uncertainty, or willing to cap upside (collar) to fund the hedge.
+**When to use:** Approaching profit target but not ready to sell (tax, thesis intact), bounded catalyst (earnings, FDA, macro print), position grew past sizing cap, or willing to cap upside (collar) to fund the put.
 
 **Binary events (hedge costs most when you need it most):** Pre-earnings IV makes protective puts expensive.
 - **Collar > protective put pre-earnings:** Sold call offsets inflated put cost; pre-earnings IV inflates both sides equally.

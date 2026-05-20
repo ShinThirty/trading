@@ -46,11 +46,13 @@ Exit and management rules by intent. Companion to [decision-framework.md](decisi
 
 ## Hedge
 
-- **Protective put:** Close when the risk that prompted the hedge has passed (macro event resolved, earnings behind you, volatility subsided). Don't let it expire worthless out of inertia — if the threat is gone, reclaim remaining premium.
-- **Collar:** Manage the short call side like a covered call — roll up and out if challenged and you want to keep shares. If shares get called away, the hedge did its job.
-- **Index puts (SPY/QQQ):** Close when portfolio risk is reduced by other means (positions trimmed, cash raised, market regime improves). Roll to next expiry if macro uncertainty persists.
-- **Re-evaluate the hedge every 2 weeks.** Hedges are insurance, not positions — if you're holding a hedge for months, either the risk is real (and you should reduce the underlying position) or the risk has passed (and the hedge is bleeding premium for nothing).
-- **Don't hedge a position you should be exiting.** If the thesis is broken, sell the shares — a protective put on a broken thesis is paying insurance on a house you should be selling.
+See [protective-put-collar-playbook.md](protective-put-collar-playbook.md) for the full single-name hedge framework (intent, strike/expiry, collar variations, management). See [tail-hedge-playbook.md](tail-hedge-playbook.md) for portfolio-level structural index puts. Brief reminders:
+
+- **Protective put:** Close when the threat that prompted it has passed. Don't let it expire worthless out of inertia.
+- **Collar:** Manage both legs together; rolling the call without the put converts the collar into a directional bet.
+- **Index puts (structural):** Only close on a playbook trigger (delta drift, harvest tranches, 30-DTE roll) — never on "nothing is wrong."
+- **Re-evaluate every 2 weeks.** If you're holding a hedge for months, either the risk is real (reduce the underlying position) or the risk has passed (close the hedge).
+- **Don't hedge a position you should be exiting.** A protective put on a broken thesis is paying insurance on a house you should be selling.
 
 ## All strategies
 

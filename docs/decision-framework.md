@@ -96,7 +96,7 @@ Once intent is set and signals are collected, match to the right strategy. See [
 | **Bearish (L3)** | Bear spread (credit or debit per IV) | Bear call spread | Bear put spread |
 | **Hedge** | Protective put / collar | Collar (sell rich calls) | Protective put |
 
-For **portfolio-level tail-risk hedging** (deep OTM index puts as a structural program, not tactical correction protection), see [tail-hedge-playbook.md](tail-hedge-playbook.md).
+For **single-name hedging** (protective puts and collars on positions you own), see [protective-put-collar-playbook.md](protective-put-collar-playbook.md). For **portfolio-level tail-risk hedging** (deep OTM index puts as a structural program, not tactical correction protection), see [tail-hedge-playbook.md](tail-hedge-playbook.md).
 
 **Cross-stock tiebreaker:** When multiple pipeline names share the same intent and conviction tier, compare premium efficiency at a standardized delta to decide who goes first when capital is limited.
 
