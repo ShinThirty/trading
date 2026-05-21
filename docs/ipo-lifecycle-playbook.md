@@ -161,8 +161,14 @@ The lockup's bite is set by holder composition, not share count:
 
 ### 5. Index inclusion
 
-S&P/Nasdaq-100 inclusion forces index-fund buying and is a modest positive technical. It was
-not isolated cleanly in this study; treat it as a known small tailwind, not an entry signal.
+In the 2020–2025 study sample, S&P / Nasdaq-100 inclusion arrived slowly — after the
+standard ~12-month seasoning — landing in Phase 3/4 as a modest positive technical. It was
+not cleanly isolable; for those comps, treat it as a small tailwind, not an entry signal.
+
+**This finding is now time-limited.** The spring-2026 fast-track rules (see the addendum)
+pulled inclusion forward by up to a year — it can now land *inside Phase 2* as a scheduled,
+dated, forced-buyer event large enough to interrupt the premium decay. For any IPO listing
+after May 2026, index inclusion is no longer a footnote — model it as a catalyst with a date.
 
 ---
 
@@ -287,34 +293,68 @@ a fixed-date fade even worse:
   demand (self-stabilizing); a weak one stays locked — the unlock turns pro-cyclical with price.
 - A 30-day partial unlock pushes first supply into Phase 1, smearing the anticipatory-bleed window.
 
+**Index inclusion has been put on a fast track.** Two rule changes, both live in 2026,
+collapse the inclusion timeline the 2020–2025 comps operated under:
+- **Nasdaq-100 "fast entry"** (new, effective 2026-05-01). A newly listed company whose
+  market cap ranks within the **top ~40 NDX constituents (≈ $100B)** is added after just
+  **15 trading days**, on 5 days' notice — waiving the usual ~3-month seasoning and
+  liquidity gates. Built for the SpaceX / OpenAI / Anthropic tier.
+- **S&P Dow Jones Indices "Fast Track IPO Entry."** Waives S&P's standard **12-month
+  observation period** for an IPO large enough to clear the index's regular size minimum
+  (S&P 500 ≈ $20B+). The lower-bar rule — it reaches well below mega-cap scale. *Worked
+  example: CBRS was approved for S&P Fast Track entry effective 2026-05-25 — ~11 days after
+  its IPO, at a ~$60B market cap.*
+
+A fast-tracked IPO acquires a price-insensitive, forced index-fund bid **within weeks of
+listing — inside Phase 1 or early Phase 2**, exactly the window the −40–60% premium-decay
+base rate measures. A forced bid there breaks the "no natural long-term holder base has
+formed yet" mechanic the decay depends on. The floor is not a force field — inclusion is a
+finite, dated buy, not a perpetual bid, and index members fall all the time — but it
+(a) permanently converts a slice of float to price-insensitive holders, removing the
+demand-exhaustion driver of the slow bleed, and (b) injects an exogenous buying spike that
+contaminates any price-structure read of the rollover. **Check a name's fast-track
+eligibility before applying the Phase-2 fade.**
+
 **The mega-cap cohort breaks the comp set.** The empirical study comps were $5–30B. The
 2026 wave is a different scale — SpaceX ~$1.75–2T, OpenAI ~$850B, Anthropic ~$900B,
 Stripe ~$160B, Databricks ~$130B. Four mechanics diverge:
 - **Mature secondary-market price discovery** (years of Forge / EquityZen trading + tender
   offers) → smaller flipper premium → shallower Phase-1 pop and Phase-2 decay — but the
   deal can be priced *at* the inflated last private mark, leaving no cushion.
-- **Index-inclusion forced bid** — Nasdaq-100 within ~15 days, S&P 500 within 12 months
-  (fast-trackable); index funds end up owning ~8–12%. A structural buyer the mid-caps never
+- **Index-inclusion forced bid** — see the fast-track paragraph above; at mega-cap scale
+  index funds end up owning ~8–12% of the float, a structural buyer the mid-cap comps never
   had — a floor that fights Phase-2 decay.
 - **Large retail allocation** (e.g. SpaceX ~30%, much of it to affiliated retail) → a
   stickier, semi-strategic holder base.
 - **Staggered drip lockups** (~2–3% of float per month) → no cliff.
 
-### The mega-cap carve-out — the key boundary
+### The carve-out — index eligibility is the boundary, not market cap
 
-**Do not apply the −40–60% Phase-2 premium-decay base rate to a $100B+ mega-cap IPO.** That
-figure is derived from $5–30B mid-cap AI IPOs and is materially dampened at mega-cap scale
-by the index-inclusion bid and pre-matured private-market pricing. The empirical four-phase
-arc remains the right model for **mid-cap IPOs** (the CBRS tier). For mega-caps, treat the
-decay as present but shallower, expect an index-demand floor, and price the deal against the
-*core cash-generative segment*, not the last private round.
+**The −40–60% Phase-2 premium-decay base rate applies only to an IPO with no near-term
+index-inclusion floor.** That figure is derived from $5–30B mid-cap AI IPOs that listed
+under the *old* seasoning regime, when index inclusion was ~12 months away and Phase 2 ran
+with no structural bid. Two things now lift a name out of the base rate:
+
+- **Mega-cap scale ($100B+)** — dampens the decay through pre-matured private-market pricing
+  *and* a near-immediate index bid. The original carve-out.
+- **Fast-track index eligibility** — dampens it for *any* IPO large enough to be
+  fast-tracked, a far lower bar than mega-cap (CBRS qualified at ~$60B). The forced index
+  bid lands within weeks, inside the decay window.
+
+The question is no longer "is this a mega-cap?" but **"will this name have a forced index
+bid during Phase 2?"** If yes — by scale or by fast-track eligibility — treat the decay as
+present but shallower and non-clean, do not trade the textbook Phase-2 fade off price
+structure alone, and price the deal against the *core cash-generative segment* rather than
+the last private round. The clean four-phase arc and the −40–60% base rate now apply only to
+an IPO that is **both** sub-mega-cap **and** too small or otherwise ineligible for fast-track
+index inclusion.
 
 ### How the four-phase arc shifts in 2026
 
-| Phase | Mid-cap IPO ($5–30B) | Mega-cap IPO ($100B+) |
-|-------|----------------------|------------------------|
-| 1 — Pop & flip | Unchanged | Smaller pop — secondary-market price discovery already happened |
-| 2 — Premium decay | Deeper / noisier (thinner disclosure, momentum-driven); watch for fast follow-ons | Dampened by the index-inclusion floor |
+| Phase | No near-term index floor | Fast-tracked or mega-cap (index floor) |
+|-------|--------------------------|----------------------------------------|
+| 1 — Pop & flip | Unchanged | Mega-cap: smaller pop (secondary-market price discovery already happened). Fast-track inclusion can itself spike Phase 1. |
+| 2 — Premium decay | Deeper / noisier (thinner disclosure, momentum-driven); watch for fast follow-ons | Dampened *and made non-clean* by the forced index bid landing inside the decay window |
 | 3 — Dead zone + lockup | Lockup even more of a non-event; dead zone longer if the name opts into semiannual reporting | Same; staggered drip lockup, no cliff |
 | 4 — Re-rate | Fewer, larger, more binary prints under semiannual reporting | Same; first half-year report may merge with the lockup window |
 
@@ -325,14 +365,23 @@ decay as present but shallower, expect an index-demand floor, and price the deal
    demand-rights dates (a separate insider-selling pathway, often ~6 months post-IPO).
 2. **Watch for follow-on / secondary offerings** as a Phase-1/2 down-catalyst — easier shelf
    access makes a quick dilutive raise into strength more likely.
-3. **For mega-caps, model the index-inclusion timeline** (Nasdaq-100 ~15 days, S&P 500
-   ≤12 months) as a scheduled forced-buyer catalyst.
+3. **Check fast-track index eligibility for every sub-12-month name — not just mega-caps.**
+   Does the market cap clear the S&P 500 size minimum (≈ $20B+) or rank in the NDX top ~40?
+   If so, model the index-inclusion date as a scheduled forced-buyer catalyst, and do not
+   apply the Phase-2 decay fade without accounting for it.
 4. **Check the reporting cadence** — a semiannual-reporting opt-in stretches the catalyst
    calendar and the dead zone.
 
 ---
 
 ## Applying it to CBRS
+
+**Section under re-evaluation (2026-05-21).** S&P DJI approved CBRS for Fast Track index
+entry effective **2026-05-25** (see "Index inclusion has been put on a fast track" in the
+addendum). That installs a forced index-fund bid inside the Phase-2 window and directly
+compromises the Phase-2-decay-fade edge asserted in point 2 below. The points below predate
+that discovery; the CBRS bearish thesis is being re-scoped separately. Treat this section as
+historical until revised.
 
 CBRS (IPO 2026-05-14, priced $185, opened $350 / +89%, day-1 high $386, day-1 close $311;
 ~$278 as of 2026-05-21) is mid-**Phase 1** — the pop is fading but premium decay has not
