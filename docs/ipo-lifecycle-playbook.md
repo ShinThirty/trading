@@ -315,6 +315,16 @@ demand-exhaustion driver of the slow bleed, and (b) injects an exogenous buying 
 contaminates any price-structure read of the rollover. **Check a name's fast-track
 eligibility before applying the Phase-2 fade.**
 
+**The decay is deferred, not deleted — and the deferral feeds the first earnings print.**
+A forced index bid does not repair the business; it suppresses the price discovery the
+Phase-2 bleed would otherwise have done. The stock holds near its flipper-set pop with no
+valuation-sensitive holder base underneath it — index funds own *weight*, they do not
+defend a print — so the first earnings miss meets a price that never built a cushion. The
+−40–60% the slow bleed would have spread over months ~1–5 is not erased; it is deferred and
+concentrated into the Phase-4 gap. For a framework-reject name this makes the first-print
+event trade *more* attractive after a fast-track, not less — and argues for sizing the
+structure for a larger move than the pre-2026 Phase-2-bled base case assumed.
+
 **The mega-cap cohort breaks the comp set.** The empirical study comps were $5–30B. The
 2026 wave is a different scale — SpaceX ~$1.75–2T, OpenAI ~$850B, Anthropic ~$900B,
 Stripe ~$160B, Databricks ~$130B. Four mechanics diverge:
@@ -356,13 +366,20 @@ index inclusion.
 | 1 — Pop & flip | Unchanged | Mega-cap: smaller pop (secondary-market price discovery already happened). Fast-track inclusion can itself spike Phase 1. |
 | 2 — Premium decay | Deeper / noisier (thinner disclosure, momentum-driven); watch for fast follow-ons | Dampened *and made non-clean* by the forced index bid landing inside the decay window |
 | 3 — Dead zone + lockup | Lockup even more of a non-event; dead zone longer if the name opts into semiannual reporting | Same; staggered drip lockup, no cliff |
-| 4 — Re-rate | Fewer, larger, more binary prints under semiannual reporting | Same; first half-year report may merge with the lockup window |
+| 4 — Re-rate | Fewer, larger, more binary prints under semiannual reporting | Same; first half-year report may merge with the lockup window. Suppressed Phase-2 decay is deferred into this print — a deeper air pocket on a miss. |
 
 ### Process additions
 
-1. **Map the actual lockup schedule** from the S-1 / 424B — do not assume a single 180-day
-   date. Note staggered tranches, price-trigger clauses, and registration-rights /
-   demand-rights dates (a separate insider-selling pathway, often ~6 months post-IPO).
+1. **Map the actual lockup schedule — and read its design as a signal.** From the
+   S-1 / 424B, do not assume a single 180-day date: note staggered tranches, price-trigger
+   clauses, and registration-rights / demand-rights dates (a separate insider-selling
+   pathway, often ~6 months post-IPO). Beyond the dates, the *architecture* is information
+   about insider intent — a heavily staggered drip release with price-trigger auto-releases,
+   paired with an aggressive index fast-track, says the deal was engineered for a smooth,
+   invisible exit (a soft bearish tell on the 12-month view); a plain long lockup on a
+   founder / strategic-heavy cap table says the opposite. The more the supply side is built
+   to distribute quietly, the more the earnings print becomes the sole place price discovery
+   actually happens.
 2. **Watch for follow-on / secondary offerings** as a Phase-1/2 down-catalyst — easier shelf
    access makes a quick dilutive raise into strength more likely.
 3. **Check fast-track index eligibility for every sub-12-month name — not just mega-caps.**
@@ -403,8 +420,12 @@ fast-track rule rewrote is *which catalyst to trade*:
 3. **The Q1 print (~Aug 2026) is the sole primary edge.** First public earnings is the real
    binary and is *unaffected* by index membership — S&P 500 names miss and gap down
    routinely. The OpenAI revenue start, the guided gross-margin step-down, the contra-revenue
-   from customer warrants, and concentration disclosure all land at once. Place a
-   defined-risk bearish structure before the print, expiring just after it.
+   from customer warrants, and concentration disclosure all land at once. And the May-25
+   index bid works *for* this leg: by suppressing the Phase-2 bleed that would otherwise have
+   pre-discounted the stock, it likely carries CBRS into the print priced near its pop with
+   no cushion built — the −40–60% decay is deferred into this gap, not avoided. Size the
+   structure for a larger move than a name that had already bled out. Place a defined-risk
+   bearish structure before the print, expiring just after it.
 4. **The inclusion pop is the entry level, not a deterrent.** CBRS ran +7–8% on the
    inclusion news — a Front-Run-Catalyst (decision-framework): for a bearish view the run-up
    is a higher, cheaper entry. The post-inclusion give-back — once the May-25 forced buying
