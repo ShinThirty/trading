@@ -46,6 +46,8 @@ When 2+ conviction inputs score "negative," route to the [Bearish Framework](bea
 
 For **pre-profit IPO candidates** (real revenue, GAAP losses, narrative-heavy story), the standard conviction tiers don't apply cleanly — the Negative-margins-Negative-Cash-Flow scoring routes them to bearish, but the burn may be the *entry condition* not the bear case. Route to the [Pre-Profit Speculative-Growth Framework](pre-profit-growth-framework.md) for unit-economics gating, sizing, and re-evaluation cadence. Default verdict per the framework's bias-to-rejection: better to miss future winners than admit ambiguous-tier names that get sentiment runway but disappoint long-term.
 
+When the trade thesis hinges on an **IPO-mechanics catalyst** — a lockup-expiry fade, a post-IPO momentum unwind, or a first-public-print event trade — see [ipo-lifecycle-playbook.md](ipo-lifecycle-playbook.md) for the data-driven first-year catalyst map and catalyst-specific entry timing. Headline finding: the 180-day lockup expiry is historically a non-event or a relief bottom; the tradeable edges are the Phase-2 premium decay (months ~1–5) and the first one or two earnings prints.
+
 ## Step 2: Read the Signals
 
 **Quick start:** Run `get_entry_signals` for all stock-level signals (conviction, IV, momentum) and circuit breaker detection in one call. Run `get_market_regime` for market-level context. See [market-regime.md](market-regime.md) for how each regime label maps to strategy preferences. Supplement with `get_company_news` for headwinds and `get_expected_move` for vol bets.
