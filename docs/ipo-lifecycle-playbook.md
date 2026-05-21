@@ -376,39 +376,47 @@ index inclusion.
 
 ## Applying it to CBRS
 
-**Section under re-evaluation (2026-05-21).** S&P DJI approved CBRS for Fast Track index
-entry effective **2026-05-25** (see "Index inclusion has been put on a fast track" in the
-addendum). That installs a forced index-fund bid inside the Phase-2 window and directly
-compromises the Phase-2-decay-fade edge asserted in point 2 below. The points below predate
-that discovery; the CBRS bearish thesis is being re-scoped separately. Treat this section as
-historical until revised.
+*Re-scoped 2026-05-21, after S&P DJI approved CBRS for Fast Track index entry — the
+fast-track rules in the addendum changed the trade. (Earlier passes scoped CBRS as a
+lockup-expiry play, then as a Phase-2 decay fade; both are superseded below.)*
 
 CBRS (IPO 2026-05-14, priced $185, opened $350 / +89%, day-1 high $386, day-1 close $311;
-~$278 as of 2026-05-21) is mid-**Phase 1** — the pop is fading but premium decay has not
-begun. The pipeline thesis is a framework-reject bearish lockup-expiry play, currently
-timed off "declining IV." This study materially refines that:
+~$282 as of 2026-05-21) is in **Phase 1** — the pop is fading but premium decay has not
+begun. The framework-reject bearish thesis is intact; what the study and then the index
+fast-track rule rewrote is *which catalyst to trade*:
 
-1. **The lockup date (~2026-11-10) is the wrong event to target.** Buying puts to expire
-   just after the unlock fights the base rate — lockup day is historically a non-event or a
-   relief bottom. If the unlock trade is taken at all, it is a *fade the anticipatory bleed,
-   be flat by the date* trade (≈ late Sept – late Oct 2026), not a hold-through.
-2. **The higher-probability, earlier bearish edge is the Phase-2 premium decay** — the +89%
-   pop retracing 40–60% over roughly June–October 2026. That window opens far sooner than
-   November and does not depend on lockup mechanics.
-3. **The Q1 print (~Aug 2026) is the real binary** — first public earnings, with the OpenAI
-   revenue start, the guided gross-margin step-down, and concentration disclosure all
-   landing at once. A defined-risk bearish structure expiring just after that date is a
-   cleaner catalyst trade than the lockup.
-4. **Holder composition is decisive and currently ambiguous.** MBZUAI (62%) and G42 (24%)
-   are strategic, sovereign-linked holders — the ARM precedent says a strategic-heavy float
-   *defuses* the lockup. The bear case for the unlock therefore rests on the VC backers and
-   founders/employees selling, *and* on CFIUS / export-control pressure converting G42 /
-   MBZUAI into forced sellers. Resolve this before sizing any lockup-specific trade: if
-   G42 / MBZUAI publicly reaffirm long-term-holder intent, the lockup loses most of its teeth.
-5. **IV trajectory:** CBRS IV Index ≈ 98% with IV Rank ≈ 0 / Percentile ≈ 5% — the rank and
-   percentile are meaningless on a 5-day-old stock. Track the **IV Index level trend**, not
+1. **The lockup (~2026-11-10) is dropped.** Lockup day is historically a non-event or a
+   relief bottom, and CBRS's holder base makes the bleed even less likely: MBZUAI (62%) and
+   G42 (24%) are strategic, sovereign-linked holders, and the ARM/SoftBank precedent says a
+   strategic-heavy float *defuses* the unlock. Worse for the bleed thesis, S&P weights by
+   float-adjusted cap — when the lockup frees insider shares, CBRS's investable float jumps
+   and triggers a float-up rebalance that *forces index funds to buy more*. The unlock
+   carries a built-in index-demand offset; it is not a trade.
+2. **The Phase-2 premium-decay fade is compromised — monitored, not traded.** It was the
+   natural primary edge (a +89% pop retracing 40–60% over ~Jun–Oct 2026), but **S&P DJI
+   confirmed CBRS for Fast Track index entry effective 2026-05-25** — at a ~$60B market cap,
+   having cleared the S&P 500 earnings screen on a one-time G42 accounting gain. That
+   installs a forced, price-insensitive index-fund bid *inside* the decay window. Per the
+   carve-out above, the −40–60% base rate no longer applies to a fast-tracked name. The
+   decay may still occur, but not as the clean pattern, and it cannot be traded off price
+   structure — the May-25 inclusion spike contaminates any lower-high / lower-close read.
+3. **The Q1 print (~Aug 2026) is the sole primary edge.** First public earnings is the real
+   binary and is *unaffected* by index membership — S&P 500 names miss and gap down
+   routinely. The OpenAI revenue start, the guided gross-margin step-down, the contra-revenue
+   from customer warrants, and concentration disclosure all land at once. Place a
+   defined-risk bearish structure before the print, expiring just after it.
+4. **The inclusion pop is the entry level, not a deterrent.** CBRS ran +7–8% on the
+   inclusion news — a Front-Run-Catalyst (decision-framework): for a bearish view the run-up
+   is a higher, cheaper entry. The post-inclusion give-back — once the May-25 forced buying
+   and arbitrage front-running exhaust (~late May–June) — is the level to enter the Q1-print
+   structure.
+5. **IV signal:** CBRS IV Index ≈ 98% with IV Rank ≈ 0 / Percentile ≈ 5% — rank and
+   percentile are meaningless on a sub-1-year stock. Track the **IV Index level trend**, not
    the rank, as the entry-timing signal.
 
-**Net:** the strongest CBRS bearish expressions are the Phase-2 decay fade (months 1–4) and
-the Q1-print event trade (~Aug 2026) — not a put position held into the November lockup.
-The lockup is at most a conditional anticipatory-bleed trade, gated on holder composition.
+**Net:** the CBRS bearish trade is the **Q1-print event trade (~Aug 2026)** — a single
+defined-risk structure around the first public earnings. The Phase-2 decay fade is
+monitored, not traded; the November lockup is dropped. The index fast-track did not break
+the *thesis* — the framework-reject business case is intact, and the S&P-qualifying "profit"
+being a one-time gain mildly reinforces it — it broke the clean Phase-2 *timing edge*,
+leaving earnings as the catalyst.
