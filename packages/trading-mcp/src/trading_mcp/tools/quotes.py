@@ -233,6 +233,103 @@ async def get_vwap(
 
 
 @mcp.tool()
+async def get_anchored_vwap(
+    ctx: Context,
+    symbol: str,
+    anchor_date: str,
+    end_date: str | None = None,
+) -> str:
+    """Compute anchored VWAP on daily bars from `anchor_date` forward.
+
+    Acts as the institutional cost-basis level since the anchor — common anchors are
+    IPO day, post-IPO peak, prior earnings, FOMC date, or a CC-write date. Price
+    holding above the AVWAP = institutional buyers in green; below = underwater.
+
+    symbol: ticker (e.g. 'CBRS', 'NVDA').
+    anchor_date: ISO date the anchor starts from (inclusive), e.g. '2026-02-14'.
+    end_date: optional ISO end date; defaults to today.
+
+    Returns latest AVWAP, price vs AVWAP, and an N-bar progression.
+    Requires [tradier] section in ~/.tradingrc.
+    """
+    resp = await _tradier(ctx).get(
+        t.HISTORY, t.GetHistoryRequest(symbol, "daily", anchor_date, end_date)
+    )
+    bars = resp.days
+    if not bars:
+        return f"(no daily data for {symbol} since {anchor_date})"
+
+    norm_bars = [
+        {
+            "high": float(b["high"]),
+            "low": float(b["low"]),
+            "close": float(b["close"]),
+            "volume": float(b.get("volume", 0) or 0),
+            "date": b.get("date", ""),
+        }
+        for b in bars
+    ]
+    avwap_vals = ta.anchored_vwap(norm_bars, 0)
+    if not avwap_vals or avwap_vals[-1] is None:
+        return f"(no volume data for {symbol} since {anchor_date})"
+
+    current_avwap = avwap_vals[-1]
+    last_close = norm_bars[-1]["close"]
+    diff_pct = (last_close - current_avwap) / current_avwap * 100
+    position = "above" if diff_pct > 0 else "below"
+
+    # Count closes above / below AVWAP since anchor
+    above = sum(1 for i, v in enumerate(avwap_vals) if v is not None and norm_bars[i]["close"] > v)
+    below = sum(1 for i, v in enumerate(avwap_vals) if v is not None and norm_bars[i]["close"] < v)
+    total_bars = above + below
+
+    data: dict[str, str] = {
+        "Anchor Date": str(norm_bars[0]["date"]),
+        "Bars Since Anchor": str(len(norm_bars)),
+        "Anchor Close": fmt_number(float(norm_bars[0]["close"])),
+        "Current Close": fmt_number(last_close),
+        "Current AVWAP": fmt_number(current_avwap),
+        "Price vs AVWAP": f"{position} by {abs(diff_pct):.2f}%",
+    }
+    if total_bars > 0:
+        data["Closes Above AVWAP"] = f"{above / total_bars * 100:.0f}% ({above}/{total_bars})"
+
+    rows: list[dict[str, str]] = []
+    sample_count = min(12, len(norm_bars))
+    if sample_count >= len(norm_bars):
+        sampled_idx = list(range(len(norm_bars)))
+    else:
+        step = max(1, (len(norm_bars) - 1) // (sample_count - 1))
+        sampled_idx = list(range(0, len(norm_bars), step))
+        if sampled_idx[-1] != len(norm_bars) - 1:
+            sampled_idx.append(len(norm_bars) - 1)
+
+    for i in sampled_idx:
+        v = avwap_vals[i]
+        if v is None:
+            continue
+        close = norm_bars[i]["close"]
+        rows.append(
+            {
+                "Date": str(norm_bars[i]["date"]),
+                "Close": fmt_number(close),
+                "AVWAP": fmt_number(v),
+                "Diff": f"{(close - v) / v * 100:+.2f}%",
+            }
+        )
+
+    sections = [
+        f"## {symbol} Anchored VWAP from {norm_bars[0]['date']}",
+        "",
+        kv_table(data),
+        "",
+        "### Progression",
+        list_table(rows),
+    ]
+    return "\n".join(sections)
+
+
+@mcp.tool()
 async def get_market_clock(ctx: Context) -> str:
     """Get current market status: whether the market is open, in pre-market, post-market,
     or closed, plus the time of the next state change.
@@ -252,20 +349,26 @@ async def get_technical_indicators(
     """Compute technical indicators from historical price data.
 
     symbol: ticker symbol (e.g. 'AAPL').
-    indicators: list of indicators to compute. Default: all.
+    indicators: list of indicators to compute. Default: sma, ema, rsi, macd, bbands, atr, adx, obv.
       - 'sma' — Simple Moving Average (20 and 50 period)
       - 'ema' — Exponential Moving Average (12 and 26 period)
       - 'rsi' — Relative Strength Index (14 period)
       - 'macd' — MACD line, signal, histogram (12/26/9)
-      - 'bbands' — Bollinger Bands (20 period, 2 std dev)
+      - 'bbands' — Bollinger Bands (20 period, 2 std dev) plus %B and width
       - 'atr' — Average True Range (14 period)
+      - 'adx' — Average Directional Index with +DI/-DI (14 period); trend strength gauge
+      - 'obv' — On-Balance Volume (cumulative signed volume) with 20-bar slope
+      - 'donchian' — 20-day and 55-day Donchian channels (opt-in)
+      - 'mfi' — Money Flow Index, volume-weighted RSI (14 period) (opt-in)
+      - 'stochrsi' — Stochastic RSI %K / %D (14/14/3/3) (opt-in)
+      - 'hv' — Historical (realized) volatility term structure 10d/30d/60d annualized (opt-in)
     period: bar interval — 'daily', 'weekly', or 'monthly'. Default 'daily'.
 
     Returns the latest values for each indicator plus a recent history table.
     Requires [tradier] section in ~/.tradingrc.
     """
     if indicators is None:
-        indicators = ["sma", "ema", "rsi", "macd", "bbands", "atr"]
+        indicators = ["sma", "ema", "rsi", "macd", "bbands", "atr", "adx", "obv"]
 
     resp = await _tradier(ctx).get(t.HISTORY, t.GetHistoryRequest(symbol, period))
     bars = resp.days
@@ -324,7 +427,9 @@ async def get_technical_indicators(
     if "bbands" in indicators:
         upper, middle, lower = ta.bollinger_bands(closes)
         if upper[-1] is not None and middle[-1] is not None and lower[-1] is not None:
-            width = (upper[-1] - lower[-1]) / middle[-1] * 100
+            band_range = upper[-1] - lower[-1]
+            width = band_range / middle[-1] * 100
+            pct_b = (latest_price - lower[-1]) / band_range * 100 if band_range > 0 else 50.0
             if latest_price > upper[-1]:
                 pos = "above upper band"
             elif latest_price < lower[-1]:
@@ -334,7 +439,7 @@ async def get_technical_indicators(
             sections.append(
                 f"**Bollinger(20,2):** upper={upper[-1]:.2f}, "
                 f"mid={middle[-1]:.2f}, lower={lower[-1]:.2f} "
-                f"(width={width:.1f}%, {pos})"
+                f"(width={width:.1f}%, %B={pct_b:.0f}, {pos})"
             )
 
     if "atr" in indicators:
@@ -342,6 +447,95 @@ async def get_technical_indicators(
         if atr_vals[-1] is not None:
             atr_pct = atr_vals[-1] / latest_price * 100
             sections.append(f"**ATR(14):** {atr_vals[-1]:.2f} ({atr_pct:.1f}% of price)")
+
+    if "adx" in indicators:
+        adx_vals, plus_di, minus_di = ta.adx(bars)
+        a, p, m = adx_vals[-1], plus_di[-1], minus_di[-1]
+        if a is not None and p is not None and m is not None:
+            if a < 20:
+                zone = "ranging"
+            elif a < 25:
+                zone = "transitional"
+            elif a < 40:
+                zone = "trending"
+            else:
+                zone = "strong trend"
+            bias = "+DI > -DI (up bias)" if p > m else "-DI > +DI (down bias)"
+            sections.append(f"**ADX(14):** {a:.1f} ({zone}); +DI={p:.1f}, -DI={m:.1f} ({bias})")
+
+    if "obv" in indicators:
+        obv_vals = ta.obv(bars)
+        if obv_vals[-1] is not None and len(obv_vals) >= 21 and obv_vals[-21] is not None:
+            cur = obv_vals[-1]
+            prior = obv_vals[-21]
+            price_prior = closes[-21]
+            obv_chg = cur - prior
+            price_chg_pct = (latest_price - price_prior) / price_prior * 100
+            if obv_chg > 0 and price_chg_pct > 0:
+                tag = "confirming (both up)"
+            elif obv_chg < 0 and price_chg_pct < 0:
+                tag = "confirming (both down)"
+            elif price_chg_pct > 0 and obv_chg <= 0:
+                tag = "bearish divergence (price up, OBV flat/down)"
+            elif price_chg_pct < 0 and obv_chg >= 0:
+                tag = "bullish divergence (price down, OBV up)"
+            else:
+                tag = "mixed"
+            sections.append(
+                f"**OBV:** 20d Δ={obv_chg:+,.0f} vs price {price_chg_pct:+.1f}% — {tag}"
+            )
+
+    if "donchian" in indicators:
+        u20, _, l20 = ta.donchian(bars, 20)
+        u55, _, l55 = ta.donchian(bars, 55)
+        parts: list[str] = []
+        if u20[-1] is not None and l20[-1] is not None:
+            parts.append(
+                f"20d high={u20[-1]:.2f} ({(latest_price - u20[-1]) / u20[-1] * 100:+.1f}%), "
+                f"low={l20[-1]:.2f} ({(latest_price - l20[-1]) / l20[-1] * 100:+.1f}%)"
+            )
+        if u55[-1] is not None and l55[-1] is not None:
+            parts.append(
+                f"55d high={u55[-1]:.2f} ({(latest_price - u55[-1]) / u55[-1] * 100:+.1f}%), "
+                f"low={l55[-1]:.2f} ({(latest_price - l55[-1]) / l55[-1] * 100:+.1f}%)"
+            )
+        if parts:
+            sections.append("**Donchian:** " + "; ".join(parts))
+
+    if "mfi" in indicators:
+        mfi_vals = ta.mfi(bars)
+        if mfi_vals[-1] is not None:
+            v = mfi_vals[-1]
+            zone = "oversold" if v < 20 else "overbought" if v > 80 else "neutral"
+            sections.append(f"**MFI(14):** {v:.1f} ({zone})")
+
+    if "stochrsi" in indicators:
+        k_vals, d_vals = ta.stochastic_rsi(closes)
+        k, d = k_vals[-1], d_vals[-1]
+        if k is not None and d is not None:
+            zone = "oversold" if k < 20 else "overbought" if k > 80 else "neutral"
+            cross = "bull cross" if k > d else "bear cross" if k < d else "flat"
+            sections.append(f"**StochRSI(14,14,3,3):** %K={k:.1f}, %D={d:.1f} ({zone}, {cross})")
+
+    if "hv" in indicators:
+        hv10 = ta.historical_volatility(closes, 10)
+        hv30 = ta.historical_volatility(closes, 30)
+        hv60 = ta.historical_volatility(closes, 60)
+        parts2: list[str] = []
+        if hv10[-1] is not None:
+            parts2.append(f"HV10={hv10[-1]:.1f}%")
+        if hv30[-1] is not None:
+            parts2.append(f"HV30={hv30[-1]:.1f}%")
+        if hv60[-1] is not None:
+            parts2.append(f"HV60={hv60[-1]:.1f}%")
+        if parts2:
+            shape = ""
+            if hv10[-1] is not None and hv30[-1] is not None and hv60[-1] is not None:
+                if hv10[-1] > hv30[-1] > hv60[-1]:
+                    shape = " — realized vol rising"
+                elif hv10[-1] < hv30[-1] < hv60[-1]:
+                    shape = " — realized vol cooling"
+            sections.append("**HV term structure:** " + ", ".join(parts2) + shape)
 
     sections.append("\n### Recent Values")
 
