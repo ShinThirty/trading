@@ -220,6 +220,12 @@ volume-expansion filter. Confirmation forfeits the first leg of the move, but be
 is a slow, low-volume bleed rather than a gap, waiting rarely costs the trade — gap risk
 lives at the first earnings print, not in the decay drift.
 
+**Operationalized in `/ta SYMBOL ipo`** — the IPO mode runs this exact test (counts lower
+highs, identifies the post-IPO range low, checks closes below it) plus the fast-track
+contamination refusal: if an index-inclusion catalyst date sits inside the current Phase-2
+window, the mode declines to issue a fade signal off price structure alone, per the
+addendum carve-out below.
+
 **IV signal nuance for sub-1-year names.** IV Rank and IV Percentile are unreliable before a
 stock has a 52-week IV history — a fresh IPO will read IV Rank ≈ 0 and Percentile in the low
 single digits regardless of how rich IV actually is. **Watch the raw IV Index level and its
@@ -235,6 +241,11 @@ off the level trend.
   (Phase 4). Size in before it only with a fundamental thesis; do not chase the gap.
 - Long options through Phases 2–3 fight both theta and the decay drift. Prefer shares, or
   wait for Phase 4 confirmation.
+
+`/ta SYMBOL ipo` invoked on a bullish-intent name runs the Phase 3 accumulation read instead
+of the rollover test — checks whether the Phase-2 trough has been put in (range-bound at the
+lows for 3+ weeks, IV crushed) and verdicts the accumulation window open or "Phase 2 still
+in progress, wait."
 
 ---
 

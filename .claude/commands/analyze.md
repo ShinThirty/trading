@@ -81,4 +81,4 @@ End with a concise action plan:
 - **Strategy**: [specific strategy with parameters]
 - **Size**: [tier]
 - **Key risk**: [the one thing that could invalidate this trade]
-- **Next step**: [what to do next — e.g., "run get_option_chain for strike selection" or "wait for post-earnings entry"]
+- **Next step**: hand off to **`/ta $ARGUMENTS.symbol`** for entry timing and price levels (default mode), or `/ta $ARGUMENTS.symbol strike <intent> <delta>` to anchor a CSP/CC/put strike at structure. Use the mode-specific variants when applicable: `/ta $ARGUMENTS.symbol tranches` for Accumulate scale-in levels, `/ta $ARGUMENTS.symbol ipo` for sub-12-months-public names, `/ta $ARGUMENTS.symbol roll <strike> <expiry>` for an existing short option. Skip `/ta` only when the strategy needs no price-structure read (e.g., "wait for post-earnings, re-run /analyze then").
