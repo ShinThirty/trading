@@ -43,44 +43,70 @@ def _year_ago(d: date) -> date:
         return d.replace(year=d.year - 1, day=28)
 
 
+def _lc(ctx: Context) -> dict[str, Any]:
+    """Parent server's lifespan dict.
+
+    Reads through ``request_context`` because tools registered on mounted
+    subservers see their own (empty) ``ctx.lifespan_context``. The request
+    context always belongs to the parent (MCP session owner), so its
+    lifespan dict is the one populated by ``server.py:lifespan()``.
+    """
+    rc = ctx.request_context
+    if rc is None:
+        raise RuntimeError("No request context — helper called outside a tool handler")
+    return rc.lifespan_context
+
+
 def _db(ctx: Context) -> sqlite3.Connection:
-    return ctx.lifespan_context["db"]
+    return _lc(ctx)["db"]
 
 
 def _webull(ctx: Context) -> WebullClient:
-    return ctx.lifespan_context["webull"]
+    return _lc(ctx)["webull"]
 
 
 def _tradier(ctx: Context) -> TradierClient:
-    client = ctx.lifespan_context.get("tradier")
+    client = _optional_tradier(ctx)
     if client is None:
         raise RuntimeError("Tradier not configured. Add [tradier] section to ~/.tradingrc")
     return client
 
 
+def _optional_tradier(ctx: Context) -> TradierClient | None:
+    """Tradier client if [tradier] is configured, else None — for callers that
+    can fall back to another provider instead of erroring."""
+    return _lc(ctx).get("tradier")
+
+
 def _finnhub(ctx: Context) -> FinnhubClient:
-    client = ctx.lifespan_context.get("finnhub")
+    client = _lc(ctx).get("finnhub")
     if client is None:
         raise RuntimeError("Finnhub not configured. Add [finnhub] section to ~/.tradingrc")
     return client
 
 
 def _fmp(ctx: Context) -> FmpClient:
-    client = ctx.lifespan_context.get("fmp")
+    client = _optional_fmp(ctx)
     if client is None:
         raise RuntimeError("FMP not configured. Add [fmp] section to ~/.tradingrc")
     return client
 
 
+def _optional_fmp(ctx: Context) -> FmpClient | None:
+    """FMP client if [fmp] is configured, else None — for callers that can
+    fall back to another provider instead of erroring."""
+    return _lc(ctx).get("fmp")
+
+
 def _fred(ctx: Context) -> FredClient:
-    client = ctx.lifespan_context.get("fred")
+    client = _lc(ctx).get("fred")
     if client is None:
         raise RuntimeError("FRED not configured. Add [fred] section to ~/.tradingrc")
     return client
 
 
 def _alphavantage(ctx: Context) -> AlphaVantageClient:
-    client = ctx.lifespan_context.get("alphavantage")
+    client = _lc(ctx).get("alphavantage")
     if client is None:
         raise RuntimeError(
             "Alpha Vantage not configured. Add [alphavantage] section to ~/.tradingrc"
@@ -89,7 +115,7 @@ def _alphavantage(ctx: Context) -> AlphaVantageClient:
 
 
 def _eia(ctx: Context) -> EiaClient:
-    client = ctx.lifespan_context.get("eia")
+    client = _lc(ctx).get("eia")
     if client is None:
         raise RuntimeError(
             "EIA not configured. Add [eia] api_key=... to ~/.tradingrc "
@@ -99,7 +125,7 @@ def _eia(ctx: Context) -> EiaClient:
 
 
 def _tastytrade(ctx: Context) -> TastyTradeClient:
-    client = ctx.lifespan_context.get("tastytrade")
+    client = _optional_tastytrade(ctx)
     if client is None:
         raise RuntimeError(
             "TastyTrade not configured. Add [tastytrade] section to ~/.tradingrc "
@@ -108,89 +134,95 @@ def _tastytrade(ctx: Context) -> TastyTradeClient:
     return client
 
 
+def _optional_tastytrade(ctx: Context) -> TastyTradeClient | None:
+    """TastyTrade client if [tastytrade] is configured, else None — for callers
+    that can fall back to another provider instead of erroring."""
+    return _lc(ctx).get("tastytrade")
+
+
 def _reddit(ctx: Context) -> RedditClient:
-    return ctx.lifespan_context["reddit"]
+    return _lc(ctx)["reddit"]
 
 
 def _fool(ctx: Context) -> FoolClient:
-    return ctx.lifespan_context["fool"]
+    return _lc(ctx)["fool"]
 
 
 def _edgar(ctx: Context) -> EdgarClient:
-    return ctx.lifespan_context["edgar"]
+    return _lc(ctx)["edgar"]
 
 
 def _bls(ctx: Context) -> BlsClient:
-    return ctx.lifespan_context["bls"]
+    return _lc(ctx)["bls"]
 
 
 def _bea(ctx: Context) -> BeaClient:
-    return ctx.lifespan_context["bea"]
+    return _lc(ctx)["bea"]
 
 
 def _fed(ctx: Context) -> FedClient:
-    return ctx.lifespan_context["fed"]
+    return _lc(ctx)["fed"]
 
 
 def _cftc(ctx: Context) -> CftcClient:
-    return ctx.lifespan_context["cftc"]
+    return _lc(ctx)["cftc"]
 
 
 def _polymarket(ctx: Context) -> PolymarketClient:
-    return ctx.lifespan_context["polymarket"]
+    return _lc(ctx)["polymarket"]
 
 
 def _kalshi(ctx: Context) -> KalshiClient:
-    return ctx.lifespan_context["kalshi"]
+    return _lc(ctx)["kalshi"]
 
 
 def _twse(ctx: Context) -> TwseClient:
-    return ctx.lifespan_context["twse"]
+    return _lc(ctx)["twse"]
 
 
 def _treasury(ctx: Context) -> TreasuryClient:
-    return ctx.lifespan_context["treasury"]
+    return _lc(ctx)["treasury"]
 
 
 def _freightos(ctx: Context) -> FreightosClient:
-    return ctx.lifespan_context["freightos"]
+    return _lc(ctx)["freightos"]
 
 
 def _portwatch(ctx: Context) -> PortwatchClient:
-    return ctx.lifespan_context["portwatch"]
+    return _lc(ctx)["portwatch"]
 
 
 def _beige_book(ctx: Context) -> BeigeBookClient:
-    return ctx.lifespan_context["beige_book"]
+    return _lc(ctx)["beige_book"]
 
 
 def _squeeze_metrics(ctx: Context) -> SqueezeMetricsClient:
-    return ctx.lifespan_context["squeeze_metrics"]
+    return _lc(ctx)["squeeze_metrics"]
 
 
 def _naaim(ctx: Context) -> NaaimClient:
-    return ctx.lifespan_context["naaim"]
+    return _lc(ctx)["naaim"]
 
 
 def _factset(ctx: Context) -> FactsetClient:
-    return ctx.lifespan_context["factset"]
+    return _lc(ctx)["factset"]
 
 
 def _sentiment(ctx: Context) -> SentimentClient | None:
     """Optional client. Returns None if Playwright failed to start at lifespan
     init (e.g. browser binary missing) — callers should treat the sentiment
     dimension as unavailable rather than erroring."""
-    return ctx.lifespan_context.get("sentiment")
+    return _lc(ctx).get("sentiment")
 
 
 def _morningstar(ctx: Context) -> MorningstarClient | None:
     """Optional client. Returns None if Playwright failed to start at lifespan
     init — callers should fall back to other transcript sources."""
-    return ctx.lifespan_context.get("morningstar")
+    return _lc(ctx).get("morningstar")
 
 
 async def _check_market(ctx: Context, order_type: str, extended_hours: bool) -> None:
-    tradier = ctx.lifespan_context.get("tradier")
+    tradier = _optional_tradier(ctx)
     if tradier is None:
         return
     clock = await tradier.get(t.CLOCK, t.EmptyRequest())

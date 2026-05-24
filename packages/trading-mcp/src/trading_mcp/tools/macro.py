@@ -32,6 +32,7 @@ from trading_mcp.helpers import (
     _fmp,
     _fred,
     _naaim,
+    _optional_tastytrade,
     _polymarket,
     _result_or_warn,
     _sentiment,
@@ -855,7 +856,7 @@ async def get_market_regime(ctx: Context) -> str:
     """
     fred_client = _fred(ctx)
     tradier = _tradier(ctx)
-    tt_client = ctx.lifespan_context.get("tastytrade")
+    tt_client = _optional_tastytrade(ctx)
     sentiment_client = _sentiment(ctx)
     cftc_client = _cftc(ctx)
     polymarket_client = _polymarket(ctx)
@@ -1112,23 +1113,15 @@ async def get_market_regime(ctx: Context) -> str:
     if next_fomc is not None and next_fomc.outcomes:
         next_pairs = [(o.label, o.implied_prob) for o in next_fomc.outcomes]
         hike_pairs = (
-            [(o.label, o.implied_prob) for o in hike_by_event.outcomes]
-            if hike_by_event
-            else None
+            [(o.label, o.implied_prob) for o in hike_by_event.outcomes] if hike_by_event else None
         )
         cut_pairs = (
-            [(o.label, o.implied_prob) for o in cut_by_event.outcomes]
-            if cut_by_event
-            else None
+            [(o.label, o.implied_prob) for o in cut_by_event.outcomes] if cut_by_event else None
         )
         ye_pairs = (
-            [(o.label, o.implied_prob) for o in year_end_event.outcomes]
-            if year_end_event
-            else None
+            [(o.label, o.implied_prob) for o in year_end_event.outcomes] if year_end_event else None
         )
-        label, detail = regime.synthesize_policy_path(
-            next_pairs, hike_pairs, cut_pairs, ye_pairs
-        )
+        label, detail = regime.synthesize_policy_path(next_pairs, hike_pairs, cut_pairs, ye_pairs)
         # Surface only the base label (without tail qualifier) to the verdict
         # synthesizer; the tail nuance lives in the detail string for humans.
         labels["policy"] = label.split(" — ")[0]

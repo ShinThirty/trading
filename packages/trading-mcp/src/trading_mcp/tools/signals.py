@@ -211,9 +211,7 @@ async def calculate_hedge(
             history_data[key] = r.days
 
     strikes_resp = results[-1]
-    available_strikes = (
-        strikes_resp.strikes if isinstance(strikes_resp, t.StrikesResponse) else []
-    )
+    available_strikes = strikes_resp.strikes if isinstance(strikes_resp, t.StrikesResponse) else []
 
     if not strike:
         target_strike = index_price * 0.95

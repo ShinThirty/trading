@@ -12,7 +12,7 @@ from trading_clients.endpoints import tastytrade as tt
 from trading_clients.endpoints import tradier as t
 from trading_clients.table_helpers import fmt_large, fmt_number, kv_table, list_table, to_float
 
-from trading_mcp.helpers import _finnhub, _fmp
+from trading_mcp.helpers import _finnhub, _fmp, _optional_tastytrade, _optional_tradier
 from trading_mcp.yfinance_helper import _yfc
 
 mcp = FastMCP("fundamentals-tools")
@@ -333,8 +333,8 @@ async def scan_informed_activity(
         )
 
     hit_symbols = list(clustered.keys())
-    tt_client = ctx.lifespan_context.get("tastytrade")
-    tradier_client = ctx.lifespan_context.get("tradier")
+    tt_client = _optional_tastytrade(ctx)
+    tradier_client = _optional_tradier(ctx)
 
     tasks: list = []
     task_labels: list[str] = []

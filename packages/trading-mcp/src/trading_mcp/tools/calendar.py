@@ -8,7 +8,7 @@ from trading_clients.endpoints import finnhub as fh
 from trading_clients.endpoints import tastytrade as tt
 from trading_clients.table_helpers import list_table
 
-from trading_mcp.helpers import _fed, _finnhub, _fmp, _fred
+from trading_mcp.helpers import _fed, _finnhub, _fmp, _fred, _optional_fmp, _optional_tastytrade
 
 mcp = FastMCP("calendar-tools")
 
@@ -56,14 +56,14 @@ async def get_dividend_history(ctx: Context, symbol: str) -> str:
     symbol: ticker symbol (e.g. 'AAPL').
     Requires [fmp] or [tastytrade] section in ~/.tradingrc.
     """
-    fmp_client = ctx.lifespan_context.get("fmp")
+    fmp_client = _optional_fmp(ctx)
     if fmp_client:
         try:
             resp = await fmp_client.get(fmp.DIVIDEND_HISTORY, fmp.SymbolRequest(symbol))
             return resp.to_output()
         except ValueError:
             pass
-    tt_client = ctx.lifespan_context.get("tastytrade")
+    tt_client = _optional_tastytrade(ctx)
     if tt_client:
         resp = await tt_client.get(tt.DIVIDEND_HISTORY, tt.DividendHistoryRequest(symbol))
         return resp.to_output()
