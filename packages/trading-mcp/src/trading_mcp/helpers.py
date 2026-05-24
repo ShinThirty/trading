@@ -1,8 +1,9 @@
 import asyncio
 import sqlite3
 import tempfile
+from collections.abc import Sequence
 from datetime import date
-from typing import Any
+from typing import Any, cast
 
 from fastmcp import Context
 from trading_clients.alphavantage_client import AlphaVantageClient
@@ -219,6 +220,25 @@ async def _retry(fn: Any, *args: Any, retries: int = 2, delay: float = 2, **kwar
                 await asyncio.sleep(delay)
                 continue
             raise
+
+
+def _result_or_warn[T](
+    results: Sequence[Any],
+    idx: int,
+    source: str,
+    warnings: list[str],
+    expected_type: type[T],
+) -> T | None:
+    """Extract results[idx] from an asyncio.gather(..., return_exceptions=True) list.
+
+    On BaseException, append a one-line warning and return None. Otherwise cast
+    to expected_type so heterogeneous-gather callers get a usable static type.
+    """
+    val = results[idx]
+    if isinstance(val, BaseException):
+        warnings.append(_exc_summary(source, val))
+        return None
+    return cast(T, val)
 
 
 def _exc_summary(source: str, exc: BaseException) -> str:

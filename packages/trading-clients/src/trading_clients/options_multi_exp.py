@@ -11,14 +11,14 @@ Single-expiration strategies are handled by options.py.
 from datetime import date
 
 from trading_clients.bsm import bsm_price
-from trading_clients.options import _build_result, _compute_net_premium
+from trading_clients.options import EnrichedLeg, _build_result, _compute_net_premium
 
 # ---------------------------------------------------------------------------
 # Multi-expiration strategy detection
 # ---------------------------------------------------------------------------
 
 
-def detect_multi_exp_strategy(legs: list[dict]) -> str:
+def detect_multi_exp_strategy(legs: list[EnrichedLeg]) -> str:
     """Detect strategy name for legs spanning multiple expirations."""
     n = len(legs)
     expirations = sorted({lg["expiration"] for lg in legs})
@@ -84,7 +84,7 @@ def _days_between(date_str_a: str, date_str_b: str) -> int:
 
 
 def _evaluate_pnl_multi_exp(
-    legs: list[dict],
+    legs: list[EnrichedLeg],
     net_premium: float,
     price_low: float,
     price_high: float,
@@ -164,7 +164,7 @@ def _evaluate_pnl_multi_exp(
 
 
 def analyze_multi_exp_strategy(
-    legs: list[dict],
+    legs: list[EnrichedLeg],
     stock_price: float,
     risk_free_rate: float = 0.0,
 ) -> dict:

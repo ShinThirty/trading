@@ -5,9 +5,30 @@ Operates on option chain dicts (from Tradier) and OHLCV bar data.
 """
 
 from math import exp, log, sqrt
+from typing import TypedDict
 
 from trading_clients.bsm import bsm_price, lognormal_cdf
 from trading_clients.endpoint import CONTRACT_MULTIPLIER
+
+
+class EnrichedLeg(TypedDict):
+    """Multi-leg strategy input. Built by callers (e.g. trading-mcp) by joining
+    user-supplied legs against a Tradier chain so that downstream analyzers can
+    rely on a single typed shape across every leg.
+    """
+
+    strike: float
+    option_type: str  # "call" | "put"
+    side: str  # "buy" | "sell"
+    quantity: int
+    premium: float
+    delta: float | None
+    iv: float | None
+    bid: float | None
+    ask: float | None
+    spread_pct: float | None
+    occ_symbol: str
+    expiration: str
 
 
 def parse_occ(symbol: str) -> tuple[str, str, str, float]:
@@ -199,7 +220,10 @@ def roll_analysis(
         result["debit_budget"] = debit_budget
         result["chain_credits"] = chain_credits
         result["gate1_pass"] = (
-            chain_credits is not None and chain_credits > 0 and debit <= debit_budget
+            chain_credits is not None
+            and chain_credits > 0
+            and debit_budget is not None
+            and debit <= debit_budget
         )
         result["gate2_pass"] = assignment_cost > 0 and debit < assignment_cost
 
@@ -303,7 +327,7 @@ def expected_move(chain: list[dict], stock_price: float) -> dict[str, float | No
 # ---------------------------------------------------------------------------
 
 
-def detect_strategy(legs: list[dict], equity_position: dict | None = None) -> str:
+def detect_strategy(legs: list[EnrichedLeg], equity_position: dict | None = None) -> str:
     """Detect option strategy name from leg structure and equity position."""
     n = len(legs)
 
@@ -416,7 +440,7 @@ def detect_strategy(legs: list[dict], equity_position: dict | None = None) -> st
 # ---------------------------------------------------------------------------
 
 
-def _compute_net_premium(legs: list[dict]) -> float:
+def _compute_net_premium(legs: list[EnrichedLeg]) -> float:
     """Compute net premium from legs. Positive = credit, negative = debit."""
     net = 0.0
     for leg in legs:
@@ -430,7 +454,7 @@ def _compute_net_premium(legs: list[dict]) -> float:
 
 
 def _evaluate_pnl(
-    legs: list[dict],
+    legs: list[EnrichedLeg],
     net_premium: float,
     price_low: float,
     price_high: float,
@@ -491,7 +515,7 @@ def _evaluate_pnl(
     }
 
 
-def _estimate_probability_of_profit(legs: list[dict]) -> float | None:
+def _estimate_probability_of_profit(legs: list[EnrichedLeg]) -> float | None:
     """Approximate probability of profit from delta."""
     short_legs = [lg for lg in legs if lg["side"] == "sell"]
 
@@ -507,7 +531,10 @@ def _estimate_probability_of_profit(legs: list[dict]) -> float | None:
     if short_legs and all(lg.get("delta") is not None for lg in short_legs):
         probs = []
         for leg in short_legs:
-            probs.append(1 - abs(leg["delta"]))
+            delta = leg["delta"]
+            if delta is None:
+                return None
+            probs.append(1 - abs(delta))
         return sum(probs) / len(probs)
 
     return None
@@ -520,7 +547,7 @@ def _estimate_probability_of_profit(legs: list[dict]) -> float | None:
 
 def _build_result(
     strategy_type: str,
-    legs: list[dict],
+    legs: list[EnrichedLeg],
     net_premium: float,
     pnl: dict,
     **extras: float | None,
@@ -544,7 +571,7 @@ def _build_result(
 
 def _analyze_equity_strategy(
     strategy_type: str,
-    legs: list[dict],
+    legs: list[EnrichedLeg],
     stock_price: float,
     equity_position: dict,
 ) -> dict:
@@ -584,7 +611,7 @@ def _analyze_equity_strategy(
 
 def _analyze_defined_risk(
     strategy_type: str,
-    legs: list[dict],
+    legs: list[EnrichedLeg],
     stock_price: float,
 ) -> dict:
     """Analyze defined-risk strategies (verticals, iron condors, butterflies, condors)."""
@@ -600,7 +627,7 @@ def _analyze_defined_risk(
 
 def _analyze_undefined_risk(
     strategy_type: str,
-    legs: list[dict],
+    legs: list[EnrichedLeg],
     stock_price: float,
 ) -> dict:
     """Analyze undefined-risk strategies (CSP, naked call, short straddle/strangle, ratio)."""
@@ -619,7 +646,7 @@ def _analyze_undefined_risk(
 
 def _analyze_long_only(
     strategy_type: str,
-    legs: list[dict],
+    legs: list[EnrichedLeg],
     stock_price: float,
 ) -> dict:
     """Analyze long-only strategies (long call/put, straddle/strangle, backspread)."""
@@ -719,7 +746,7 @@ PROFIT_OUTSIDE_BREAKEVENS = {
 
 
 def lognormal_ev(
-    enriched_legs: list[dict],
+    enriched_legs: list[EnrichedLeg],
     strategy_type: str,
     stock_price: float,
     max_loss: float,
@@ -765,13 +792,16 @@ def lognormal_ev(
     )
     expected_pnl = net_premium * CONTRACT_MULTIPLIER
     for el in enriched_legs:
+        iv = el["iv"]
+        if iv is None:
+            return None
         # Risk-neutral expected payoff at expiration = bsm_price * exp(rT)
         payoff = (
             bsm_price(
                 stock_price=stock_price,
                 strike=el["strike"],
                 tte=tte,
-                iv=el["iv"],
+                iv=iv,
                 option_type=el["option_type"],
                 r=risk_free_rate,
             )
@@ -787,7 +817,7 @@ def lognormal_ev(
 def lognormal_pop(
     strategy_type: str,
     breakevens: list[float],
-    enriched_legs: list[dict],
+    enriched_legs: list[EnrichedLeg],
     stock_price: float,
     dte: int,
     risk_free_rate: float,
@@ -833,7 +863,7 @@ def lognormal_pop(
 
 
 def strategy_analysis(
-    legs: list[dict],
+    legs: list[EnrichedLeg],
     stock_price: float,
     equity_position: dict | None = None,
 ) -> dict:

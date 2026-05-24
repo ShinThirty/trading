@@ -19,6 +19,7 @@ from trading_clients.endpoints import (
 )
 from trading_clients.endpoints import tastytrade as tt
 from trading_clients.endpoints import tradier as t
+from trading_clients.endpoints.factset import FactsetEarningsInsightResponse
 from trading_clients.table_helpers import kv_table, md_table
 
 from trading_mcp.helpers import (
@@ -32,6 +33,7 @@ from trading_mcp.helpers import (
     _fred,
     _naaim,
     _polymarket,
+    _result_or_warn,
     _sentiment,
     _squeeze_metrics,
     _tradier,
@@ -136,12 +138,10 @@ async def get_equity_risk_premium(ctx: Context) -> str:
     )
 
     warnings: list[str] = []
-    fs_resp = results[0] if not isinstance(results[0], BaseException) else None
-    if fs_resp is None:
-        warnings.append(_exc_summary("FactSet Earnings Insight", results[0]))
-    fred_resp = results[1] if not isinstance(results[1], BaseException) else None
-    if fred_resp is None:
-        warnings.append(_exc_summary("FRED DGS10", results[1]))
+    fs_resp = _result_or_warn(
+        results, 0, "FactSet Earnings Insight", warnings, FactsetEarningsInsightResponse
+    )
+    fred_resp = _result_or_warn(results, 1, "FRED DGS10", warnings, fred.ObservationsResponse)
 
     out: list[str] = []
     out.extend(_warnings_section(warnings))
@@ -532,12 +532,14 @@ async def get_jobs_report_texture(ctx: Context) -> str:
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     warnings: list[str] = []
-    bls_resp = results[0] if not isinstance(results[0], BaseException) else None
-    if bls_resp is None:
-        warnings.append(_exc_summary("BLS Employment Situation press release", results[0]))
-    tape_resp = results[1] if not isinstance(results[1], BaseException) else None
-    if tape_resp is None:
-        warnings.append(_exc_summary("Tradier intraday quotes", results[1]))
+    bls_resp = _result_or_warn(
+        results,
+        0,
+        "BLS Employment Situation press release",
+        warnings,
+        bls.EmploymentSituationResponse,
+    )
+    tape_resp = _result_or_warn(results, 1, "Tradier intraday quotes", warnings, t.QuotesResponse)
     obs_by_id = _collect_fred_obs(results, series_specs, 2, warnings)
 
     payems = obs_by_id.get("PAYEMS", [])
@@ -718,12 +720,10 @@ async def get_cpi_report_texture(ctx: Context) -> str:
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     warnings: list[str] = []
-    bls_resp = results[0] if not isinstance(results[0], BaseException) else None
-    if bls_resp is None:
-        warnings.append(_exc_summary("BLS CPI press release", results[0]))
-    tape_resp = results[1] if not isinstance(results[1], BaseException) else None
-    if tape_resp is None:
-        warnings.append(_exc_summary("Tradier intraday quotes", results[1]))
+    bls_resp = _result_or_warn(
+        results, 0, "BLS CPI press release", warnings, bls.CpiReleaseResponse
+    )
+    tape_resp = _result_or_warn(results, 1, "Tradier intraday quotes", warnings, t.QuotesResponse)
     obs_by_id = _collect_fred_obs(results, series_specs, 2, warnings)
 
     headline = obs_by_id.get("CPIAUCSL", [])
@@ -2012,9 +2012,7 @@ async def get_pce_report_texture(ctx: Context) -> str:
     else:
         bea_resp, bea_warnings = bea_bundle
         warnings.extend(bea_warnings)
-    tape_resp = results[1] if not isinstance(results[1], BaseException) else None
-    if tape_resp is None:
-        warnings.append(_exc_summary("Tradier intraday quotes", results[1]))
+    tape_resp = _result_or_warn(results, 1, "Tradier intraday quotes", warnings, t.QuotesResponse)
     obs_by_id = _collect_fred_obs(results, series_specs, 2, warnings)
 
     pce_pi = obs_by_id.get("PCEPI", [])
@@ -2221,9 +2219,7 @@ async def get_gdp_report_texture(ctx: Context) -> str:
     else:
         bea_resp, bea_warnings = bea_bundle
         warnings.extend(bea_warnings)
-    tape_resp = results[1] if not isinstance(results[1], BaseException) else None
-    if tape_resp is None:
-        warnings.append(_exc_summary("Tradier intraday quotes", results[1]))
+    tape_resp = _result_or_warn(results, 1, "Tradier intraday quotes", warnings, t.QuotesResponse)
     obs_by_id = _collect_fred_obs(results, series_specs, 2, warnings)
 
     real_gdp = obs_by_id.get("A191RL1Q225SBEA", [])

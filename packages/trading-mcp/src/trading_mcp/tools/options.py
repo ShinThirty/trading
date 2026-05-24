@@ -19,6 +19,7 @@ from trading_clients.endpoints.webull import (
     AccountRequest,
     GetOrderHistoryRequest,
 )
+from trading_clients.options import EnrichedLeg
 from trading_clients.table_helpers import fmt_number, kv_table, list_table, to_float, to_float_zero
 from trading_clients.tradier_client import TradierClient
 
@@ -283,7 +284,7 @@ async def analyze_option_strategy(
             return f"(no option chain for {symbol} at {exp_date})"
         chains[exp_date] = chain.options
 
-    enriched_legs = []
+    enriched_legs: list[EnrichedLeg] = []
     for leg in legs:
         strike = float(leg["strike"])
         otype = leg["option_type"]

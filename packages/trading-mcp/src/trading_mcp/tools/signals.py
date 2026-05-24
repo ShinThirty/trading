@@ -207,11 +207,13 @@ async def calculate_hedge(
     history_data: dict[str, list[dict]] = {}
     for i, key in enumerate(history_keys):
         r = results[i]
-        if not isinstance(r, Exception) and hasattr(r, "days"):
+        if isinstance(r, t.HistoryResponse):
             history_data[key] = r.days
 
     strikes_resp = results[-1]
-    available_strikes = strikes_resp.strikes if not isinstance(strikes_resp, Exception) else []
+    available_strikes = (
+        strikes_resp.strikes if isinstance(strikes_resp, t.StrikesResponse) else []
+    )
 
     if not strike:
         target_strike = index_price * 0.95
