@@ -6,22 +6,24 @@ State bundled:
   - ~/.trading/                                    (SQLite DB: pipeline, rolls, decisions, TWSE cache)
   - ~/.claude/projects/.../memory/                 (Claude auto-memory)
 
-Transport: S3.   Encryption: age (passphrase).   Snapshot: sqlite3 .backup.
+Transport: S3.   Encryption: age (passphrase).   Snapshot: sqlite3 backup API.
 
 Usage:
-  scripts/env_sync.py push     Bundle local state, encrypt, upload to S3
-  scripts/env_sync.py pull     Download from S3, decrypt, restore
-  scripts/env_sync.py status   Show local vs remote sync state
+  uv run scripts/env_sync.py push     Bundle local state, encrypt, upload to S3
+  uv run scripts/env_sync.py pull     Download from S3, decrypt, restore
+  uv run scripts/env_sync.py status   Show local vs remote sync state
 
 One-time setup:
-  pacman -S age           # or: brew install age
+  pacman -S age           # Linux: pacman / apt / dnf
+                          # macOS:    brew install age
+                          # Windows:  scoop install age   (or winget install FiloSottile.age)
   (S3 bucket is hardcoded in S3_URI below — edit if migrating accounts)
 
 Workflow:
-  Before leaving the desktop:  scripts/env_sync.py push
+  Before leaving the desktop:  uv run scripts/env_sync.py push
   On the laptop (first time):  clone repo, install age + aws + uv, then pull
   On the laptop (each visit):  stop MCP server, then pull
-  Before leaving the laptop:   scripts/env_sync.py push
+  Before leaving the laptop:   uv run scripts/env_sync.py push
   Back at the desktop:         stop MCP server, then pull
 
 Safety:
@@ -29,8 +31,8 @@ Safety:
     since your last sync, preventing accidental overwrite of the other machine
   - pull refuses (unless --force) if local files are newer than your last sync,
     preventing accidental overwrite of unpushed local work
-  - the sqlite snapshot is taken with `sqlite3 .backup`, safe to run while the
-    MCP server is writing to the live DB
+  - the sqlite snapshot uses Python's built-in online backup API, safe to run
+    while the MCP server is writing to the live DB
   - pull deletes leftover trading.db-wal / trading.db-shm before extracting
     so the restored DB starts clean
 """
@@ -41,11 +43,13 @@ import argparse
 import json
 import shutil
 import socket
+import sqlite3
 import subprocess
 import sys
 import tarfile
 import tempfile
 import time
+from contextlib import closing
 from pathlib import Path
 
 HOME = Path.home()
@@ -55,10 +59,13 @@ TRADING_DB = TRADING_DIR / "trading.db"
 SYNC_MARKER = TRADING_DIR / ".last_sync"
 
 # Claude Code stores per-project memory under ~/.claude/projects/<slug>/memory,
-# where <slug> is the repo's absolute path with `/` → `-`. Derive from this
-# script's location so it works on any machine regardless of where the repo lives.
+# where <slug> is the repo's absolute path with path separators and the Windows
+# drive-letter colon all mapped to `-`. Derive from this script's location so it
+# works on any machine regardless of where the repo lives.
+#   /home/me/trading            → -home-me-trading
+#   D:\Workspaces\me\trading    → D--Workspaces-me-trading
 REPO_DIR = Path(__file__).resolve().parent.parent
-_repo_slug = str(REPO_DIR).replace("/", "-")  # e.g. /home/me/trading → -home-me-trading
+_repo_slug = str(REPO_DIR).replace("\\", "-").replace("/", "-").replace(":", "-")
 MEMORY_DIR = HOME / ".claude" / "projects" / _repo_slug / "memory"
 
 S3_URI = "s3://trading-env-113477077840"
@@ -130,14 +137,11 @@ def confirm(prompt: str) -> bool:
 
 
 def snapshot_sqlite(dst: Path) -> None:
-    """Take an online-safe snapshot of trading.db using sqlite3 .backup."""
+    """Take an online-safe snapshot of trading.db using sqlite3's backup API."""
     if not TRADING_DB.exists():
         return
-    require("sqlite3")
-    subprocess.run(
-        ["sqlite3", str(TRADING_DB), f".backup '{dst}'"],
-        check=True,
-    )
+    with closing(sqlite3.connect(TRADING_DB)) as src, closing(sqlite3.connect(dst)) as bak:
+        src.backup(bak)
 
 
 def cmd_push(args: argparse.Namespace) -> None:
