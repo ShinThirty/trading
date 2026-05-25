@@ -168,7 +168,7 @@ async def save_webull_token(token: str, path: Path = RC_PATH) -> None:
         if not parser.has_section("webull"):
             raise KeyError("[webull] section missing in " + str(path))
         parser.set("webull", "token", token)
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             parser.write(f)
 
     await asyncio.to_thread(_sync_save)
