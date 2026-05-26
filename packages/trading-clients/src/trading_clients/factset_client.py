@@ -1,13 +1,15 @@
 """FactSet Earnings Insight client (httpx, no auth — polite User-Agent).
 
-FactSet publishes the Earnings Insight PDF every Friday afternoon ET at:
+FactSet publishes the Earnings Insight PDF weekly — typically Friday
+afternoon ET, but shifted one or two days earlier during US market holiday
+weeks (e.g., Memorial Day 2026 → Thu May 21). The URL is:
 
   https://advantage.factset.com/hubfs/Website/Resources%20Section/
     Research%20Desk/Earnings%20Insight/EarningsInsight_<MMDDYY>.pdf
 
-The MMDDYY token is the publish-Friday date. We walk back from the request
-date (or today) to find the most-recent Friday whose PDF is live, retrying
-up to 4 weeks back to handle holiday weeks or late publishes.
+The MMDDYY token is the publish date. We walk back day-by-day from the
+request date (or today), skipping weekends, up to 4 weeks back. Brute force
+catches off-schedule publications without needing a US holiday calendar.
 
 This client deliberately doesn't extend BaseClient — the date-walk + binary
 PDF + pdfplumber extraction doesn't fit the single-Endpoint shape, mirroring
@@ -41,20 +43,14 @@ NARRATIVE_PAGES: tuple[int, ...] = (1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15)
 # back-to-back briefing → review session.
 INSIGHT_TTL_SECONDS = 21600
 
-# Walk back at most 4 Fridays. Beyond that, the data is too stale to be useful
-# for a "current earnings season" read; surface the failure instead.
-MAX_FRIDAYS_BACK = 4
+# Walk back at most 4 weeks of weekdays (~20 probes). Beyond that, the data
+# is too stale to be useful for a "current earnings season" read; surface the
+# failure instead.
+MAX_DAYS_BACK = 28
 
 RATE_LIMITS: dict[str, tuple[int, float]] = {
     "default": (3, 1.0),
 }
-
-
-def _most_recent_friday(today: date) -> date:
-    """Return the most-recent Friday on or before `today`."""
-    # weekday(): Mon=0, Fri=4, Sun=6.
-    days_since_friday = (today.weekday() - 4) % 7
-    return today - timedelta(days=days_since_friday)
 
 
 def _filename_for(d: date) -> str:
@@ -88,16 +84,21 @@ class FactsetClient:
     ) -> FactsetEarningsInsightResponse:
         """Fetch + parse the latest available FactSet Earnings Insight PDF.
 
-        If `as_of_date` is None, walks back from today to find the most-recent
-        Friday with a live PDF. Result is cached 6h keyed on the resolved
-        publish date so repeated calls during a session don't re-fetch.
+        If `as_of_date` is None, walks back day-by-day from today (skipping
+        weekends) to find the most-recent weekday with a live PDF. Result is
+        cached 6h keyed on the resolved publish date so repeated calls during
+        a session don't re-fetch.
         """
         anchor = as_of_date or date.today()
         async with self._semaphore:
-            # Walk back up to MAX_FRIDAYS_BACK Fridays to find a live PDF.
-            current = _most_recent_friday(anchor)
+            current = anchor
             last_exc: Exception | None = None
-            for _ in range(MAX_FRIDAYS_BACK):
+            for _ in range(MAX_DAYS_BACK):
+                # Skip Saturday (5) and Sunday (6) — FactSet never publishes on weekends.
+                if current.weekday() >= 5:
+                    current -= timedelta(days=1)
+                    continue
+
                 cache_key = f"factset:insight:{current.isoformat()}"
                 cached = self._cache.get(cache_key, INSIGHT_TTL_SECONDS)
                 if cached is not None:
@@ -108,7 +109,7 @@ class FactsetClient:
                 except httpx.HTTPStatusError as e:
                     if e.response.status_code == 404:
                         last_exc = e
-                        current -= timedelta(days=7)
+                        current -= timedelta(days=1)
                         continue
                     raise
                 pages_text = _extract_pages(pdf_bytes)
@@ -116,8 +117,8 @@ class FactsetClient:
                 self._cache.put(cache_key, parsed)
                 return parsed
             raise RuntimeError(
-                f"FactSet Earnings Insight not found in {MAX_FRIDAYS_BACK} Fridays "
-                f"back from {_most_recent_friday(anchor).isoformat()}: {last_exc}"
+                f"FactSet Earnings Insight not found in {MAX_DAYS_BACK} days "
+                f"back from {anchor.isoformat()}: {last_exc}"
             )
 
     async def _fetch_pdf(self, publish_date: date) -> bytes:
