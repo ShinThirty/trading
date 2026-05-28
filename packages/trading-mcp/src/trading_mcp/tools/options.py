@@ -201,6 +201,200 @@ async def get_expected_move(ctx: Context, symbol: str, expiration: str) -> str:
     return f"## {symbol} Expected Move ({expiration})\n\n{kv_table(data)}"
 
 
+# TODO(positioning-trend): Tradier exposes OI only as a live snapshot, not as a
+# series — so we can't see OI accumulating into a print. Add a scheduled task
+# that writes daily positioning rows (Vol P/C, OI P/C, Δ-Skew per expiration)
+# for every pipeline ticker into ~/.trading/trading.db, then extend this tool
+# with a `lookback_days` param that renders a trend column alongside today's
+# snapshot. Build after the 2026-05-28 software basket validates the playbook;
+# reuses the trading-alerts EventBridge harness. See conversation 2026-05-27
+# for the design discussion (Path B).
+@mcp.tool()
+async def get_options_positioning(
+    ctx: Context,
+    symbol: str,
+    expiration: str | None = None,
+    dte_max: int = 60,
+    atm_band_pct: float = 2.0,
+) -> str:
+    """Read single-name put/call positioning from the option chain.
+
+    Aggregates volume and open interest across all strikes within a DTE window
+    (or one specific expiration) and bins them by moneyness (OTM / ATM / ITM).
+    Surfaces three positioning lenses:
+
+      - Volume P/C ratio (today's fresh flow direction)
+      - OI P/C ratio (accumulated positioning by contract count)
+      - Delta-weighted skew (-1 to +1, dealer-book exposure — accounts for
+        moneyness so 5Δ wing OI counts less than ATM OI)
+
+    Plus a 5-tier regime classifier (Concentrated Bull / Tilted Bull / Balanced /
+    Tilted Bear / Concentrated Bear) keyed off delta-skew, and a per-expiration
+    term-structure breakdown that shows whether front-week positioning
+    (event-driven) diverges from back-month positioning (structural).
+
+    symbol: underlying ticker (e.g. 'SNOW').
+    expiration: option expiration date (YYYY-MM-DD). If set, restricts to that
+      single expiration (skips term-structure view). If None, aggregates across
+      all expirations within dte_max.
+    dte_max: maximum days to expiration to include when expiration is None
+      (default 60). Ignored if expiration is set.
+    atm_band_pct: half-width of the ATM band as % of spot (default 2.0).
+
+    Requires [tradier] section in ~/.tradingrc.
+    """
+    tradier = _tradier(ctx)
+
+    today = date.today()
+    if expiration is not None:
+        target_exps = [expiration]
+    else:
+        exp_resp = await tradier.get(t.EXPIRATIONS, t.GetExpirationsRequest(symbol))
+        if not exp_resp.dates:
+            return f"(no expirations for {symbol})"
+        target_exps = [
+            d for d in exp_resp.dates if 1 <= (date.fromisoformat(d) - today).days <= dte_max
+        ]
+        if not target_exps:
+            return f"(no expirations for {symbol} within {dte_max} DTE)"
+
+    quote_resp, *chain_resps = await asyncio.gather(
+        tradier.get(t.QUOTES, t.GetQuotesRequest(symbol, greeks=False)),
+        *[tradier.get(t.CHAIN, t.GetChainRequest(symbol, exp, greeks=True)) for exp in target_exps],
+    )
+
+    if not quote_resp.quotes:
+        return f"(no quote for {symbol})"
+    stock_price = float(quote_resp.quotes[0].get("last") or quote_resp.quotes[0].get("close", 0))
+    if not stock_price:
+        return f"(no usable price for {symbol})"
+
+    per_exp: list[tuple[str, int, dict]] = []
+    for exp, chain_resp in zip(target_exps, chain_resps, strict=True):
+        if not chain_resp.options:
+            continue
+        p = opts.options_positioning(chain_resp.options, stock_price, atm_band_pct)
+        try:
+            dte = (date.fromisoformat(exp) - today).days
+        except ValueError:
+            dte = 0
+        per_exp.append((exp, dte, p))
+
+    if not per_exp:
+        return f"(no option chains for {symbol})"
+
+    if len(per_exp) == 1:
+        agg = per_exp[0][2]
+    else:
+        agg = opts.aggregate_positioning([p for _e, _d, p in per_exp], stock_price, atm_band_pct)
+
+    def _ratio(v: float | int | None) -> str:
+        if v is None:
+            return "n/a"
+        return f"{float(v):.2f}"
+
+    def _skew(v: float | int | None) -> str:
+        if v is None:
+            return "n/a"
+        return f"{float(v):+.2f}"
+
+    def _divergence_tag(vol_pc: float | None, oi_pc: float | None) -> str | None:
+        if vol_pc is None or oi_pc is None or oi_pc <= 0:
+            return None
+        ratio = vol_pc / oi_pc
+        if ratio > 1.3:
+            return "fresh flow tilting put-heavy vs accumulated OI"
+        if ratio < 0.77:
+            return "fresh flow tilting call-heavy vs accumulated OI"
+        return None
+
+    vol_pc = agg["volume_pc_ratio"]
+    oi_pc = agg["oi_pc_ratio"]
+    tier = opts.classify_positioning(agg)
+    divergence = _divergence_tag(vol_pc, oi_pc)
+    read = tier + (f"; {divergence}" if divergence else "")
+
+    if expiration is not None:
+        dte_label = f"{per_exp[0][0]} ({per_exp[0][1]} DTE)"
+    else:
+        dte_label = f"{len(per_exp)} expirations, {per_exp[0][1]}-{per_exp[-1][1]} DTE"
+
+    summary: dict[str, str] = {
+        "Underlying": f"${fmt_number(stock_price)}",
+        "Coverage": dte_label,
+        "Volume P/C": _ratio(vol_pc),
+        "OI P/C": _ratio(oi_pc),
+        "Δ-Skew": _skew(agg["delta_skew"]),
+        "Call Volume / OI": f"{agg['call_volume']:,} / {agg['call_oi']:,}",
+        "Put Volume / OI": f"{agg['put_volume']:,} / {agg['put_oi']:,}",
+        "ATM Band": (
+            f"${fmt_number(agg['band_low'])} – ${fmt_number(agg['band_high'])} "
+            f"(±{atm_band_pct:.1f}%)"
+        ),
+        "Read": read,
+    }
+
+    otm_call_oi = agg["otm_call_oi"]
+    otm_put_oi = agg["otm_put_oi"]
+    if otm_call_oi and otm_put_oi:
+        wing_ratio = float(otm_put_oi) / float(otm_call_oi)
+        if wing_ratio > 2.0:
+            summary["Wing Skew"] = f"{wing_ratio:.2f}x OTM puts vs calls (fat put tail)"
+        elif wing_ratio < 0.5:
+            summary["Wing Skew"] = f"{1 / wing_ratio:.2f}x OTM calls vs puts (fat call tail)"
+        else:
+            summary["Wing Skew"] = f"{wing_ratio:.2f}x OTM puts/calls (balanced)"
+
+    bin_rows = [
+        {
+            "Bin": "OTM",
+            "Call Vol": f"{agg['otm_call_vol']:,}",
+            "Call OI": f"{agg['otm_call_oi']:,}",
+            "Put Vol": f"{agg['otm_put_vol']:,}",
+            "Put OI": f"{agg['otm_put_oi']:,}",
+        },
+        {
+            "Bin": "ATM",
+            "Call Vol": f"{agg['atm_call_vol']:,}",
+            "Call OI": f"{agg['atm_call_oi']:,}",
+            "Put Vol": f"{agg['atm_put_vol']:,}",
+            "Put OI": f"{agg['atm_put_oi']:,}",
+        },
+        {
+            "Bin": "ITM",
+            "Call Vol": f"{agg['itm_call_vol']:,}",
+            "Call OI": f"{agg['itm_call_oi']:,}",
+            "Put Vol": f"{agg['itm_put_vol']:,}",
+            "Put OI": f"{agg['itm_put_oi']:,}",
+        },
+    ]
+
+    sections = [
+        f"## {symbol.upper()} Options Positioning",
+        "",
+        kv_table(summary),
+        "",
+        "### Volume / OI by Moneyness",
+        list_table(bin_rows),
+    ]
+
+    if len(per_exp) > 1:
+        term_rows = [
+            {
+                "Expiration": exp,
+                "DTE": str(dte),
+                "Vol P/C": _ratio(p["volume_pc_ratio"]),
+                "OI P/C": _ratio(p["oi_pc_ratio"]),
+                "Δ-Skew": _skew(p["delta_skew"]),
+                "Tier": opts.classify_positioning(p),
+            }
+            for exp, dte, p in per_exp
+        ]
+        sections.extend(["", "### Term Structure", list_table(term_rows)])
+
+    return "\n".join(sections)
+
+
 # ── Strategy + roll analysis ────────────────────────────────
 
 

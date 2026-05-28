@@ -322,6 +322,213 @@ def expected_move(chain: list[dict], stock_price: float) -> dict[str, float | No
     }
 
 
+_POSITIONING_BIN_KEYS = [
+    "call_volume",
+    "put_volume",
+    "call_oi",
+    "put_oi",
+    "otm_call_vol",
+    "atm_call_vol",
+    "itm_call_vol",
+    "otm_put_vol",
+    "atm_put_vol",
+    "itm_put_vol",
+    "otm_call_oi",
+    "atm_call_oi",
+    "itm_call_oi",
+    "otm_put_oi",
+    "atm_put_oi",
+    "itm_put_oi",
+]
+
+
+def options_positioning(
+    chain: list[dict],
+    stock_price: float,
+    atm_band_pct: float = 2.0,
+) -> dict[str, float | int | None]:
+    """Aggregate single-name put/call positioning metrics from an option chain.
+
+    Sums volume and open interest across calls and puts and bins each contract by
+    moneyness relative to the underlying spot:
+      - OTM: puts with strike < spot*(1-band); calls with strike > spot*(1+band)
+      - ATM: strikes within ±band% of spot
+      - ITM: puts with strike > spot*(1+band); calls with strike < spot*(1-band)
+
+    When chain entries include 'greeks' with a 'delta' value, also computes
+    delta-weighted skew: (Σ call_OI·call_delta − Σ put_OI·|put_delta|) / total_OI.
+    Range -1 to +1. Captures both count and moneyness — 5Δ wing OI contributes
+    far less than ATM OI, so a 0.9 OI P/C with all OI at the wings reads as
+    balanced (delta_skew ~0) rather than tilted.
+
+    Returns a dict with: call_volume, put_volume, call_oi, put_oi, volume_pc_ratio,
+    oi_pc_ratio, six volume bins (otm/atm/itm × call/put), six OI bins, band_low,
+    band_high, delta_skew, call_delta_oi, put_delta_oi. Ratios and skew are None
+    when the underlying counts are zero or greeks are absent.
+    """
+    band = atm_band_pct / 100
+    band_low = stock_price * (1 - band)
+    band_high = stock_price * (1 + band)
+
+    b: dict[str, int] = {k: 0 for k in _POSITIONING_BIN_KEYS}
+    call_delta_oi = 0.0
+    put_delta_oi = 0.0
+    has_greeks = False
+
+    for o in chain:
+        ot = o.get("option_type")
+        if ot not in ("call", "put"):
+            continue
+        strike = o.get("strike")
+        if strike is None:
+            continue
+        vol = int(o.get("volume") or 0)
+        oi = int(o.get("open_interest") or 0)
+
+        if ot == "call":
+            b["call_volume"] += vol
+            b["call_oi"] += oi
+            if strike < band_low:
+                b["itm_call_vol"] += vol
+                b["itm_call_oi"] += oi
+            elif strike > band_high:
+                b["otm_call_vol"] += vol
+                b["otm_call_oi"] += oi
+            else:
+                b["atm_call_vol"] += vol
+                b["atm_call_oi"] += oi
+        else:
+            b["put_volume"] += vol
+            b["put_oi"] += oi
+            if strike > band_high:
+                b["itm_put_vol"] += vol
+                b["itm_put_oi"] += oi
+            elif strike < band_low:
+                b["otm_put_vol"] += vol
+                b["otm_put_oi"] += oi
+            else:
+                b["atm_put_vol"] += vol
+                b["atm_put_oi"] += oi
+
+        if oi > 0:
+            greeks = o.get("greeks") or {}
+            delta = greeks.get("delta")
+            if delta is not None:
+                has_greeks = True
+                if ot == "call":
+                    call_delta_oi += oi * float(delta)
+                else:
+                    put_delta_oi += oi * abs(float(delta))
+
+    vol_pc: float | None = b["put_volume"] / b["call_volume"] if b["call_volume"] > 0 else None
+    oi_pc: float | None = b["put_oi"] / b["call_oi"] if b["call_oi"] > 0 else None
+
+    total_oi = b["call_oi"] + b["put_oi"]
+    delta_skew: float | None
+    if has_greeks and total_oi > 0:
+        delta_skew = (call_delta_oi - put_delta_oi) / total_oi
+    else:
+        delta_skew = None
+
+    out: dict[str, float | int | None] = dict(b)
+    out["volume_pc_ratio"] = vol_pc
+    out["oi_pc_ratio"] = oi_pc
+    out["band_low"] = band_low
+    out["band_high"] = band_high
+    out["delta_skew"] = delta_skew
+    out["call_delta_oi"] = call_delta_oi if has_greeks else None
+    out["put_delta_oi"] = put_delta_oi if has_greeks else None
+    return out
+
+
+def aggregate_positioning(
+    per_exp: list[dict[str, float | int | None]],
+    stock_price: float,
+    atm_band_pct: float = 2.0,
+) -> dict[str, float | int | None]:
+    """Sum bin counts across per-expiration positioning dicts and recompute ratios.
+
+    Used by callers that fetched chains across multiple expirations and want a
+    single roll-up (with the per-expiration views still available separately).
+    """
+    band = atm_band_pct / 100
+    agg: dict[str, int] = {k: 0 for k in _POSITIONING_BIN_KEYS}
+    call_delta_oi = 0.0
+    put_delta_oi = 0.0
+    has_greeks = False
+
+    for p in per_exp:
+        for k in _POSITIONING_BIN_KEYS:
+            v = p.get(k)
+            if v is not None:
+                agg[k] += int(v)
+        if p.get("delta_skew") is not None:
+            has_greeks = True
+            call_delta_oi += float(p.get("call_delta_oi") or 0)
+            put_delta_oi += float(p.get("put_delta_oi") or 0)
+
+    out: dict[str, float | int | None] = dict(agg)
+    out["band_low"] = stock_price * (1 - band)
+    out["band_high"] = stock_price * (1 + band)
+    out["volume_pc_ratio"] = (
+        agg["put_volume"] / agg["call_volume"] if agg["call_volume"] > 0 else None
+    )
+    out["oi_pc_ratio"] = agg["put_oi"] / agg["call_oi"] if agg["call_oi"] > 0 else None
+
+    total_oi = agg["call_oi"] + agg["put_oi"]
+    if has_greeks and total_oi > 0:
+        out["delta_skew"] = (call_delta_oi - put_delta_oi) / total_oi
+        out["call_delta_oi"] = call_delta_oi
+        out["put_delta_oi"] = put_delta_oi
+    else:
+        out["delta_skew"] = None
+        out["call_delta_oi"] = None
+        out["put_delta_oi"] = None
+    return out
+
+
+def classify_positioning(p: dict[str, float | int | None]) -> str:
+    """5-tier regime classifier for a positioning dict from `options_positioning`.
+
+    Primary signal is delta-weighted skew (range -1 to +1) — captures both contract
+    count and moneyness, which a raw OI P/C ratio misses. Falls back to OI P/C when
+    greeks are unavailable.
+
+    Tiers:
+      Concentrated Bull   delta_skew > 0.25 (or oi_pc < 0.5)
+      Tilted Bull         delta_skew > 0.10 (or oi_pc < 0.85)
+      Balanced            otherwise
+      Tilted Bear         delta_skew < -0.10 (or oi_pc > 1.15)
+      Concentrated Bear   delta_skew < -0.25 (or oi_pc > 2.0)
+    """
+    delta_skew = p.get("delta_skew")
+    if delta_skew is not None:
+        ds = float(delta_skew)
+        if ds > 0.25:
+            return "Concentrated Bull"
+        if ds > 0.10:
+            return "Tilted Bull"
+        if ds < -0.25:
+            return "Concentrated Bear"
+        if ds < -0.10:
+            return "Tilted Bear"
+        return "Balanced"
+
+    oi_pc = p.get("oi_pc_ratio")
+    if oi_pc is None:
+        return "Insufficient activity"
+    oi = float(oi_pc)
+    if oi < 0.5:
+        return "Concentrated Bull"
+    if oi < 0.85:
+        return "Tilted Bull"
+    if oi > 2.0:
+        return "Concentrated Bear"
+    if oi > 1.15:
+        return "Tilted Bear"
+    return "Balanced"
+
+
 # ---------------------------------------------------------------------------
 # Strategy detection
 # ---------------------------------------------------------------------------
