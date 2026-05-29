@@ -33,6 +33,7 @@ from trading_clients.treasury_client import TreasuryClient
 from trading_clients.twse_client import TwseClient
 from trading_clients.webull_client import WebullClient
 
+from trading_mcp import server_lock
 from trading_mcp.db import open_db
 from trading_mcp.db.decisions import init_schema as init_decision_schema
 from trading_mcp.db.pipeline import init_schema as init_pipeline_schema
@@ -137,10 +138,14 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
     init_decision_schema(db)
     init_twse_revenue_schema(db)
     ctx["db"] = db
+    # Mark the DB as in-use so scripts/env_sync.py refuses to sync over a live
+    # server (even an idle one a WAL checkpoint wouldn't catch).
+    server_lock.acquire()
     try:
         yield ctx
     finally:
         db.close()
+        server_lock.release()
         for v in ctx.values():
             if hasattr(v, "close") and callable(v.close) and v is not db:
                 await v.close()

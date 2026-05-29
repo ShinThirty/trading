@@ -26,10 +26,10 @@ Bucket safety (set once, server-side):
   Both are pure insurance against bad pushes / accidental deletion.
 
 Workflow:
-  Before leaving the desktop:  uv run scripts/env_sync.py push
+  Before leaving the desktop:  stop MCP server, then push
   On the laptop (first time):  clone repo, install age + aws + uv, then pull
   On the laptop (each visit):  stop MCP server, then pull
-  Before leaving the laptop:   uv run scripts/env_sync.py push
+  Before leaving the laptop:   stop MCP server, then push
   Back at the desktop:         stop MCP server, then pull
 
 Safety:
@@ -39,11 +39,21 @@ Safety:
   - Compare-and-swap: each push uses S3 If-Match against the object's ETag, so
     two machines pushing concurrently can't silently overwrite each other —
     the loser is told to pull first.
+  - Running-server guard: the MCP server writes a PID lockfile
+    (~/.trading/mcp-server.lock, never synced) on startup and removes it on clean
+    exit. push/pull ABORT if that lock names a live process on this host; a lock
+    whose process is gone (crash) is treated as stale and removed. This catches an
+    idle server that a WAL checkpoint alone would miss.
+  - WAL checkpoint before signing: push/pull fold trading.db's WAL into the main
+    file (PRAGMA wal_checkpoint(TRUNCATE)) before computing the signature, so the
+    size+mtime fingerprint can't miss committed-but-un-checkpointed writes. Both
+    also abort if the DB is locked by some other writer. status warns instead of
+    aborting on either condition — it is read-only.
   - Local dirty detection: the marker stores a manifest signature (sha256 of
-    text-file contents + size/mtime of the binary DB file). The signature, not
-    raw mtime, drives the "you have local changes" warning on pull.
-  - sqlite snapshot uses Python's built-in online backup API, safe to run
-    while the MCP server is writing to the live DB.
+    text-file contents + size/mtime of the checkpointed DB file). The signature,
+    not raw mtime, drives the "you have local changes" warning on pull.
+  - sqlite snapshot uses Python's built-in online backup API for a consistent
+    capture of the (now checkpointed) DB.
   - pull deletes leftover trading.db-wal / trading.db-shm before extracting so
     the restored DB starts clean.
 """
@@ -53,6 +63,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import shutil
 import socket
 import sqlite3
@@ -69,6 +80,11 @@ TRADINGRC = HOME / ".tradingrc"
 TRADING_DIR = HOME / ".trading"
 TRADING_DB = TRADING_DIR / "trading.db"
 SYNC_MARKER = TRADING_DIR / ".last_sync"
+# PID lockfile the MCP server writes on startup (trading_mcp/server_lock.py).
+# Never synced — it names a process on one machine. Its presence + a live pid is
+# the authoritative "server is running" signal.
+MCP_LOCK_NAME = "mcp-server.lock"
+MCP_LOCK = TRADING_DIR / MCP_LOCK_NAME
 
 # Claude Code stores per-project memory under ~/.claude/projects/<slug>/memory,
 # where <slug> is the repo's absolute path with path separators and the Windows
@@ -98,7 +114,7 @@ def tracked_files() -> list[Path]:
         files.append(TRADINGRC)
     if TRADING_DIR.exists():
         for p in TRADING_DIR.rglob("*"):
-            if not p.is_file() or p.name == ".last_sync":
+            if not p.is_file() or p.name in {".last_sync", MCP_LOCK_NAME}:
                 continue
             if p.name.endswith(("-wal", "-shm")):
                 continue
@@ -210,6 +226,113 @@ def snapshot_sqlite(dst: Path) -> None:
         src.backup(bak)
 
 
+class DatabaseLockedError(Exception):
+    """trading.db could not be checkpointed because another connection holds it."""
+
+
+def checkpoint_db() -> None:
+    """Fold trading.db's WAL into the main file so size+mtime see every committed write.
+
+    The sync signature fingerprints trading.db by size+mtime (hashing its bytes
+    is expensive and unstable). In WAL mode, committed writes can sit in the -wal
+    file without moving the main file's size/mtime until a checkpoint, so change
+    detection would silently miss them. Checkpointing here closes that gap.
+
+    Raises DatabaseLockedError if the DB is locked, or a TRUNCATE checkpoint can't
+    complete because another connection (typically a running MCP server) is using
+    it — in which case the signature can't be trusted and the caller should stop.
+    """
+    if not TRADING_DB.exists():
+        return
+    try:
+        with closing(sqlite3.connect(TRADING_DB, timeout=2.0)) as conn:
+            busy, _log, _ckpt = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+    except sqlite3.OperationalError as e:
+        raise DatabaseLockedError(f"trading.db is locked: {e}") from e
+    if busy:
+        raise DatabaseLockedError(
+            "trading.db checkpoint was blocked — another connection holds the DB."
+        )
+    # A successful TRUNCATE checkpoint zeroes the WAL; if it has grown back, another
+    # process is actively writing (the MCP server is still running).
+    wal = TRADING_DIR / "trading.db-wal"
+    if wal.exists() and wal.stat().st_size > 0:
+        raise DatabaseLockedError(
+            "trading.db-wal repopulated right after checkpoint — the DB is in use."
+        )
+
+
+def _pid_alive(pid: int) -> bool:
+    """True if a process with this pid currently exists (cross-platform)."""
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        import ctypes
+
+        process_query = 0x1000  # PROCESS_QUERY_LIMITED_INFORMATION
+        still_active = 259  # STILL_ACTIVE
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        handle = kernel32.OpenProcess(process_query, False, pid)
+        if not handle:
+            return False
+        try:
+            code = ctypes.c_ulong()
+            if kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                return code.value == still_active
+            return True
+        finally:
+            kernel32.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # exists, owned by another user
+    return True
+
+
+def running_mcp_server() -> dict | None:
+    """Return the lockfile info if a live MCP server holds the DB on this host.
+
+    Cleans up a stale lockfile (crashed server, or unreadable garbage) as a side
+    effect. A lock whose hostname isn't this machine's is ignored without
+    deletion (it should never be synced, but be defensive).
+    """
+    if not MCP_LOCK.exists():
+        return None
+    try:
+        info = json.loads(MCP_LOCK.read_text())
+        pid = int(info["pid"])
+    except (OSError, ValueError, KeyError, TypeError):
+        MCP_LOCK.unlink(missing_ok=True)
+        return None
+    if info.get("hostname") != socket.gethostname():
+        return None
+    if _pid_alive(pid):
+        return info
+    MCP_LOCK.unlink(missing_ok=True)
+    return None
+
+
+def ensure_db_checkpointed() -> None:
+    """Checkpoint the DB before signing; abort the command if the DB is in use."""
+    server = running_mcp_server()
+    if server:
+        sys.exit(
+            f"MCP server is running (pid {server['pid']} on {server.get('hostname')}, "
+            f"started {server.get('started_at', '?')}). Stop it before syncing.\n"
+            f"Lockfile: {MCP_LOCK}"
+        )
+    try:
+        checkpoint_db()
+    except DatabaseLockedError as e:
+        sys.exit(
+            f"{e}\n"
+            "Stop the MCP server (or whatever holds trading.db open) and retry — its "
+            "WAL must be checkpointed before the sync signature is trustworthy."
+        )
+
+
 def _is_dirty(local_sync_ts: int, local_sig: str | None) -> bool:
     """True if local state differs from the last-sync baseline.
 
@@ -223,6 +346,7 @@ def _is_dirty(local_sync_ts: int, local_sig: str | None) -> bool:
 
 def cmd_push(args: argparse.Namespace) -> None:
     require("age", "aws")
+    ensure_db_checkpointed()
 
     remote = fetch_remote_meta()
     local_sync_ts, _, _ = read_marker()
@@ -251,14 +375,20 @@ def cmd_push(args: argparse.Namespace) -> None:
             staged_trading = staging / ".trading"
             staged_trading.mkdir()
             for p in TRADING_DIR.iterdir():
-                if p.name in {"trading.db", "trading.db-wal", "trading.db-shm", ".last_sync"}:
+                if p.name in {
+                    "trading.db",
+                    "trading.db-wal",
+                    "trading.db-shm",
+                    ".last_sync",
+                    MCP_LOCK_NAME,
+                }:
                     continue
                 if p.is_file():
                     shutil.copy2(p, staged_trading / p.name)
                 elif p.is_dir():
                     shutil.copytree(p, staged_trading / p.name)
             if TRADING_DB.exists():
-                print("Snapshotting trading.db (safe while MCP server is running)...")
+                print("Snapshotting trading.db...")
                 snapshot_sqlite(staged_trading / "trading.db")
 
         # Stage memory dir under a fixed arcname (the source-machine slug would
@@ -320,6 +450,10 @@ def cmd_push(args: argparse.Namespace) -> None:
 
 def cmd_pull(args: argparse.Namespace) -> None:
     require("age", "aws")
+    # Fold the WAL in (and refuse if the MCP server still holds the DB) so the
+    # dirty check below can't miss un-checkpointed local writes and silently
+    # overwrite them.
+    ensure_db_checkpointed()
 
     remote = fetch_remote_meta()
     if not remote:
@@ -337,14 +471,6 @@ def cmd_pull(args: argparse.Namespace) -> None:
     if remote["push_ts"] == local_sync_ts and not args.force:
         print(f"Already in sync with remote (push_ts={remote['push_ts']}).")
         return
-
-    # Refuse if the MCP server appears to be holding the DB open.
-    wal = TRADING_DIR / "trading.db-wal"
-    if wal.exists() and wal.stat().st_size > 0 and not args.force:
-        print("WARNING: trading.db-wal is non-empty — the MCP server may still be running.")
-        print("Stop the MCP server first, or pass --force to proceed (may corrupt the DB).")
-        if not confirm("Continue?"):
-            sys.exit(1)
 
     with tempfile.TemporaryDirectory() as tmp_str:
         tmp = Path(tmp_str)
@@ -401,6 +527,16 @@ def cmd_pull(args: argparse.Namespace) -> None:
 
 
 def cmd_status(_: argparse.Namespace) -> None:
+    # Read-only command: detect a running server / checkpoint best-effort so the
+    # signature is accurate, but only flag (don't abort) if the DB is in use.
+    server = running_mcp_server()
+    db_locked = False
+    if not server:
+        try:
+            checkpoint_db()
+        except DatabaseLockedError:
+            db_locked = True
+
     remote = fetch_remote_meta()
     local_sync_ts, local_sync_host, local_sig = read_marker()
     dirty = _is_dirty(local_sync_ts, local_sig)
@@ -412,6 +548,13 @@ def cmd_status(_: argparse.Namespace) -> None:
     else:
         suffix = " (dirty)" if dirty else ""
         print(f"  Latest mtime: {ts_to_str(latest_local_mtime())}{suffix}")
+    if server:
+        print(
+            f"  DB:           MCP server RUNNING (pid {server['pid']}) — "
+            "local state may be incomplete; stop it before syncing"
+        )
+    elif db_locked:
+        print("  DB:           LOCKED — change detection may miss un-checkpointed writes")
     print()
     print(f"Remote ({S3_URI}):")
     if not remote:
