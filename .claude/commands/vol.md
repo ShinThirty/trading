@@ -110,9 +110,21 @@ Specify:
 | Max per trade | 1% portfolio (premium at risk) |
 | Half size for B grade | 0.5% |
 | Assume total loss possible | ~30-50% of straddles expire inside implied |
-| Exit at the open day after print | Capture IV crush + first hour realized vol — never hold to expiry |
-| Inside-implied move | Close immediately, accept 50-70% loss |
-| Outside-implied move | Ride winning leg 1-2 days max |
+
+### The 9:30 exit decision (do NOT default to "sell at the open")
+
+Sell-at-open is correct only for a **gap-and-stall** print. It destroyed the OKTA 2026-05-29 straddle, whose gap *equalled* the implied move (a scratch at the open) but then trended cleanly to +28% intraday — the entire profit lived in the post-open trend, not the gap. The print before this (PATH 5/29) gapped −8% vs ~15% implied and reverted to green — there the open-sell *saved* the trade. Two prints, opposite right answers. Run the tree, don't reflex-sell.
+
+**At 9:30, measure the realized gap** = (open − pre-print close) / pre-print close, and compare to the **implied move** (straddle debit ÷ spot, ≈ the Step-1 `get_iv_metrics` implied move). Then:
+
+| At 9:30, the print... | Action |
+|---|---|
+| Gapped **inside** implied (\|gap\| < implied move) | **Close immediately.** The move didn't clear; crush + theta erode the rest. Accept 50-70% loss. *(PATH 5/29: −8% gap vs ~15% implied → loss at every width.)* |
+| Gapped **≈ implied** AND stalling / fading off the open | **Sell at the open.** You captured the crush; no continuation juice left. *(Gap-and-fade — the open-sell saves you.)* |
+| Gapped **≈ implied** BUT trending in the gap direction on strong volume, no reversal | **Hold / ride into the morning** (cap 1-2 days). The trend is the trade, not the gap. *(OKTA 5/29: +13.5% gap = straddle scratch → rode to +28% = +107% on the straddle; even one 15-min bar flipped it from scratch to ~+50%.)* |
+| Gapped **>> implied** (already well past the move) | **Lock the win** — sell or trail a stop; the magnitude bet already paid. Optionally ride a clean trend ≤ 1-2 days. |
+
+**Decision logic:** *gap clearing implied* is the go/no-go (inside → close, no exceptions); *momentum after the open* decides ride-vs-sell on everything that cleared. Confirm the trend with intraday tape (`get_timesales`, 15min) before riding. **Never hold to expiry; cap any ride at 1-2 days.** Source lesson: `memory/project_software_vol_mispricing.md` (Exit rules + 5/28 basket reconstruction).
 
 ## Final Output
 
