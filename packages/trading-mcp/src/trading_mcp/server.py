@@ -1,3 +1,4 @@
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -70,6 +71,8 @@ from trading_mcp.tools.squeeze_metrics import mcp as squeeze_metrics_mcp
 from trading_mcp.tools.treasury import mcp as treasury_mcp
 from trading_mcp.tools.tsmc import mcp as tsmc_mcp
 
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
@@ -112,7 +115,16 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
     playwright_host: PlaywrightHost | None = PlaywrightHost()
     try:
         await playwright_host.startup()
-    except Exception:
+    except Exception as e:
+        # Most often a stale browser binary after a Playwright upgrade (the
+        # pinned revision changed) — re-run `playwright install chromium`.
+        # Without Chromium, SentimentClient, MorningstarClient, and Reddit
+        # loid-minting all degrade, so surface it rather than failing silently.
+        logger.warning(
+            "Playwright Chromium failed to launch — sentiment, morningstar, and Reddit "
+            "are degraded. Try `playwright install chromium`. (%s)",
+            e,
+        )
         await playwright_host.close()
         playwright_host = None
 
@@ -121,7 +133,8 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
         try:
             await sentiment.startup()
             ctx["sentiment"] = sentiment
-        except Exception:
+        except Exception as e:
+            logger.warning("SentimentClient failed to start; skipping. (%s)", e)
             await sentiment.close()
         # Morningstar transcript fallback used by get_earnings_transcript when
         # Motley Fool has no transcript for a ticker.
@@ -129,7 +142,8 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
         try:
             await morningstar.startup()
             ctx["morningstar"] = morningstar
-        except Exception:
+        except Exception as e:
+            logger.warning("MorningstarClient failed to start; skipping. (%s)", e)
             await morningstar.close()
     # Reddit needs the shared Chromium only to mint a loid cookie (lazily, on
     # first use) — the .json fetches stay on httpx. Tolerates a None host.
