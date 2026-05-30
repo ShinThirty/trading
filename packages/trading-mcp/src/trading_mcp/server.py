@@ -89,7 +89,6 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
         ctx["eia"] = EiaClient(config.eia)
     if config.tastytrade:
         ctx["tastytrade"] = TastyTradeClient(config.tastytrade)
-    ctx["reddit"] = RedditClient()
     ctx["fool"] = FoolClient()
     ctx["edgar"] = EdgarClient(config.edgar)
     ctx["bls"] = BlsClient()
@@ -132,6 +131,9 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
             ctx["morningstar"] = morningstar
         except Exception:
             await morningstar.close()
+    # Reddit needs the shared Chromium only to mint a loid cookie (lazily, on
+    # first use) — the .json fetches stay on httpx. Tolerates a None host.
+    ctx["reddit"] = RedditClient(playwright_host)
     db = open_db()
     init_pipeline_schema(db)
     init_roll_schema(db)

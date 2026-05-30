@@ -68,7 +68,7 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │       ├── beige_book_client.py     # No auth, identifies via User-Agent (Fed Beige Book)
 │   │       ├── squeeze_metrics_client.py # No auth (SqueezeMetrics public DIX/GEX CSV)
 │   │       ├── naaim_client.py          # No auth (NAAIM since-inception XLSX history)
-│   │       ├── reddit_client.py         # No auth (Reddit JSON API — search, subreddit, post)
+│   │       ├── reddit_client.py         # Reddit JSON API (search, subreddit, post); httpx fetch + Playwright-minted loid cookie (anonymous .json is 403-blocked); takes PlaywrightHost
 │   │       ├── playwright_host.py       # Shared Chromium process (one Browser, many isolated Contexts) used by all Playwright-backed clients
 │   │       ├── sentiment_client.py      # Playwright-based scraper (CBOE p/c, AAII); takes PlaywrightHost
 │   │       ├── bsm.py                   # Black-Scholes-Merton option pricing (pure math, no I/O)
@@ -285,7 +285,7 @@ signature) handles button clicks (`mute:<seconds>:<dedup_key>`) and the
 | **AAII** | Investor sentiment survey bull/neutral/bear (weekly) | None (Playwright, realistic browser context) |
 | **NAAIM** | Active manager equity exposure index — full since-inception history with 52w z-score / percentile (latest entry replaces the prior Playwright scrape) | None (httpx + polite User-Agent; XLSX) |
 | **FactSet** | Earnings Insight weekly PDF (S&P 500 beat rates, surprise magnitudes, blended growth, forward EPS by quarter + CY, forward 12M P/E with 5y/10y context, sector revisions, beat/miss reaction asymmetry). Published Friday afternoon ET. The institutional benchmark for earnings season tone. | None (httpx + polite User-Agent; pdfplumber) |
-| **Reddit** | Subreddit search, hot/top/new listings, and individual post + comments — used for sentiment reading on specific tickers or themes via `search_reddit`, `get_subreddit_posts`, `get_reddit_post` tools | None (JSON API) |
+| **Reddit** | Subreddit search, hot/top/new listings, and individual post + comments — used for sentiment reading on specific tickers or themes via `search_reddit`, `get_subreddit_posts`, `get_reddit_post` tools | None (JSON API; anonymous `.json` is 403-blocked, so httpx rides a `loid` cookie minted once via the shared Playwright Chromium and re-minted on 403) |
 
 ### No Webull SDK
 
