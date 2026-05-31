@@ -113,8 +113,11 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   ├── trading-mcp/                     # MCP server (composed via fastmcp mount)
 │   │   ├── pyproject.toml               # depends on: trading-clients + fastmcp + yfinance
 │   │   └── src/trading_mcp/
-│   │       ├── server.py                # Lifespan, parent FastMCP, mount() calls
+│   │       ├── server.py                # Lifespan, parent FastMCP, mount() calls, dependency middleware
 │   │       ├── helpers.py               # Client extractors, shared helpers (_retry, etc.)
+│   │       ├── dependencies.py          # Dependency enum + DependencyRegistry + middleware:
+│   │       │                            #   tools declare hard deps via meta=depends(Dependency.X); a call
+│   │       │                            #   needing a degraded dep is blocked with a clean ToolError
 │   │       ├── yfinance_helper.py       # Shared yfinance namespace (_yfc) for fundamentals + screens
 │   │       ├── pipeline_sync.py         # Best-effort S3 publish of active pipeline on every mutation
 │   │       ├── db/                      # SQLite database layer (~/.trading/trading.db)

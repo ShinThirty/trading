@@ -10,6 +10,7 @@ from trading_clients.endpoints import alphavantage as av
 from trading_clients.endpoints import finnhub as fh
 from trading_clients.endpoints import reddit as r
 
+from trading_mcp.dependencies import Dependency, depends
 from trading_mcp.helpers import _alphavantage, _finnhub, _reddit
 
 mcp = FastMCP("news-tools")
@@ -76,7 +77,7 @@ def _post_id_from_url(url: str) -> str:
     return url.strip()
 
 
-@mcp.tool()
+@mcp.tool(meta=depends(Dependency.PLAYWRIGHT))
 async def search_reddit(
     ctx: Context,
     query: str,
@@ -107,7 +108,7 @@ async def search_reddit(
     return header + resp.to_output()
 
 
-@mcp.tool()
+@mcp.tool(meta=depends(Dependency.PLAYWRIGHT))
 async def get_subreddit_posts(
     ctx: Context,
     subreddit: str,
@@ -131,7 +132,7 @@ async def get_subreddit_posts(
     return header + resp.to_output(include_subreddit=False)
 
 
-@mcp.tool()
+@mcp.tool(meta=depends(Dependency.PLAYWRIGHT))
 async def get_reddit_post(
     ctx: Context,
     url: str,

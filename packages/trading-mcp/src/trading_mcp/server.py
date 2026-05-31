@@ -40,6 +40,12 @@ from trading_mcp.db.decisions import init_schema as init_decision_schema
 from trading_mcp.db.pipeline import init_schema as init_pipeline_schema
 from trading_mcp.db.rolls import init_schema as init_roll_schema
 from trading_mcp.db.twse_revenue import init_schema as init_twse_revenue_schema
+from trading_mcp.dependencies import (
+    DEPENDENCIES_KEY,
+    Dependency,
+    DependencyMiddleware,
+    DependencyRegistry,
+)
 from trading_mcp.tools.account import mcp as account_mcp
 from trading_mcp.tools.backtest import mcp as backtest_mcp
 from trading_mcp.tools.beige_book import mcp as beige_book_mcp
@@ -77,7 +83,11 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
     config = load_config()
-    ctx: dict[str, Any] = {"webull": WebullClient(config.webull)}
+    deps = DependencyRegistry()
+    ctx: dict[str, Any] = {
+        DEPENDENCIES_KEY: deps,
+        "webull": WebullClient(config.webull),
+    }
     if config.tradier:
         ctx["tradier"] = TradierClient(config.tradier)
     if config.finnhub:
@@ -125,6 +135,10 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
             "are degraded. Try `playwright install chromium`. (%s)",
             e,
         )
+        deps.degrade(
+            Dependency.PLAYWRIGHT,
+            "Chromium isn't available — run `playwright install chromium`.",
+        )
         await playwright_host.close()
         playwright_host = None
 
@@ -171,6 +185,9 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
 
 
 mcp = FastMCP("trading-mcp", lifespan=lifespan)
+
+# Warns (or blocks, per tool meta) when a declared dependency is degraded.
+mcp.add_middleware(DependencyMiddleware())
 
 mcp.mount(account_mcp)
 mcp.mount(orders_mcp)
