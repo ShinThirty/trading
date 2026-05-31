@@ -40,6 +40,7 @@ from trading_mcp.helpers import (
     _tradier,
     _year_ago,
 )
+from trading_mcp.timeouts import timeout
 
 mcp = FastMCP("macro-tools")
 
@@ -801,7 +802,7 @@ async def get_cpi_report_texture(ctx: Context) -> str:
     return "\n".join(out)
 
 
-@mcp.tool()
+@mcp.tool(meta=timeout(180))
 async def get_market_regime(ctx: Context) -> str:
     """Get current market regime classification with a synthesized verdict.
 

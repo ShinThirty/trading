@@ -6,11 +6,12 @@ from fastmcp import Context, FastMCP
 from trading_clients.endpoints import tastytrade as tt
 
 from trading_mcp.helpers import _tastytrade
+from trading_mcp.timeouts import timeout
 
 mcp = FastMCP("backtest-tools")
 
 
-@mcp.tool()
+@mcp.tool(meta=timeout(180))
 async def backtest_strategy(
     ctx: Context,
     symbol: str,

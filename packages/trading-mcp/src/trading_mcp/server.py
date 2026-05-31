@@ -46,6 +46,7 @@ from trading_mcp.dependencies import (
     DependencyMiddleware,
     DependencyRegistry,
 )
+from trading_mcp.timeouts import TimeoutMiddleware
 from trading_mcp.tools.account import mcp as account_mcp
 from trading_mcp.tools.backtest import mcp as backtest_mcp
 from trading_mcp.tools.beige_book import mcp as beige_book_mcp
@@ -185,6 +186,11 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
 
 
 mcp = FastMCP("trading-mcp", lifespan=lifespan)
+
+# Outermost: bounds every tool call to a wall-clock budget (120s default, raised
+# per-tool via meta=timeout(...)) so a wedged provider/scrape returns a clean
+# error instead of hanging the session. Added first ⇒ wraps the dependency check.
+mcp.add_middleware(TimeoutMiddleware())
 
 # Warns (or blocks, per tool meta) when a declared dependency is degraded.
 mcp.add_middleware(DependencyMiddleware())

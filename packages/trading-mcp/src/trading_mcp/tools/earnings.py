@@ -11,12 +11,13 @@ from fastmcp import Context, FastMCP
 from trading_clients.endpoints import edgar as e
 
 from trading_mcp.helpers import _edgar, _exc_summary
+from trading_mcp.timeouts import timeout
 from trading_mcp.tools.transcript_providers import PROVIDERS
 
 mcp = FastMCP("earnings-tools")
 
 
-@mcp.tool()
+@mcp.tool(meta=timeout(180))
 async def get_earnings_transcript(ctx: Context, symbol: str) -> str:
     """Fetch the most recent earnings call transcript for a ticker.
 

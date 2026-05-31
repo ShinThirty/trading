@@ -18,11 +18,12 @@ since the PDF refreshes only on Fridays.
 from fastmcp import Context, FastMCP
 
 from trading_mcp.helpers import _factset
+from trading_mcp.timeouts import timeout
 
 mcp = FastMCP("factset-tools")
 
 
-@mcp.tool()
+@mcp.tool(meta=timeout(180))
 async def get_earnings_season_pulse(ctx: Context) -> str:
     """Get the FactSet Earnings Insight summary — S&P 500 earnings season pulse.
 
