@@ -170,7 +170,7 @@ Do NOT flag on cleared signals, vol normalizing, premium decay, or drawdown anxi
 
 ## Step 3: Pipeline Catalysts
 
-1. Call `pipeline_list` (active entries only).
+1. Call `pipeline_list` (active entries only) and `pipeline_catalyst_list days_ahead=14` in parallel. The catalyst list reads the `pipeline_catalyst_*` table directly (date, type, magnitude, and the description's buy-gate / re-eval conditions); use its rows — not the entry's free-text field — to populate the "next catalyst" column and the flags below.
 
 2. Call `get_iv_metrics` on all pipeline tickers (comma-separated, one call).
 

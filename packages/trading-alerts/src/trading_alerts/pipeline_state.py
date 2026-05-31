@@ -30,7 +30,7 @@ def get_pipeline() -> list[dict[str, Any]]:
     """Return active pipeline entries from S3, cached for container lifetime.
 
     Each entry is a dict carrying ticker / intent / status / pipeline / tier
-    / conviction / priority / earnings_date / thesis / catalysts / watch_items
+    / conviction / priority / earnings_date / thesis / watch_items
     / numeric snapshots. Watchers can filter by any field (e.g. only fire on
     high-conviction names).
 

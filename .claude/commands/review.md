@@ -158,11 +158,11 @@ No triggers + hedge exists → **"Hedge healthy, hold."**
 
 ## 5. PIPELINE REVIEW
 
-1. Call `pipeline_list` with status "active" to get all active pipeline names.
+1. Call `pipeline_list` with status "active" to get all active pipeline names. Also call `pipeline_catalyst_list days_ahead=21` to surface the stored catalysts (with their buy-gate / re-eval conditions) landing in the review window — this reads the `pipeline_catalyst_*` table directly, which the general earnings calendar in item 2 does NOT. Cross-reference: a stored catalyst whose conditions are now met (or whose WAITING entry is ready to activate) is a Section 6 action item.
 
 2. For each pipeline name:
    - Check if conviction has changed — any recent news (`get_company_news`) that shifts thesis?
-   - Check earnings proximity — call `get_earnings_calendar` and flag any reporting in next 2 weeks.
+   - Check earnings proximity — call `get_earnings_calendar` and flag any reporting in next 2 weeks. Reconcile against the stored catalysts from item 1: if the catalyst date and the calendar date disagree, use the later date and note the discrepancy.
    - If actionable (ready for entry), summarize: current intent, last signal check, what's needed to pull the trigger.
 
 3. Prioritize: recommend max 2-3 new entries for the next 2-week period.
