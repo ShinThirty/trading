@@ -2,8 +2,8 @@
   "mcpServers": {
     "trading-mcp": {
       "type": "stdio",
-      "command": "scripts/start-mcp.sh",
-      "args": [],
+      "command": "uv",
+      "args": ["run", "--package", "trading-mcp", "python", "scripts/start_mcp.py"],
       "env": {
         "PIPELINE_STATE_BUCKET": "trading-alerts-state-113477077840",
         "PIPELINE_STATE_KEY": "pipeline.json"
