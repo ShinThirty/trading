@@ -6,11 +6,44 @@ real-world filings fails loudly.
 """
 
 from trading_clients.endpoints.edgar import (
+    FilingIndexResponse,
     RiskItem,
     diff_risk_factor_items,
     extract_section,
     split_risk_factor_items,
 )
+
+# ---------------- find_press_release ----------------
+
+
+def test_find_press_release_abbreviated_form() -> None:
+    """Abbreviated 'ex99' naming (AVGO/OKTA style)."""
+    idx = FilingIndexResponse(
+        files=[
+            "avgo-20260304.htm",
+            "avgo-02012026x8kxex99.htm",
+            "FilingSummary.xml",
+        ]
+    )
+    assert idx.find_press_release() == "avgo-02012026x8kxex99.htm"
+
+
+def test_find_press_release_spelled_out_form() -> None:
+    """Spelled-out 'exhibit99' naming (HPQ/CRM/DELL style) — the regression."""
+    for files, expected in [
+        (["hpq-20260527.htm", "hp43026exhibit991q226.htm"], "hp43026exhibit991q226.htm"),
+        (["crm-20260527.htm", "crm-q1fy27xexhibit991.htm"], "crm-q1fy27xexhibit991.htm"),
+        (["dell-20260528.htm", "exhibit991earnings8kq1fy27.htm"], "exhibit991earnings8kq1fy27.htm"),
+    ]:
+        assert FilingIndexResponse(files=files).find_press_release() == expected
+
+
+def test_find_press_release_skips_xbrl_and_returns_none() -> None:
+    """Instance/XBRL docs must not match; no exhibit -> None."""
+    idx = FilingIndexResponse(
+        files=["hpq-20260527.htm", "hpq-20260527_htm.xml", "R1.htm", "MetaLinks.json"]
+    )
+    assert idx.find_press_release() is None
 
 
 # ---------------- extract_section ----------------

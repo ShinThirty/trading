@@ -227,6 +227,13 @@ class SubmissionsResponse:
         return f"{len(self.filings)} filings"
 
 
+# Press-release exhibit naming varies by filer: abbreviated ('ex-99.1.htm',
+# 'a8-kex991q.htm') or spelled out ('exhibit99.1.htm', 'exhibit991earnings.htm').
+# After stripping separators both collapse to a substring matching ex(hibit)?99.
+# The spelled-out form is now common — matching only 'ex99' silently misses it.
+_PRESS_RELEASE_RE = re.compile(r"ex(?:hibit)?99")
+
+
 @dataclass
 class FilingIndexResponse:
     files: list[str] = field(default_factory=list)
@@ -240,15 +247,17 @@ class FilingIndexResponse:
         return cls(files=[str(i.get("name", "")) for i in items if i.get("name")])
 
     def find_press_release(self) -> str | None:
-        """Press release exhibit follows naming like 'a8-kex991q...htm', 'ex-99.1.htm',
-        'exhibit991.htm'. We normalize separators and look for 'ex99' substring.
+        """Locate the press-release exhibit (Exhibit 99.x) among the filing's files.
+
+        Normalizes separators, then matches either the abbreviated ('ex99') or
+        spelled-out ('exhibit99') naming form via _PRESS_RELEASE_RE.
         """
         for name in self.files:
             lower = name.lower()
             if not lower.endswith((".htm", ".html")):
                 continue
             normalized = lower.replace("-", "").replace("_", "").replace(".", "")
-            if "ex99" in normalized:
+            if _PRESS_RELEASE_RE.search(normalized):
                 return name
         return None
 
