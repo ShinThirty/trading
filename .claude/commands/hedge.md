@@ -17,9 +17,10 @@ For each open SPY/QQQ put:
 
 | Strike depth from spot | Classification | Action |
 |---|---|---|
-| ≥20% OTM | Structural sweet spot | Evaluate per Step 3 |
+| 20-30% OTM | Structural sweet spot | Evaluate per Step 3 |
 | 15-20% OTM | Edge of tail | Evaluate per Step 3; consider rolling deeper at next maintenance window |
-| <15% OTM | **Outside structural definition** | Flag as legacy correction-zone position; recommend rolling to 25% OTM at next maintenance window |
+| <15% OTM | **Outside structural definition (shallow)** | Flag as legacy correction-zone position; recommend rolling to 25% OTM at next maintenance window |
+| >30% OTM | **Drifted out (rally)** | Rally pushed the strike past the sweet spot into black-swan-only territory; if DTE > 45-50, roll up to 25% OTM (Trigger 1, rally side) |
 
 If no structural hedge exists, jump to Step 5 (Recommendation) — the question is whether to commit to running the program, which is governed by playbook's [When to deploy](../../docs/tail-hedge-playbook.md#when-to-deploy), not by signals.
 
@@ -36,7 +37,9 @@ Compute:
 
 | Input | Source | Used by |
 |---|---|---|
-| Put delta | `get_quote greeks=True` | Trigger 1 |
+| Put delta | `get_quote greeks=True` | Trigger 1 (drop side) |
+| Strike depth (% OTM) | (spot − strike) / spot | Trigger 1 (rally side) |
+| Rally from strike anchor | current SPY vs entry/last-roll SPY (`decision_list`) | Trigger 1 (rally side) |
 | VIX retracement from spike high | VIX history | Trigger 1 |
 | Put P&L % | `get_portfolio_summary` | Trigger 1 + 2 |
 | SPY drawdown from recent high | SPY history | Trigger 2 context |
@@ -49,20 +52,22 @@ Regime/signal context from `get_market_regime` is **informational only** at this
 
 Apply in priority order. First match wins. If none fire, **hold the hedge** — that's the answer.
 
-### Trigger 1: Maintenance roll (delta drift)
+### Trigger 1: Maintenance roll (bidirectional drift)
 
-Fires when **both**:
+The put has drifted out of the 20-30% OTM sweet spot. Restore the 25% OTM profile from current SPY. Check **both** directions.
+
+**Drop side (roll down)** — fires when **both**:
 - Put delta in **-0.20 to -0.40** range (was -0.05 at entry; signals ~10-15% SPY drop has moved the put out of tail zone), AND
-- One of:
-  - VIX retraced ≥50% from recent spike high
-  - Known catalyst that drove the move has resolved
-  - Put P&L is in 100-300% range and stalling
+- One of: VIX retraced ≥50% from recent spike high / known catalyst resolved / put P&L 100-300% and stalling
 
-Do NOT roll if:
-- Delta still tighter than -0.15 (move hasn't materialized — give it room)
-- VIX still climbing or holding above 30 (move not done)
-- SPY making new lows daily (Trigger 2 may be coming — let it develop)
-- P&L only 50-100% (premature — let convexity work)
+Do NOT roll down if: delta still tighter than -0.15 (move hasn't materialized), VIX still climbing or above 30 (move not done), SPY making new lows daily (Trigger 2 may be coming), or P&L only 50-100% (premature).
+
+**Rally side (roll up)** — fires when **all three**:
+- Strike depth **> ~30% OTM** (rally pushed the put out of the sweet spot into black-swan-only territory — a -25% crash no longer reaches the strike). **% OTM is the primary trigger, not delta** — delta also decays with time, so it conflates the rally with theta.
+- **DTE > 45-50** (the routine 30-DTE roll won't re-anchor it soon anyway)
+- SPY **≥ ~10%** above the strike's anchor (entry/last-roll SPY)
+
+Do NOT roll up if: routine 30-DTE roll is near (just wait for it), rally <10% (still in-band), or SPY IV Rank >50% (don't overpay to re-anchor — defer to the routine roll). The rally side **costs** premium (vs the drop side, which harvests), so the bar is higher — it's an exception handler for fast melt-ups, not a routine action.
 
 ### Trigger 2: Harvest tranches (real crash in progress)
 
@@ -100,18 +105,19 @@ Run `get_order_history` for the cash account, filter for SPY/QQQ put trades.
 
 ### If a structural hedge exists
 
-**Action: [HOLD / MAINTENANCE ROLL / HARVEST TRANCHE / 30-DTE ROLL]**
+**Action: [HOLD / MAINTENANCE ROLL DOWN / MAINTENANCE ROLL UP / HARVEST TRANCHE / 30-DTE ROLL]**
 
 | Field | Value |
 |---|---|
 | Position | (N contracts at K strike, exp date) |
-| Strike depth | X% OTM (sweet spot / edge of tail / legacy) |
+| Strike depth | X% OTM (sweet spot / edge of tail / legacy-shallow / drifted-out) |
 | Current put delta | -X.XX |
+| Rally from strike anchor | +X.X% |
 | DTE remaining | X |
 | Put P&L % | X% |
 | VIX current vs recent high | X.X / Y.Y (Z% retracement) |
 | SPY drawdown from recent high | -X.X% |
-| Trigger fired | None / Trigger 1 / Trigger 2 [percent] / Trigger 3 |
+| Trigger fired | None / Trigger 1 (down) / Trigger 1 (up) / Trigger 2 [percent] / Trigger 3 |
 | Annual drag YTD | X% (vs 0.5-1.5% target) |
 
 **Rationale:** One sentence — anchored on trigger criteria, NOT on signals or feel.

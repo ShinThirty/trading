@@ -159,7 +159,7 @@ These are what separate a tail program from a tactical trade. Without these, the
 | Rule | Why |
 |---|---|
 | **Roll at 30 DTE remaining** | Captures most of time value before theta acceleration. Don't wait until expiry. |
-| **Don't close on rallies** | "Nothing is wrong" doesn't mean "no risk." That's the entire premise. |
+| **Don't close on rallies** | "Nothing is wrong" doesn't mean "no risk." That's the entire premise. *Closing* (going to zero protection) is not the same as *re-striking up*: a rally that drifts the put past ~30% OTM warrants a maintenance roll-up (Trigger 1, rally side) — close-and-immediate-redeploy, never absent protection. |
 | **Don't close on losses** | Premium decay is the *normal* outcome. Losing the entire premium most of the time is how the program is supposed to work. |
 | **Only close on a rebalancing trigger** | Three valid triggers: maintenance roll (delta drift to -0.20 to -0.40), major harvest (5x+ via tranches), or routine 30-DTE roll. All three are close-and-immediate-redeploy. See Rebalancing the Program. |
 | **Resize at every roll** | Re-run `calculate_hedge` (with `fidelity_folder` + `crisis_multiplier`) before each new contract — the tool reads current NLV/beta, so you never need to track portfolio drift manually. |
@@ -182,11 +182,27 @@ When SPY drops, the original deep-OTM put mutates:
 
 In the 25% → 17% range, the contract is no longer doing the job it was bought for — it's now correction insurance, which the playbook explicitly avoids. In the deep-ITM range, holding exposes you to vol mean-reversion (VIX 80 → 40 in days at the March 2020 nadir, with +9% SPY days during the crash). Either way, the answer is **roll, don't hold and don't exit**.
 
+The mirror case — SPY **rallies** — degrades the contract the other way:
+
+| Metric | At entry (25% OTM) | After SPY +10% (now ~32% OTM) |
+|---|---|---|
+| Delta | -0.05 (tail) | -0.02 (lottery ticket) |
+| Convexity | high (asymmetric payoff was the point) | dead until a far deeper move |
+| Floor coverage | a -25% crash reaches the strike | a -25% crash no longer reaches the strike — only -32%+ pays |
+| Exposure type | Tail insurance | Black-swan-only; the modal crash is now uncovered |
+
+A rally pushes the strike *below* where a -25% crash would land, so the put stops covering the modal crash it was bought for — and the portfolio grew with the rally, so the notional is undersized too. Same answer: **roll up, don't hold and don't exit.** This matters most in a low-volume melt-up, where you want the floor re-anchored *before* the reversal rather than drifted out into black-swan-only territory — but the trigger is mechanical (% OTM), never a call on when the reversal arrives.
+
 ### Three rebalancing triggers (all data-driven, never gut feel)
 
 The `/hedge` skill operationalizes these — this section is the rationale.
 
-**Trigger 1: Maintenance roll** — put delta drifted to -0.20 to -0.40 (was -0.05; indicates ~10-15% SPY drop) AND one of: VIX retraced ≥50% from spike high, catalyst resolved, or P&L 100-300% and stalling. Restores the 25% OTM profile. Do NOT roll if delta still tighter than -0.15, VIX still climbing or above 30, SPY making new lows daily (T2 may be coming), or P&L only 50-100% (premature).
+**Trigger 1: Maintenance roll (bidirectional)** — the put has drifted out of the 20-30% OTM sweet spot in *either* direction; roll to restore the 25% OTM profile from current SPY.
+
+- **Drop side (roll down):** put delta drifted to -0.20 to -0.40 (was -0.05; indicates ~10-15% SPY drop) AND one of: VIX retraced ≥50% from spike high, catalyst resolved, or P&L 100-300% and stalling. Do NOT roll if delta still tighter than -0.15, VIX still climbing or above 30, SPY making new lows daily (T2 may be coming), or P&L only 50-100% (premature).
+- **Rally side (roll up):** the rally has pushed the put past **~30% OTM** (out of the sweet spot into black-swan-only territory — a -25% crash no longer reaches the strike) AND **DTE > 45-50** (the routine 30-DTE roll won't re-anchor it soon) AND SPY is **≥ ~10% above the strike's anchor** (entry/last-roll SPY). The primary trigger is **% OTM, not delta** — delta also decays with time, so it conflates the rally with theta; % OTM isolates the strike drift. Do NOT roll up if the routine 30-DTE roll is near (just wait for it), the rally is <10% (still in-band), or SPY IV Rank >50% (don't overpay to re-anchor — defer to the routine roll).
+
+The two sides are not economically symmetric: the drop side **harvests** an appreciated put (pulls cash out while resetting), the rally side **costs** premium (you sell a near-dead put and buy a closer, pricier one). That's why the rally side carries the higher activation bar — it's an exception handler for fast melt-ups that outrun the roll cycle, not a routine action. In a normal grind-up the routine 30-DTE roll re-anchors the strike for free.
 
 **Trigger 2: Major payoff harvest** — VIX >50, SPY down 20%+, puts deep ITM. Mechanical tranches: +400% close 50%, +900% close another 25%, +1900%+ close remaining. Don't top-tick.
 
