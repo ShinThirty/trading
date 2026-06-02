@@ -161,7 +161,8 @@ Present a snapshot: contracts, strike % OTM, current put delta, DTE, P&L %.
 
 Flag only against playbook triggers:
 - **DTE ≤ 30** → Trigger 3 (routine roll). Run `/hedge`.
-- **Put delta -0.20 to -0.40** → Trigger 1 (maintenance roll) candidate. Run `/hedge`.
+- **Put delta -0.20 to -0.40** → Trigger 1 maintenance roll (down) candidate. Run `/hedge`.
+- **Strike >30% OTM AND DTE >45-50** → Trigger 1 maintenance roll (up) candidate — rally drifted the put out of the sweet spot into black-swan-only territory. Run `/hedge`.
 - **P&L ≥ +400%** → Trigger 2 (harvest tranche) live. Run `/hedge` immediately.
 - **Strike <15% OTM** → Legacy correction-zone; migrate to 25% OTM next maintenance window.
 - **No hedge in book** → One-time program-commit decision, not a daily signal call. Run `/hedge` Step 5.
