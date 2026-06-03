@@ -304,21 +304,30 @@ class PositionsResponse:
                             }
                         )
                     elif itype == "OPTION":
-                        # Covered stock option legs are short — negate qty
-                        opt_qty = -qty if strategy == "COVERED_STOCK" else qty
+                        otype = (lg.get("option_type") or "").lower()
+                        # A COVERED_STOCK combo is long stock plus EITHER a short
+                        # call (covered call) OR a long put (protective / married
+                        # put). Webull returns both shapes identically, so infer
+                        # the leg's direction from its type: within a covered-stock
+                        # combo the call is short and the put is long.
+                        if strategy == "COVERED_STOCK":
+                            signed_qty = -qty if otype == "call" else qty
+                        else:
+                            signed_qty = qty
+                        last = sf(lg.get("last_price"))
                         result.append(
                             {
                                 "symbol": symbol,
-                                "quantity": opt_qty,
-                                "last": sf(lg.get("last_price")),
+                                "quantity": signed_qty,
+                                "last": last,
                                 "cost": sf(lg.get("cost")),
-                                "value": sf(lg.get("last_price")) * opt_qty * -CONTRACT_MULTIPLIER,
+                                "value": last * signed_qty * CONTRACT_MULTIPLIER,
                                 "pnl": sf(lg.get("unrealized_profit_loss")),
                                 "pnl_pct": 0.0,
                                 "is_option": True,
                                 "is_cash": False,
                                 "underlying": symbol,
-                                "option_type": (lg.get("option_type") or "").lower(),
+                                "option_type": otype,
                                 "strike": sf(lg.get("option_exercise_price")),
                                 "expiration": lg.get("option_expire_date", ""),
                                 "strategy": strategy,
