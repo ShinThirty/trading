@@ -7,9 +7,11 @@ weeks (e.g., Memorial Day 2026 → Thu May 21). The URL is:
   https://advantage.factset.com/hubfs/Website/Resources%20Section/
     Research%20Desk/Earnings%20Insight/EarningsInsight_<MMDDYY>.pdf
 
-The MMDDYY token is the publish date. We walk back day-by-day from the
-request date (or today), skipping weekends, up to 4 weeks back. Brute force
-catches off-schedule publications without needing a US holiday calendar.
+The MMDDYY token is the publish date, optionally with an ``A`` suffix on some
+weeks (e.g. ``EarningsInsight_052926A.pdf``). We walk back day-by-day from the
+request date (or today), skipping weekends, up to 4 weeks back, trying both the
+plain and ``A``-suffixed filename per day. Brute force catches off-schedule
+publications and suffix variants without needing a US holiday calendar.
 
 This client deliberately doesn't extend BaseClient — the date-walk + binary
 PDF + pdfplumber extraction doesn't fit the single-Endpoint shape, mirroring
@@ -53,8 +55,17 @@ RATE_LIMITS: dict[str, tuple[int, float]] = {
 }
 
 
-def _filename_for(d: date) -> str:
-    return f"EarningsInsight_{d.strftime('%m%d%y')}.pdf"
+def _filenames_for(d: date) -> tuple[str, ...]:
+    """Candidate PDF filenames for a publish date, in fetch-preference order.
+
+    FactSet usually publishes ``EarningsInsight_<MMDDYY>.pdf``, but some weeks
+    carry an ``A`` suffix instead (e.g. the May 29 2026 report was only posted
+    as ``EarningsInsight_052926A.pdf`` — the plain name 404s). The suffix is
+    inconsistent week-to-week, so we try the plain name first (historical
+    default) and fall back to the suffixed variant before walking back a day.
+    """
+    stem = d.strftime("%m%d%y")
+    return (f"EarningsInsight_{stem}.pdf", f"EarningsInsight_{stem}A.pdf")
 
 
 class FactsetClient:
@@ -104,14 +115,19 @@ class FactsetClient:
                 if cached is not None:
                     return cached  # type: ignore[no-any-return]
 
-                try:
-                    pdf_bytes = await self._fetch_pdf(current)
-                except httpx.HTTPStatusError as e:
-                    if e.response.status_code == 404:
-                        last_exc = e
-                        current -= timedelta(days=1)
-                        continue
-                    raise
+                pdf_bytes: bytes | None = None
+                for filename in _filenames_for(current):
+                    try:
+                        pdf_bytes = await self._fetch_pdf(filename)
+                        break
+                    except httpx.HTTPStatusError as e:
+                        if e.response.status_code == 404:
+                            last_exc = e
+                            continue
+                        raise
+                if pdf_bytes is None:
+                    current -= timedelta(days=1)
+                    continue
                 pages_text = _extract_pages(pdf_bytes)
                 parsed = FactsetEarningsInsightResponse.from_response(pages_text)
                 self._cache.put(cache_key, parsed)
@@ -121,9 +137,9 @@ class FactsetClient:
                 f"back from {anchor.isoformat()}: {last_exc}"
             )
 
-    async def _fetch_pdf(self, publish_date: date) -> bytes:
+    async def _fetch_pdf(self, filename: str) -> bytes:
         await self._limiter.acquire()
-        url = f"{BASE_URL}/{_filename_for(publish_date)}"
+        url = f"{BASE_URL}/{filename}"
         resp = await self._http.get(url)
         resp.raise_for_status()
         return resp.content
