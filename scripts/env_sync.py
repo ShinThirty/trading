@@ -6,17 +6,22 @@ State bundled:
   - ~/.trading/                                    (SQLite DB: pipeline, rolls, decisions, cache)
   - ~/.claude/projects/.../memory/                 (Claude auto-memory)
 
-Transport: S3.   Encryption: age (passphrase).   Snapshot: sqlite3 backup API.
+Transport: S3.   Encryption: age (X25519 keypair).   Snapshot: sqlite3 backup API.
 
 Usage:
-  uv run scripts/env_sync.py push     Bundle local state, encrypt, upload to S3
-  uv run scripts/env_sync.py pull     Download from S3, decrypt, restore
-  uv run scripts/env_sync.py status   Show local vs remote sync state
+  uv run scripts/env_sync.py push       Bundle local state, encrypt, upload to S3
+  uv run scripts/env_sync.py pull       Download from S3, decrypt, restore
+  uv run scripts/env_sync.py status     Show local vs remote sync state
+  uv run scripts/env_sync.py setup-key  Create the shared age keypair (run once)
 
 One-time setup:
   pacman -S age           # Linux: pacman / apt / dnf
                           # macOS:    brew install age
                           # Windows:  scoop install age   (or winget install FiloSottile.age)
+  uv run scripts/env_sync.py setup-key   # generate the shared keypair (first machine)
+  # Then copy the identity file (default ~/.config/age/trading-env.txt) to every
+  # other machine that syncs — same path, or point TRADING_ENV_AGE_IDENTITY at it.
+  # The keypair replaces the old passphrase: push/pull no longer prompt.
   (S3 bucket is hardcoded in BUCKET below — edit if migrating accounts.)
 
 Bucket safety (set once, server-side):
@@ -100,11 +105,38 @@ BUCKET = "trading-env-113477077840"
 S3_URI = f"s3://{BUCKET}"
 KEY_BUNDLE = "trading-env.tar.gz.age"
 
+# age identity (X25519 keypair) used to encrypt/decrypt the bundle without a
+# passphrase prompt. ONE keypair is shared across machines: create it once with
+# `setup-key`, then copy the file to every machine that syncs (same path, or
+# point TRADING_ENV_AGE_IDENTITY at it). The private key is never bundled or
+# uploaded — only the matching public recipient encrypts the S3 object.
+AGE_IDENTITY = Path(
+    os.environ.get("TRADING_ENV_AGE_IDENTITY", str(HOME / ".config" / "age" / "trading-env.txt"))
+)
+
 
 def require(*tools: str) -> None:
     missing = [t for t in tools if not shutil.which(t)]
     if missing:
         sys.exit(f"Missing tool(s): {', '.join(missing)}")
+
+
+def require_identity() -> None:
+    if not AGE_IDENTITY.exists():
+        sys.exit(
+            f"No age identity at {AGE_IDENTITY}.\n"
+            "Run `uv run scripts/env_sync.py setup-key` on one machine, then copy that\n"
+            "identity file to this one (same path, or set TRADING_ENV_AGE_IDENTITY)."
+        )
+
+
+def age_recipient() -> str:
+    """Public recipient (age1...) derived from the local identity file."""
+    require_identity()
+    res = subprocess.run(["age-keygen", "-y", str(AGE_IDENTITY)], capture_output=True, text=True)
+    if res.returncode != 0:
+        sys.exit(f"Could not read age identity {AGE_IDENTITY}:\n{res.stderr.strip()}")
+    return res.stdout.strip()
 
 
 def tracked_files() -> list[Path]:
@@ -345,7 +377,8 @@ def _is_dirty(local_sync_ts: int, local_sig: str | None) -> bool:
 
 
 def cmd_push(args: argparse.Namespace) -> None:
-    require("age", "aws")
+    require("age", "age-keygen", "aws")
+    recipient = age_recipient()
     ensure_db_checkpointed()
 
     remote = fetch_remote_meta()
@@ -403,8 +436,8 @@ def cmd_push(args: argparse.Namespace) -> None:
                 tar.add(entry, arcname=entry.name)
 
         encrypted = tmp / KEY_BUNDLE
-        print("Encrypting (you'll be prompted for the passphrase)...")
-        subprocess.run(["age", "-p", "-o", str(encrypted), str(tarball)], check=True)
+        print("Encrypting...")
+        subprocess.run(["age", "-r", recipient, "-o", str(encrypted), str(tarball)], check=True)
 
         push_ts = int(time.time())
         host = socket.gethostname()
@@ -480,8 +513,12 @@ def cmd_pull(args: argparse.Namespace) -> None:
         print(f"Downloading from {S3_URI}/...")
         subprocess.run(["aws", "s3", "cp", f"{S3_URI}/{KEY_BUNDLE}", str(encrypted)], check=True)
 
-        print("Decrypting (you'll be prompted for the passphrase)...")
-        subprocess.run(["age", "-d", "-o", str(tarball), str(encrypted)], check=True)
+        require_identity()
+        print("Decrypting...")
+        subprocess.run(
+            ["age", "-d", "-i", str(AGE_IDENTITY), "-o", str(tarball), str(encrypted)],
+            check=True,
+        )
 
         # Remove stale WAL/SHM so the restored DB starts clean.
         for stale in (TRADING_DIR / "trading.db-wal", TRADING_DIR / "trading.db-shm"):
@@ -572,6 +609,30 @@ def cmd_status(_: argparse.Namespace) -> None:
         print("  Status: local marker ahead of remote (unusual)")
 
 
+def cmd_setup_key(_: argparse.Namespace) -> None:
+    require("age-keygen")
+    if AGE_IDENTITY.exists():
+        print(f"Identity already exists: {AGE_IDENTITY}")
+        print(f"Recipient (public key): {age_recipient()}")
+        print("Copy this file to your other machines to let them decrypt the bundle.")
+        return
+    AGE_IDENTITY.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["age-keygen", "-o", str(AGE_IDENTITY)], check=True)
+    try:
+        AGE_IDENTITY.chmod(0o600)
+    except OSError:
+        pass
+    print(f"\nCreated age identity: {AGE_IDENTITY}")
+    print(f"Recipient (public key): {age_recipient()}")
+    print(
+        "\nNext steps:\n"
+        f"  1. Copy {AGE_IDENTITY} to your other machines (same path, or set\n"
+        "     TRADING_ENV_AGE_IDENTITY to wherever you keep it).\n"
+        "  2. Run `push` here to re-encrypt the S3 bundle with the key.\n"
+        "After that, push/pull never prompt for a passphrase."
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -588,6 +649,9 @@ def main() -> None:
 
     status = sub.add_parser("status", help="Show local vs remote sync state")
     status.set_defaults(func=cmd_status)
+
+    setup = sub.add_parser("setup-key", help="Create the shared age keypair (run once)")
+    setup.set_defaults(func=cmd_setup_key)
 
     args = parser.parse_args()
     args.func(args)
