@@ -84,13 +84,17 @@ class FidelityFormatError(ValueError):
     """Raised when a Fidelity CSV doesn't match the expected format."""
 
 
-async def parse_fidelity_csv(path: str) -> AccountSummary:
-    """Parse a single-account Fidelity positions CSV.
+async def parse_fidelity_csv(path: str) -> list[AccountSummary]:
+    """Parse a Fidelity positions CSV into one summary per account.
 
     Handles the current Fidelity export format:
     - Row 1: CSV header (Account Number, Account Name, Symbol, ...)
-    - Data rows with account info in each row
-    - Disclaimer text at bottom (ignored)
+    - Data rows with account info in each row. A single export commonly
+      contains several accounts (BrokerageLink, Roth, HSA, 401k, ...); each
+      distinct Account Number becomes its own AccountSummary.
+    - No-ticker core/sweep rows (e.g. a BrokerageLink core balance, which has
+      an empty Symbol but a real Current Value) are counted as cash.
+    - Trailing blank line + disclaimer text at the bottom (ignored).
 
     Raises FidelityFormatError if the CSV format is unrecognized.
     """
@@ -117,37 +121,80 @@ async def parse_fidelity_csv(path: str) -> AccountSummary:
             f"{', '.join(sorted(missing))}. "
             f"Found columns: {', '.join(sorted(columns))}"
         )
-    positions: list[dict] = []
-    cash = 0.0
-    day_pnl = 0.0
-    unrealized_pnl = 0.0
-    label = ""
-    account_id = ""
+
+    stem = Path(path).stem
+    accounts: dict[str, AccountSummary] = {}
+
+    def _account_for(number: str, name: str) -> AccountSummary:
+        acct = accounts.get(number)
+        if acct is None:
+            acct = AccountSummary(
+                account_id=number or stem,
+                label=name or number or stem,
+                broker="Fidelity",
+                account_type="CASH",
+            )
+            accounts[number] = acct
+        return acct
 
     for row in reader:
         symbol = (row.get("Symbol") or "").strip()
-        # Stop at blank lines or disclaimer text
-        if not symbol or symbol.startswith('"'):
-            break
+        account_number = (row.get("Account Number") or "").strip()
+        account_name = (row.get("Account Name") or "").strip()
+        current_value_raw = (row.get("Current Value") or "").strip()
 
-        # Extract account info from first data row
-        if not label:
-            label = (row.get("Account Name") or Path(path).stem).strip()
-            account_id = (row.get("Account Number") or Path(path).stem).strip()
+        # A row with no Symbol is one of three things:
+        #   1. A roll-up pointer (Description "BROKERAGELINK") whose underlying
+        #      holdings are enumerated separately under their own Account
+        #      Numbers — e.g. a 401k whose BrokerageLink sub-accounts are
+        #      listed as distinct accounts later in the file. Counting it would
+        #      double-count those sub-accounts, so skip it.
+        #   2. A genuine no-ticker core/sweep cash balance — count as cash.
+        #   3. The trailing blank line / disclaimer text — end of holdings.
+        # The core balance and roll-up both carry an Account Number AND a
+        # Current Value; the disclaimer/blank rows carry neither — so use that
+        # to find the end of holdings instead of breaking on the first empty
+        # Symbol (which silently dropped the entire file when a no-Symbol line
+        # came first).
+        if not symbol:
+            if not account_number or not current_value_raw:
+                break  # blank line or disclaimer — end of holdings
+            description = (row.get("Description") or "").strip()
+            if description.upper() == "BROKERAGELINK":
+                continue  # roll-up of sub-accounts enumerated separately
+            acct = _account_for(account_number, account_name)
+            value = _safe_float(current_value_raw)
+            acct.cash += value
+            acct.positions.append(
+                {
+                    "symbol": description or "Core",
+                    "quantity": _safe_float(row.get("Quantity")),
+                    "last": _safe_float(row.get("Last Price")),
+                    "cost": _safe_float(row.get("Average Cost Basis")),
+                    "value": value,
+                    "pnl": _safe_float(row.get("Total Gain/Loss Dollar")),
+                    "pnl_pct": _safe_float(row.get("Total Gain/Loss Percent")),
+                    "is_option": False,
+                    "is_cash": True,
+                }
+            )
+            continue
+
+        acct = _account_for(account_number, account_name)
 
         # Normalize: strip trailing asterisks (e.g. FDRXX** → FDRXX)
         symbol = symbol.rstrip("*")
 
         # Handle pending activity as cash adjustment (unsettled transactions)
         if symbol.lower() == "pending activity":
-            cash += _safe_float(row.get("Current Value"))
+            acct.cash += _safe_float(row.get("Current Value"))
             continue
 
         # Handle cash / money market / cash equivalents
         if symbol in CASH_EQUIVALENTS:
             value = _safe_float(row.get("Current Value"))
-            cash += value
-            positions.append(
+            acct.cash += value
+            acct.positions.append(
                 {
                     "symbol": symbol,
                     "quantity": _safe_float(row.get("Quantity")),
@@ -171,8 +218,8 @@ async def parse_fidelity_csv(path: str) -> AccountSummary:
         cost = _safe_float(row.get("Average Cost Basis"))
         pnl = _safe_float(row.get("Total Gain/Loss Dollar"))
         pnl_pct = _safe_float(row.get("Total Gain/Loss Percent"))
-        day_pnl += _safe_float(row.get("Today's Gain/Loss Dollar"))
-        unrealized_pnl += pnl
+        acct.day_pnl += _safe_float(row.get("Today's Gain/Loss Dollar"))
+        acct.unrealized_pnl += pnl
 
         opt = parse_fidelity_option(clean_symbol)
         pos: dict[str, Any] = {
@@ -193,23 +240,15 @@ async def parse_fidelity_csv(path: str) -> AccountSummary:
             pos["option_type"] = option_type
             pos["strike"] = strike
 
-        positions.append(pos)
+        acct.positions.append(pos)
 
-    market_value = sum(p.get("value", 0.0) for p in positions if not p.get("is_cash"))
-    nlv = cash + market_value
+    for acct in accounts.values():
+        acct.market_value = sum(
+            p.get("value", 0.0) for p in acct.positions if not p.get("is_cash")
+        )
+        acct.nlv = acct.cash + acct.market_value
 
-    return AccountSummary(
-        account_id=account_id or Path(path).stem,
-        label=label or Path(path).stem,
-        broker="Fidelity",
-        account_type="CASH",
-        nlv=nlv,
-        cash=cash,
-        market_value=market_value,
-        day_pnl=day_pnl,
-        unrealized_pnl=unrealized_pnl,
-        positions=positions,
-    )
+    return list(accounts.values())
 
 
 async def parse_fidelity_folder(folder: str) -> list[AccountSummary]:
@@ -218,7 +257,8 @@ async def parse_fidelity_folder(folder: str) -> list[AccountSummary]:
     if not folder_path.is_dir():
         return []
     csvs = sorted(folder_path.glob("*Positions*.csv"))
-    return await asyncio.gather(*(parse_fidelity_csv(str(p)) for p in csvs))
+    per_file = await asyncio.gather(*(parse_fidelity_csv(str(p)) for p in csvs))
+    return [acct for file_accounts in per_file for acct in file_accounts]
 
 
 def compact_portfolio_summary(summary: PortfolioSummary, file_path: str) -> str:
