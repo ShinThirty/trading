@@ -76,18 +76,18 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │       ├── indicators.py            # Technical analysis indicators on OHLCV bars (pure functions)
 │   │       ├── options.py               # Options analytics: expected move, HV, strategy P&L (pure functions)
 │   │       ├── options_multi_exp.py     # Multi-expiration strategy analysis: calendars, diagonals, PMCC (uses BSM for far leg)
-│   │       ├── portfolio.py             # Multi-account portfolio aggregation (Fidelity CSV + Webull API)
+│   │       ├── portfolio.py             # Multi-account portfolio aggregation (Webull + Tradier + TastyTrade APIs + Fidelity CSV)
 │   │       ├── regime.py                # Market regime classification from pre-fetched data (pure functions)
 │   │       └── endpoints/               # Typed request/response models + Endpoint defs
 │   │           ├── webull.py            # 11 endpoints (account, orders, instruments)
-│   │           ├── tradier.py           # 19 endpoints (options, quotes, account, orders)
+│   │           ├── tradier.py           # 13 endpoints (options, quotes + read-only account: profile, balances, positions, orders)
 │   │           ├── finnhub.py           # 11 endpoints (news, earnings, financials)
 │   │           ├── fmp.py               # 8 endpoints (financial statements, profiles, sector perf)
 │   │           ├── fred.py              # 4 endpoints (economic data series)
 │   │           ├── alphavantage.py      # 2 endpoints (sentiment, movers)
 │   │           ├── eia.py               # 1 endpoint (single-series fetch by series_id; v2 /seriesid)
 │   │           ├── factset.py           # FactsetEarningsInsightResponse — narrative + parsed S&P 500 metrics
-│   │           ├── tastytrade.py        # 5 endpoints (IV metrics, backtesting, watchlists, dividends)
+│   │           ├── tastytrade.py        # 10 endpoints (IV metrics, backtesting, watchlists, dividends + read-only account: accounts, balances, positions, orders)
 │   │           ├── fool.py              # 2 endpoints (monthly sitemap, transcript page)
 │   │           ├── morningstar.py       # 1 endpoint (earnings call transcript by exchange + ticker)
 │   │           ├── edgar.py             # 5 endpoints (ticker map, submissions, filing index, doc, Form 4)
@@ -127,7 +127,7 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │       │   ├── decisions.py         # Option decisions table schema, enums, async CRUD
 │   │       │   └── twse_revenue.py      # TWSE monthly revenue cache (TSMC + future TW tickers)
 │   │       └── tools/                   # Subdomain-organized tool modules
-│   │           ├── account.py           # Balances, positions, instruments, portfolio aggregates
+│   │           ├── account.py           # Balances, positions, orders, instruments, portfolio aggregates (Webull + Tradier + TastyTrade read-only)
 │   │           ├── orders.py            # Place/preview/replace/cancel orders, order history
 │   │           ├── quotes.py            # Stock/option quotes, history, intraday, technicals, clock
 │   │           ├── options.py           # Chains, expected move, strategy/roll analysis,
@@ -262,13 +262,13 @@ signature) handles button clicks (`mute:<seconds>:<dedup_key>`) and the
 | Provider | Role | Auth |
 |---|---|---|
 | **Webull** (required) | Brokerage: account, orders, positions | HMAC-SHA1 + token |
-| **Tradier** | Option chains, greeks, IV, quotes, account | Bearer token |
+| **Tradier** | Option chains, greeks, IV, quotes; read-only account (profile, balances, positions, orders) folded into the portfolio aggregation | Bearer token |
 | **Finnhub** | News, earnings calendar, key metrics | API key |
 | **FMP** | Financial statements, company profiles, sector performance | API key |
 | **FRED** | Macroeconomic data (CPI, GDP, VIX, rates) | API key |
 | **Alpha Vantage** | News sentiment, top market movers | API key |
 | **EIA** | Weekly Petroleum Status Report — crude/product stocks, refinery utilization, retail gasoline. WPSR Wed 10:30 ET. Used during oil-price / inflation events; informs CPI energy, consumer demand destruction, Fed policy path. | API key (free, [register](https://www.eia.gov/opendata/register.php)) |
-| **TastyTrade** | IV rank/percentile, backtesting, watchlists, dividends | OAuth2 refresh token |
+| **TastyTrade** | IV rank/percentile, backtesting, watchlists, dividends; read-only account (accounts, balances, positions, orders) folded into the portfolio aggregation | OAuth2 refresh token |
 | **Yahoo Finance** | Stock screener, institutional ownership | None (via yfinance) |
 | **Motley Fool** | Earnings call transcripts (scraped, primary source) | None |
 | **Morningstar** | Earnings call transcripts (Playwright fallback for tickers Fool misses — small caps, foreign issuers). URL is `/stocks/{xase\|xnys\|xnas}/{ticker}/earnings-transcript`; AWS WAF JS challenge requires headless-Chromium with `navigator.webdriver` mask. | None (Playwright) |

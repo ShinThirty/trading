@@ -4,7 +4,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from trading_clients.endpoint import BodyRequest, Endpoint, ParamsRequest, PathRequest
-from trading_clients.table_helpers import fmt_number, list_table
+from trading_clients.options import parse_occ
+from trading_clients.table_helpers import fmt_number, kv_table, list_table, to_float_zero
 
 # ═══════════════════════════════════════════════════════════════
 # Request Models
@@ -328,4 +329,250 @@ BACKTEST_GET = Endpoint(
     "/backtests/{id}",
     response_model=BacktestResponse,
     base_url=BACKTESTER_URL,
+)
+
+
+# ═══════════════════════════════════════════════════════════════
+# Account (read-only): accounts, balances, positions, orders
+# ═══════════════════════════════════════════════════════════════
+
+# Statuses for an order that is still working (not terminal).
+_OPEN_ORDER_STATUSES = {
+    "Received",
+    "Routed",
+    "In Flight",
+    "Live",
+    "Contingent",
+    "Cancel Requested",
+    "Replace Requested",
+}
+
+
+@dataclass
+class AccountPathRequest(PathRequest, ParamsRequest):
+    """GET scoped to a single account via {account_number} path template."""
+
+    account_number: str
+
+    def to_path_params(self) -> dict[str, str]:
+        return {"account_number": self.account_number}
+
+    def to_params(self) -> dict[str, str]:
+        return {}
+
+
+@dataclass
+class PositionsRequest(AccountPathRequest):
+    """Positions need include-marks=true to populate mark/mark-price."""
+
+    def to_params(self) -> dict[str, str]:
+        return {"include-marks": "true"}
+
+
+@dataclass
+class AccountsResponse:
+    accounts: list[dict]
+
+    @classmethod
+    def from_response(cls, data: list[dict]) -> "AccountsResponse":
+        return cls(accounts=[a for a in (data or []) if not a.get("is-closed")])
+
+    def account_numbers(self) -> list[str]:
+        return [a.get("account-number", "") for a in self.accounts if a.get("account-number")]
+
+    def to_output(self) -> str:
+        if not self.accounts:
+            return "(no accounts)"
+        rows = [
+            {
+                "Account #": a.get("account-number", ""),
+                "Nickname": a.get("nickname", ""),
+                "Type": a.get("account-type-name", ""),
+                "Margin/Cash": a.get("margin-or-cash", ""),
+            }
+            for a in self.accounts
+        ]
+        return list_table(rows)
+
+
+@dataclass
+class AccountBalancesResponse:
+    data: dict
+
+    @classmethod
+    def from_response(cls, data: dict) -> "AccountBalancesResponse":
+        return cls(data=data or {})
+
+    def to_output(self) -> str:
+        d = self.data
+        if not d:
+            return "(no balance)"
+        fields = {
+            "Account #": d.get("account-number"),
+            "Net Liq Value": fmt_number(d.get("net-liquidating-value")),
+            "Cash Balance": fmt_number(d.get("cash-balance")),
+            "Cash to Withdraw": fmt_number(d.get("cash-available-to-withdraw")),
+            "Equity BP": fmt_number(d.get("equity-buying-power")),
+            "Derivative BP": fmt_number(d.get("derivative-buying-power")),
+            "Long Equity Value": fmt_number(d.get("long-equity-value")),
+            "Short Equity Value": fmt_number(d.get("short-equity-value")),
+            "Maint. Requirement": fmt_number(d.get("maintenance-requirement")),
+            "Pending Cash": fmt_number(d.get("pending-cash")),
+        }
+        return kv_table({k: v for k, v in fields.items() if v not in (None, "")})
+
+
+def _tt_position_norm(p: dict) -> dict:
+    """Normalize one TastyTrade CurrentPosition into the shared aggregation shape.
+
+    average-open-price / mark-price are per-unit; multiplier is 100 for options,
+    1 for equity. pnl = (price-cost)*signed_qty*mult is sign-correct for shorts.
+    """
+    symbol = p.get("symbol", "")
+    is_option = p.get("instrument-type") == "Equity Option"
+    qty = to_float_zero(p.get("quantity"))
+    signed_qty = -qty if p.get("quantity-direction") == "Short" else qty
+    mult = to_float_zero(p.get("multiplier")) or (100 if is_option else 1)
+    price = (
+        to_float_zero(p.get("mark-price"))
+        or to_float_zero(p.get("mark"))
+        or to_float_zero(p.get("close-price"))
+    )
+    cost = to_float_zero(p.get("average-open-price"))
+    value = price * signed_qty * mult
+    pnl = (price - cost) * signed_qty * mult
+    denom = abs(cost) * abs(signed_qty) * mult
+    pos: dict[str, Any] = {
+        "symbol": symbol,
+        "quantity": signed_qty,
+        "last": price,
+        "cost": cost,
+        "value": value,
+        "pnl": pnl,
+        "pnl_pct": (pnl / denom * 100) if denom else 0.0,
+        "is_option": is_option,
+        "is_cash": False,
+    }
+    if is_option:
+        _, exp, option_type, strike = parse_occ(symbol)
+        pos["underlying"] = p.get("underlying-symbol", "") or symbol
+        pos["option_type"] = option_type
+        pos["strike"] = strike
+        pos["expiration"] = exp
+        pos["strategy"] = ""
+    return pos
+
+
+@dataclass
+class AccountPositionsResponse:
+    positions: list[dict]
+
+    @classmethod
+    def from_response(cls, data: list[dict]) -> "AccountPositionsResponse":
+        return cls(positions=data or [])
+
+    def to_normalized(self) -> list[dict]:
+        return [_tt_position_norm(p) for p in self.positions if to_float_zero(p.get("quantity"))]
+
+    def to_output(self) -> str:
+        if not self.positions:
+            return "(no positions)"
+        rows = []
+        for p in self.positions:
+            n = _tt_position_norm(p)
+            row: dict[str, str] = {
+                "Symbol": n.get("underlying", n["symbol"]) if n["is_option"] else n["symbol"],
+                "Qty": fmt_number(n["quantity"], 0),
+                "Cost": fmt_number(n["cost"]),
+                "Mark": fmt_number(n["last"]),
+                "Mkt Val": fmt_number(n["value"]),
+                "P&L": fmt_number(n["pnl"]),
+                "P&L %": fmt_number(n["pnl_pct"]),
+            }
+            if n["is_option"]:
+                row |= {
+                    "Option": n["option_type"],
+                    "Strike": fmt_number(n["strike"]),
+                    "Exp": n["expiration"],
+                }
+            rows.append(row)
+        return list_table(rows)
+
+
+@dataclass
+class AccountOrdersResponse:
+    orders: list[dict]
+
+    @classmethod
+    def from_response(cls, data: list[dict]) -> "AccountOrdersResponse":
+        return cls(orders=data or [])
+
+    def filter_by_status(self, status: str) -> "AccountOrdersResponse":
+        if status == "all":
+            return self
+        if status == "open":
+            keep = [o for o in self.orders if o.get("status") in _OPEN_ORDER_STATUSES]
+        else:
+            keep = [o for o in self.orders if o.get("status") == status]
+        return AccountOrdersResponse(orders=keep)
+
+    @staticmethod
+    def _legs(o: dict) -> str:
+        parts = []
+        for leg in o.get("legs", []):
+            parts.append(
+                f"{leg.get('action', '')} {leg.get('quantity', '')} {leg.get('symbol', '')}".strip()
+            )
+        return " / ".join(parts)
+
+    def to_output(self) -> str:
+        if not self.orders:
+            return "(no orders)"
+        rows = []
+        for o in self.orders:
+            price = o.get("price")
+            effect = o.get("price-effect", "")
+            rows.append(
+                {
+                    "Order ID": str(o.get("id", "")),
+                    "Underlying": o.get("underlying-symbol", ""),
+                    "Type": o.get("order-type", ""),
+                    "TIF": o.get("time-in-force", ""),
+                    "Price": f"{fmt_number(price)} {effect}".strip() if price else "",
+                    "Size": str(o.get("size", "")),
+                    "Status": o.get("status", ""),
+                    "Legs": self._legs(o),
+                }
+            )
+        return list_table(rows)
+
+
+ACCOUNTS = Endpoint(
+    "/customers/me/accounts",
+    cache_ttl=300,
+    response_model=AccountsResponse,
+    extract=lambda d: [
+        it.get("account", {}) for it in d.get("data", {}).get("items", d.get("items", []))
+    ],
+)
+
+BALANCES = Endpoint(
+    "/accounts/{account_number}/balances",
+    cache_ttl=60,
+    response_model=AccountBalancesResponse,
+    extract=lambda d: d.get("data", d),
+)
+
+POSITIONS = Endpoint(
+    "/accounts/{account_number}/positions",
+    cache_ttl=60,
+    response_model=AccountPositionsResponse,
+    extract=lambda d: d.get("data", {}).get("items", d.get("items", [])),
+)
+
+ORDERS = Endpoint(
+    "/accounts/{account_number}/orders",
+    cache_ttl=30,
+    response_model=AccountOrdersResponse,
+    extract=lambda d: d.get("data", {}).get("items", d.get("items", [])),
 )

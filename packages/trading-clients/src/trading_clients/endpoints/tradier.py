@@ -1,15 +1,21 @@
 """Tradier API endpoint definitions with typed request/response models."""
 
+import re
 from dataclasses import dataclass
 from typing import Any
 
-from trading_clients.endpoint import Endpoint, ParamsRequest
+from trading_clients.endpoint import CONTRACT_MULTIPLIER, Endpoint, ParamsRequest, PathRequest
+from trading_clients.options import parse_occ
 from trading_clients.table_helpers import (
     fmt_large,
     fmt_number,
     kv_table,
     list_table,
+    to_float_zero,
 )
+
+# Compact OCC option symbol (no space padding), e.g. "VXX190517P00016000".
+_OCC_RE = re.compile(r"^[A-Z.]+\d{6}[CP]\d{8}$")
 
 # ═══════════════════════════════════════════════════════════════
 # Helpers
@@ -449,4 +455,239 @@ CLOCK = Endpoint(
     cache_ttl=30,
     response_model=ClockResponse,
     extract=lambda d: d.get("clock", {}),
+)
+
+
+# ═══════════════════════════════════════════════════════════════
+# Account (read-only): profile, balances, positions, orders
+# ═══════════════════════════════════════════════════════════════
+
+
+@dataclass
+class AccountPathRequest(PathRequest, ParamsRequest):
+    """GET scoped to a single account via {account_id} path template."""
+
+    account_id: str
+
+    def to_path_params(self) -> dict[str, str]:
+        return {"account_id": self.account_id}
+
+    def to_params(self) -> dict[str, str]:
+        return {}
+
+
+@dataclass
+class AccountProfileResponse:
+    accounts: list[dict]
+
+    @classmethod
+    def from_response(cls, data: list[dict]) -> "AccountProfileResponse":
+        return cls(accounts=data or [])
+
+    def account_numbers(self) -> list[str]:
+        return [a.get("account_number", "") for a in self.accounts if a.get("account_number")]
+
+    def to_output(self) -> str:
+        if not self.accounts:
+            return "(no accounts)"
+        rows = [
+            {
+                "Account #": a.get("account_number", ""),
+                "Type": a.get("type", ""),
+                "Class": a.get("classification", ""),
+                "Opt Lvl": str(a.get("option_level", "")),
+                "Day Trader": str(a.get("day_trader", "")),
+                "Status": a.get("status", ""),
+            }
+            for a in self.accounts
+        ]
+        return list_table(rows)
+
+
+@dataclass
+class AccountBalancesResponse:
+    data: dict
+
+    @classmethod
+    def from_response(cls, data: dict) -> "AccountBalancesResponse":
+        return cls(data=data or {})
+
+    def to_output(self) -> str:
+        d = self.data
+        if not d:
+            return "(no balance)"
+        fields = {
+            "Account #": d.get("account_number"),
+            "Type": d.get("account_type"),
+            "Net Liq (Equity)": fmt_number(d.get("total_equity")),
+            "Total Cash": fmt_number(d.get("total_cash")),
+            "Market Value": fmt_number(d.get("market_value")),
+            "Long Mkt Value": fmt_number(d.get("long_market_value")),
+            "Short Mkt Value": fmt_number(d.get("short_market_value")),
+            "Stock Long Value": fmt_number(d.get("stock_long_value")),
+            "Option Long Value": fmt_number(d.get("option_long_value")),
+            "Open P&L": fmt_number(d.get("open_pl")),
+            "Close P&L": fmt_number(d.get("close_pl")),
+            "Uncleared Funds": fmt_number(d.get("uncleared_funds")),
+            "Pending Cash": fmt_number(d.get("pending_cash")),
+        }
+        return kv_table({k: v for k, v in fields.items() if v not in (None, "")})
+
+
+@dataclass
+class AccountPositionsResponse:
+    positions: list[dict]
+
+    @classmethod
+    def from_response(cls, data: list[dict]) -> "AccountPositionsResponse":
+        return cls(positions=data or [])
+
+    def to_normalized(self) -> list[dict]:
+        """Normalize for aggregation. Tradier positions carry no price, so
+        last/value/pnl are left at 0.0 — the fetch layer fills them from a
+        batched quote. `cost` is per-unit; `cost_basis` keeps the signed total
+        for sign-correct P&L (Tradier reports cost_basis positive for shorts)."""
+        result: list[dict] = []
+        for p in self.positions:
+            symbol = p.get("symbol", "")
+            qty = to_float_zero(p.get("quantity"))
+            cost_basis = to_float_zero(p.get("cost_basis"))
+            is_opt = bool(_OCC_RE.match(symbol))
+            mult = CONTRACT_MULTIPLIER if is_opt else 1
+            denom = (abs(qty) * mult) or 1
+            pos: dict[str, Any] = {
+                "symbol": symbol,
+                "quantity": qty,
+                "last": 0.0,
+                "cost": cost_basis / denom,
+                "cost_basis": cost_basis,
+                "value": 0.0,
+                "pnl": 0.0,
+                "pnl_pct": 0.0,
+                "is_option": is_opt,
+                "is_cash": False,
+            }
+            if is_opt:
+                underlying, exp, option_type, strike = parse_occ(symbol)
+                pos["underlying"] = underlying
+                pos["option_type"] = option_type
+                pos["strike"] = strike
+                pos["expiration"] = exp
+                pos["strategy"] = ""
+            result.append(pos)
+        return result
+
+    def to_output(self) -> str:
+        if not self.positions:
+            return "(no positions)"
+        has_options = any(_OCC_RE.match(p.get("symbol", "")) for p in self.positions)
+        rows = []
+        for p in self.positions:
+            symbol = p.get("symbol", "")
+            row: dict[str, str] = {
+                "Symbol": symbol,
+                "Qty": fmt_number(p.get("quantity"), 0),
+                "Cost Basis": fmt_number(p.get("cost_basis")),
+                "Acquired": (p.get("date_acquired") or "")[:10],
+            }
+            if has_options:
+                if _OCC_RE.match(symbol):
+                    underlying, exp, option_type, strike = parse_occ(symbol)
+                    row |= {
+                        "Underlying": underlying,
+                        "Option": option_type,
+                        "Strike": fmt_number(strike),
+                        "Exp": exp,
+                    }
+                else:
+                    row |= {"Underlying": "", "Option": "", "Strike": "", "Exp": ""}
+            rows.append(row)
+        return list_table(rows)
+
+
+@dataclass
+class AccountOrdersResponse:
+    orders: list[dict]
+
+    _OPEN_STATUSES = {"open", "pending", "partially_filled"}
+
+    @classmethod
+    def from_response(cls, data: list[dict]) -> "AccountOrdersResponse":
+        return cls(orders=data or [])
+
+    def filter_by_status(self, status: str) -> "AccountOrdersResponse":
+        if status == "all":
+            return self
+        if status == "open":
+            keep = [o for o in self.orders if o.get("status") in self._OPEN_STATUSES]
+        else:
+            keep = [o for o in self.orders if o.get("status") == status]
+        return AccountOrdersResponse(orders=keep)
+
+    def to_output(self) -> str:
+        if not self.orders:
+            return "(no orders)"
+        rows = []
+        for o in self.orders:
+            rows.append(
+                {
+                    "Order ID": str(o.get("id", "")),
+                    "Symbol": o.get("option_symbol") or o.get("symbol", ""),
+                    "Side": o.get("side", ""),
+                    "Type": o.get("type", ""),
+                    "Class": o.get("class", ""),
+                    "Qty": fmt_number(o.get("quantity"), 0),
+                    "Filled": fmt_number(o.get("exec_quantity"), 0),
+                    "Price": fmt_number(o.get("price")),
+                    "Avg Fill": fmt_number(o.get("avg_fill_price")),
+                    "Status": o.get("status", ""),
+                    "Duration": o.get("duration", ""),
+                    "Created": (o.get("create_date") or "")[:19],
+                }
+            )
+        return list_table(rows)
+
+
+def _extract_tradier_positions(d: dict) -> list:
+    """Tradier returns the JSON string "null" for `positions` when the account
+    is flat — guard against it before reaching into `.position`."""
+    pos = d.get("positions")
+    if not isinstance(pos, dict):
+        return []
+    return _ensure_list(pos.get("position", []))
+
+
+def _extract_tradier_orders(d: dict) -> list:
+    orders = d.get("orders")
+    if not isinstance(orders, dict):
+        return []
+    return _ensure_list(orders.get("order", []))
+
+
+PROFILE = Endpoint(
+    "/v1/user/profile",
+    cache_ttl=300,
+    response_model=AccountProfileResponse,
+    extract=lambda d: _ensure_list((d.get("profile") or {}).get("account", [])),
+)
+
+BALANCES = Endpoint(
+    "/v1/accounts/{account_id}/balances",
+    cache_ttl=60,
+    response_model=AccountBalancesResponse,
+    extract=lambda d: d.get("balances", {}),
+)
+
+POSITIONS = Endpoint(
+    "/v1/accounts/{account_id}/positions",
+    cache_ttl=60,
+    response_model=AccountPositionsResponse,
+    extract=_extract_tradier_positions,
+)
+
+ORDERS = Endpoint(
+    "/v1/accounts/{account_id}/orders",
+    cache_ttl=30,
+    response_model=AccountOrdersResponse,
+    extract=_extract_tradier_orders,
 )

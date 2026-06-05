@@ -3,6 +3,7 @@
 from fastmcp import Context, FastMCP
 from trading_clients import options as opts
 from trading_clients.endpoint import CONTRACT_MULTIPLIER
+from trading_clients.endpoints import tastytrade as tt
 from trading_clients.endpoints import tradier as t
 from trading_clients.endpoints.webull import (
     ACCOUNT_LIST,
@@ -22,7 +23,7 @@ from trading_clients.portfolio import (
 )
 from trading_clients.table_helpers import fmt_number, kv_table, list_table
 
-from trading_mcp.helpers import _tradier, _webull, _write_temp_file
+from trading_mcp.helpers import _tastytrade, _tradier, _webull, _write_temp_file
 from trading_mcp.portfolio_fetching import (
     _compute_csp_collateral,
     _fetch_accounts,
@@ -98,6 +99,132 @@ async def get_instruments(ctx: Context, symbols: str, category: str = "US_STOCK"
     """
     resp = await _webull(ctx).get(INSTRUMENTS, GetInstrumentsRequest(symbols, category))
     return resp.to_output()
+
+
+# ── Tradier (read-only) ─────────────────────────────────────────
+
+
+@mcp.tool()
+async def get_tradier_profile(ctx: Context) -> str:
+    """List all Tradier accounts: account number, type (cash/margin), option
+    level, day-trader flag, and status. Use the 'Account #' value as the
+    account_id parameter for the other Tradier tools.
+    """
+    return (await _tradier(ctx).get(t.PROFILE, t.EmptyRequest())).to_output()
+
+
+@mcp.tool()
+async def get_tradier_balance(ctx: Context, account_id: str | None = None) -> str:
+    """Get Tradier account balance: net liquidation (equity), total cash, market
+    value, long/short market value, and open/close P&L.
+
+    account_id: Tradier account number. Defaults to the configured Tradier
+    account (use get_tradier_profile to list them).
+    """
+    client = _tradier(ctx)
+    aid = client.resolve_account_id(account_id)
+    return (await client.get(t.BALANCES, t.AccountPathRequest(aid))).to_output()
+
+
+@mcp.tool()
+async def get_tradier_positions(ctx: Context, account_id: str | None = None) -> str:
+    """Get Tradier positions: symbol, quantity, cost basis, acquisition date
+    (option legs parsed into underlying/strike/expiration).
+
+    Tradier's positions endpoint returns no live price, so market value and P&L
+    are not shown here — use get_portfolio_summary for valued, P&L-enriched
+    positions across all brokers.
+
+    account_id: Tradier account number. Defaults to the configured account.
+    """
+    client = _tradier(ctx)
+    aid = client.resolve_account_id(account_id)
+    return (await client.get(t.POSITIONS, t.AccountPathRequest(aid))).to_output()
+
+
+@mcp.tool()
+async def get_tradier_orders(
+    ctx: Context, account_id: str | None = None, status: str = "open"
+) -> str:
+    """Get Tradier orders (read-only).
+
+    status: 'open' (default — working orders: open/pending/partially_filled),
+    'all', or a specific Tradier status (filled, canceled, rejected, expired).
+    account_id: Tradier account number. Defaults to the configured account.
+    """
+    client = _tradier(ctx)
+    aid = client.resolve_account_id(account_id)
+    resp = await client.get(t.ORDERS, t.AccountPathRequest(aid))
+    return resp.filter_by_status(status).to_output()
+
+
+# ── TastyTrade (read-only) ──────────────────────────────────────
+
+
+async def _resolve_tastytrade_account(client, account_number: str | None) -> str:
+    """Resolve a TastyTrade account number: use the given one, else the sole
+    account, else raise listing the choices."""
+    if account_number:
+        return account_number
+    accts = await client.get(tt.ACCOUNTS, tt.EmptyRequest())
+    nums = accts.account_numbers()
+    if len(nums) == 1:
+        return nums[0]
+    if not nums:
+        raise RuntimeError("No TastyTrade accounts found.")
+    raise RuntimeError(
+        f"Multiple TastyTrade accounts found ({', '.join(nums)}). Pass account_number to pick one."
+    )
+
+
+@mcp.tool()
+async def get_tastytrade_accounts(ctx: Context) -> str:
+    """List all TastyTrade accounts: account number, nickname, type, margin/cash.
+    Use the 'Account #' value as the account_number parameter for the other
+    TastyTrade tools.
+    """
+    return (await _tastytrade(ctx).get(tt.ACCOUNTS, tt.EmptyRequest())).to_output()
+
+
+@mcp.tool()
+async def get_tastytrade_balance(ctx: Context, account_number: str | None = None) -> str:
+    """Get TastyTrade account balance: net liquidating value, cash balance,
+    cash available to withdraw, equity/derivative buying power.
+
+    account_number: TastyTrade account number. Omit to use the sole account
+    (use get_tastytrade_accounts to list them).
+    """
+    client = _tastytrade(ctx)
+    num = await _resolve_tastytrade_account(client, account_number)
+    return (await client.get(tt.BALANCES, tt.AccountPathRequest(num))).to_output()
+
+
+@mcp.tool()
+async def get_tastytrade_positions(ctx: Context, account_number: str | None = None) -> str:
+    """Get TastyTrade positions with live marks: quantity, cost, mark, market
+    value, and unrealized P&L per position (option legs parsed).
+
+    account_number: TastyTrade account number. Omit to use the sole account.
+    """
+    client = _tastytrade(ctx)
+    num = await _resolve_tastytrade_account(client, account_number)
+    return (await client.get(tt.POSITIONS, tt.PositionsRequest(num))).to_output()
+
+
+@mcp.tool()
+async def get_tastytrade_orders(
+    ctx: Context, account_number: str | None = None, status: str = "open"
+) -> str:
+    """Get TastyTrade orders (read-only).
+
+    status: 'open' (default — working orders: Received/Routed/Live/etc.), 'all',
+    or a specific TastyTrade status (Filled, Cancelled, Expired, Rejected).
+    account_number: TastyTrade account number. Omit to use the sole account.
+    """
+    client = _tastytrade(ctx)
+    num = await _resolve_tastytrade_account(client, account_number)
+    resp = await client.get(tt.ORDERS, tt.AccountPathRequest(num))
+    return resp.filter_by_status(status).to_output()
 
 
 @mcp.tool()
