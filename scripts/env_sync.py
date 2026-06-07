@@ -5,6 +5,7 @@ State bundled:
   - ~/.tradingrc                                   (API credentials, Webull token)
   - ~/.trading/                                    (SQLite DB: pipeline, rolls, decisions, cache)
   - ~/.claude/projects/.../memory/                 (Claude auto-memory)
+  - ~/Documents/analysis/                          (per-ticker research notes)
 
 Transport: S3.   Encryption: age (X25519 keypair).   Snapshot: sqlite3 backup API.
 
@@ -101,6 +102,10 @@ REPO_DIR = Path(__file__).resolve().parent.parent
 _repo_slug = str(REPO_DIR).replace("\\", "-").replace("/", "-").replace(":", "-")
 MEMORY_DIR = HOME / ".claude" / "projects" / _repo_slug / "memory"
 
+# Per-ticker research notes (plain markdown). Lives under HOME so it rides the
+# same logical-rel signature path; restored to the same place on every machine.
+DOCS_DIR = HOME / "Documents" / "analysis"
+
 BUCKET = "trading-env-113477077840"
 S3_URI = f"s3://{BUCKET}"
 KEY_BUNDLE = "trading-env.tar.gz.age"
@@ -153,6 +158,8 @@ def tracked_files() -> list[Path]:
             files.append(p)
     if MEMORY_DIR.exists():
         files.extend(p for p in MEMORY_DIR.rglob("*") if p.is_file())
+    if DOCS_DIR.exists():
+        files.extend(p for p in DOCS_DIR.rglob("*") if p.is_file())
     return files
 
 
@@ -429,6 +436,10 @@ def cmd_push(args: argparse.Namespace) -> None:
         if MEMORY_DIR.exists():
             shutil.copytree(MEMORY_DIR, staging / "memory")
 
+        # Stage analysis docs under a fixed arcname (HOME path differs per machine).
+        if DOCS_DIR.exists():
+            shutil.copytree(DOCS_DIR, staging / "analysis")
+
         tarball = tmp / "bundle.tar.gz"
         print("Bundling state...")
         with tarfile.open(tarball, "w:gz") as tar:
@@ -557,6 +568,13 @@ def cmd_pull(args: argparse.Namespace) -> None:
                 shutil.rmtree(MEMORY_DIR)
             MEMORY_DIR.parent.mkdir(parents=True, exist_ok=True)
             shutil.copytree(src_mem, MEMORY_DIR)
+
+        src_docs = extract_dir / "analysis"
+        if src_docs.exists():
+            if DOCS_DIR.exists():
+                shutil.rmtree(DOCS_DIR)
+            DOCS_DIR.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(src_docs, DOCS_DIR)
 
         post_sig = live_signature()
         write_marker(remote["push_ts"], remote["hostname"], post_sig)
