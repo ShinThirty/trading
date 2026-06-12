@@ -18,12 +18,47 @@ This skill supports **intraday 0–1DTE option scalping** on the index ETFs. Its
 Five guardrails apply to every mode:
 
 1. **Discipline over analysis.** Pre-session output ALWAYS ends with the discipline checklist; review ALWAYS grades stop-honor and win/loss size-asymmetry first. More setups ≠ better. If the day has no clean edge, the correct output is "no-trade conditions — sit out."
-2. **Data limits — be honest about them.** `get_technical_indicators` is **daily-only** (no intraday bars from any tool). The real scalper's edge — Level 2 / order flow / tape speed — is **not in this toolset**; it's on the Webull screen. This skill is **prep + review + lagging context**, NOT the live execution surface. Never pretend to out-speed the user's chart.
+2. **Data limits — be honest about them.** `get_technical_indicators` is **daily-only** (no intraday bars from any tool). **Daily signals draw the map and set the lean — they never pull the trigger.** Levels (SMA20/50, Bollinger bands, prior H/L/C), the range envelope (ATR), and the day-type prior (ADX/±DI) are the *right* use; the momentum/participation oscillators (RSI, MACD, **OBV**) describe a **multi-week state** and must never be read as same-session timing or participation. The real scalper's edge — Level 2 / order flow / tape speed — is **not in this toolset**; it's on the Webull screen. This skill is **prep + review + lagging context**, NOT the live execution surface. Never pretend to out-speed the user's chart.
 3. **Never green-light a click.** Produce the map, the levels, and the rules. The user pulls the trigger. Do not encourage more trading; if anything, bias toward "wait."
 4. **SPY/QQQ only.** These have the penny-wide spreads + daily expirations that make option scalping viable. If `$ARGUMENTS.symbol` is anything else, refuse: *"Scalp skill is SPY/QQQ-only — single-name option spreads + thinner expiries break the scalp math. Use /ta for single-name intraday levels."*
 5. **Account = Webull "Individual Cash."** Scalping lives there (per memory). Review mode resolves it via `get_app_subscriptions` and defaults to the `Individual Cash` account — never hardcode the ID.
 
 Parse `$ARGUMENTS.mode`: empty → `prep` (default). Valid: `prep`, `review`, `check`.
+
+---
+
+## Live layer — your screen (Webull Premium)
+
+`/scalp prep` (this skill, via Tradier-backed MCP tools) draws the **map and the lean**. The **live trigger** is not in this toolset — it's on your Webull Premium screen, across four panels. Prep is the skill's job; the click is the screen's. **I can't see any of these live — when price is at an edge, your screen beats `check`.** Read all four **only when price is at a pre-mapped edge** (Step 3); mid-range they're noise. And remember the instrument has to be SPY/QQQ — penny option spreads + 0DTE — for any of this to be tradeable.
+
+**1. Level 2 order book (depth curve + ladder) — "bounce or break at this level?"**
+- The book is *resting intentions*, not trades — and displayed size is a **promise, not a commitment** (it can be pulled). Never trust a wall just because it's big. Lit Nasdaq depth only: hidden/iceberg/dark size isn't shown.
+- At a mapped edge, the wall does one of three things:
+  - **Refreshes** when hit (size reloads) → real absorption → **bounce / fade holds**.
+  - **Eaten** — shrinks *with prints going off on the tape* → real demand → **break, go-with**.
+  - **Pulled** — vanishes *with no prints* → spoof → **break, but hollow — be careful**.
+- Eaten vs pulled is the whole read, and L2 alone can't tell them apart → confirm on the tape.
+- **When it's too fast:** widen the price **grouping** (collapses the flicker into fewer fatter levels), watch the **depth curve** (moves slower than the rows), or switch your primary read to the tape.
+
+**2. Time & Sales — the tape — "is the move real?"**
+- Executed prints (reality) vs L2's intentions. The **lie-detector** for the book.
+- **Filter to size** (e.g. ≥100) — kill the 1–50-lot router spray; read only prints that matter.
+- **Color = aggressor:** green = buyer lifted the offer; red = seller hit the bid; neutral = mid/hidden. Read the *balance of color*, not just that trades happened. (The side tag is an inference from price-vs-quote — shaky when the quote's moving fast.)
+- **Sweeps:** a burst of same-instant prints across several prices = **one** aggressive order, not many traders — don't overcount.
+- **Speed:** accelerating prints = momentum; *unreadably* fast = the burst itself → **not your entry, wait for the pullback** where it slows enough to read.
+
+**3. NOII (Net Order Imbalance Indicator) — auction lean — open & close windows only**
+- Live only in the cross windows: **~9:28–9:30 (Opening Cross)** and **~3:50–4:00 (Closing Cross)** — i.e. inside your two trade windows.
+- **Imbalance Side** = which side has unpaired MOC/LOC interest. **Near / Far** indicative prices *above* Reference = the cross is leaning **up**; *below* = leaning **down**. Low **Price Variance** (<1%) = stable, trustworthy indication.
+- Use as a **directional lean into the print** (persistent buy imbalance + rising indicatives = MOC buying pinning up into 4:00).
+- **Caveat:** it can flip in the final seconds as offsetting orders land. A *lean*, not a lock.
+
+**4. Vol Analysis (volume-at-price) — the level-map input**
+- Volume traded *at each price*, split buy/sell. **High-volume nodes (HVNs) are S/R magnets** — a stronger level than a round number, because real size changed hands there. Feed them into the Step 3 map.
+- The **buy/sell split** shows who controlled each shelf (heavy sell node = where sellers capitulated; heavy buy node = where buyers absorbed — e.g. a closing-cross buy print).
+- **Purely descriptive** — it confirms where levels *are*, it does not predict the next move.
+
+**The handoff:** prep hands you the edges; **L2 + tape confirm bounce-vs-break at the edge**, **NOII gives the auction lean** in the open/close windows, **Vol Analysis sharpens where the edges are**. The stop and the edge-discipline still do the real work — these confirm a trade at a pre-mapped level, they never manufacture one.
 
 ---
 
@@ -39,7 +74,7 @@ Run this before the open (or early in the session). One command that produces th
 - **Negative GEX** → trend/momentum day. Go *with* breakouts; do not fade.
 - Note DIX (accumulation vs distribution) and any divergence flag as background, not a same-day trigger.
 
-**Step 2 — daily bias (a weak prior, not a verdict).** Call `get_technical_indicators` (daily). Read **ADX** (>25 = real trend, <20 = chop/no-trend), **+DI/-DI** direction, price vs **SMA20/SMA50**, **MACD**. Output one line: "which direction am I *allowed* to scalp, and is it even a trend day." **State the override rule:** the intraday tape (VWAP + structure) overrules this daily bias for a same-day scalp — on a conflict, the tape wins; the daily read just sets the lean.
+**Step 2 — daily bias (a weak prior, not a verdict).** Call `get_technical_indicators` (daily). Use it for **levels + day-type only**: **ADX** (>25 = real trend, <20 = chop/no-trend) and **+DI/-DI** set whether it's even a trend day and which way; price vs **SMA20/SMA50** + Bollinger bands are *levels* feeding Step 3; **ATR** is the range envelope for Step 5. **RSI / MACD / OBV here are multi-week state — they color the lean and the fragility check, never an intraday entry.** Output one line: "which direction am I *allowed* to scalp, and is it even a trend day." **State the override rule:** the intraday tape (VWAP + structure) overrules this daily bias for a same-day scalp — on a conflict, the tape wins; the daily read just sets the lean.
 
 **Step 3 — level map.** Call `get_quote` (prev close, day H/L, 52w), `get_timesales` (prior or current session, 15min — for intraday structure), and `get_vwap` (if open). Map and state as **price points**:
 - Prior-day high / low / close (the primary pivots).
@@ -49,7 +84,7 @@ Run this before the open (or early in the session). One command that produces th
 - VWAP + its slope (once open).
 For deeper structural S/R, defer to `/ta $ARGUMENTS.symbol` rather than re-deriving — reuse, don't duplicate.
 
-**Step 4 — fragility check.** Flag anything that weakens the bias: OBV divergence (from Step 2), DIX accumulation-into-weakness, price sitting on a major level (bounce/break risk). If fragile → shrink size, shorten leash.
+**Step 4 — fragility check.** Flag anything that weakens the bias: daily OBV divergence (from Step 2), DIX accumulation-into-weakness, price sitting on a major level (bounce/break risk). If fragile → shrink size, shorten leash. **Caveat — daily OBV is a ~20-day signal:** it speaks to the *multi-week* structure (distribution vs accumulation), NOT whether a specific session's move had buyers. To judge participation of *today's / the prior session's* move, use **session volume vs avg + volume on the breakout/close bars** (`get_quote` + `get_timesales`), not daily OBV. Never read a 20-day divergence as "today's rally was hollow" — right signal, wrong altitude.
 
 **Step 5 — the plan.** Output the day's structure tightly:
 - **The edges:** support edge ↔ resistance edge (the range you fade inside, or the breakout level you go with).
@@ -102,7 +137,7 @@ The feedback loop on discipline. Run after the close (or when the user says "don
 
 ## Mode `check` — thin live snapshot (use sparingly)
 
-A quick "where are we" relative to the prep map. **This is lagging context — the Webull chart + L2 is the real-time surface. Do not use this to chase.**
+A quick "where are we" relative to the prep map. **This is lagging context — the Webull chart + the four Live-layer panels are the real-time surface. Do not use this to chase.**
 
 Call `get_quote` + `get_vwap` + `get_timesales` (last ~10 1-min bars) for `$ARGUMENTS.symbol`. Output 3 lines max:
 - **Price vs VWAP** (side + slope) and distance to the nearest mapped edge.
