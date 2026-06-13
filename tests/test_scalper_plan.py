@@ -111,3 +111,17 @@ def test_contract_and_bracket_default_when_absent(tmp_path: Path) -> None:
     assert all(lvl.contract is None for lvl in plan.levels)
     assert plan.target_pct == 0.20  # default when absent
     assert plan.contracts == 1
+
+
+def test_load_parses_level_mode_and_defaults_to_fade(tmp_path: Path) -> None:
+    p = tmp_path / "plan.yaml"
+    p.write_text(
+        "date: 2026-06-12\nsymbol: QQQ\nregime: breakout-trend\nlean: both\n"
+        "levels:\n"
+        '  - {price: 723.10, side: resistance, stop: 723.70, mode: break, contract: "X"}\n'
+        "  - {price: 719.40, side: support, stop: 718.90}\n"
+    )
+    plan = load_session_plan(p)
+
+    assert plan.levels[0].mode == "break"
+    assert plan.levels[1].mode == "fade"  # default when absent

@@ -12,7 +12,9 @@ Note: ``levels`` are *underlying* prices that drive ``SetupDetector`` (which
 watches the underlying). Each level optionally names the *option* ``contract`` to
 buy when it tags; the paper bracket's stop/target are a percent of the option
 premium (``default_stop_pct`` / ``target_pct``), so ``level.stop`` (an underlying
-price) is alert-text only.
+price) is alert-text only. Each level also carries a ``mode`` — ``fade``
+(touch-and-reject, the positive-GEX setup) or ``break`` (cross-and-follow-through,
+the negative-GEX setup) — which the detector uses to pick its trigger geometry.
 """
 
 from dataclasses import dataclass, field
@@ -29,6 +31,7 @@ class Level:
     side: str  # "support" | "resistance"
     stop: float
     contract: str | None = None  # OCC option symbol to BUY when this level tags
+    mode: str = "fade"  # "fade" (touch + reject) | "break" (cross + follow-through)
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,6 +63,7 @@ def load_session_plan(path: Path) -> SessionPlan:
             side=str(lvl["side"]),
             stop=float(lvl["stop"]),
             contract=(str(lvl["contract"]) if lvl.get("contract") else None),
+            mode=str(lvl.get("mode", "fade")),
         )
         for lvl in (data.get("levels") or [])
     ]

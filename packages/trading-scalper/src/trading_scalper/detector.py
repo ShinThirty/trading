@@ -1,23 +1,38 @@
-"""SetupDetector — prompts an entry when the underlying tags a blessed level.
+"""SetupDetector — fires a confirmed entry when the underlying tags a blessed level.
 
-On a *degraded* view (top-of-book + tape, no L2 ladder) it fires when the
-underlying price tags one of the morning's blessed levels, filtered by the
-plan's ``lean``, annotated with the tape direction. Each fire does two things:
-it ``notify``s the human (the prompt), and — if that level names an option
-``contract`` — emits a ``TradeProposal`` to ``propose`` so the paper broker can
-auto-execute the same bracket. A level with no contract stays alert-only.
+On a *degraded* view (top-of-book + tape, no L2 ladder) it confirms a setup from
+three things that are all already on the wire:
 
-Hysteresis: a level fires once per tag — it re-arms only after price leaves the
-band — so a price hovering on a level doesn't spam (one prompt + one paper
-bracket per tag).
+1. **Geometry** keyed to the level's ``mode``:
+   - ``fade`` (positive-GEX setup): price touches within ``tolerance`` of the level
+     — the mean-reversion trade at a gamma wall (touch-and-reject).
+   - ``break`` (negative-GEX setup): price *crosses* the level by ``break_margin``
+     in the trade's direction — the momentum trade (cross-and-follow-through).
+2. **Lean** — the plan's ``lean`` must allow the trade *direction* (a call/long
+   needs ``long-only`` or ``both``; a put/short needs ``short-only`` or ``both``).
+3. **Tape** — the last timesale's aggressor side must agree with the option's
+   direction (a call wants buyers lifting offers; a put wants sellers hitting
+   bids). Direction is read from the level's ``contract`` (``parse_occ``); for an
+   alert-only level it's derived from ``side`` + ``mode``.
 
-Inputs are the *underlying* feed (QQQ/SPY trades + timesales); the option
-contract feed is what fills the bracket in the broker.
+Only a setup that clears all three fires — there is no bare-touch heads-up. The
+fire ``notify``s the human and, if the level names a ``contract``, emits a
+``TradeProposal`` so the paper broker auto-executes the same bracket. A
+**spread gate** sits on the proposal only: a confirmed-but-wide option still
+alerts (work a limit) but is not paper-filled, keeping the paper book's fills
+honest. The underlying's top-of-book size imbalance is a soft annotation, never
+a gate.
+
+Hysteresis: ``_active`` is set only on a *confirmed* fire, so an unconfirmed tag
+keeps re-evaluating in-zone until the tape turns, then fires once; it re-arms
+when price leaves the zone. Tape direction comes from timesales, so a level seen
+only by trades (no timesale) waits for a tape print before it can confirm.
 """
 
 from collections.abc import Callable
 
-from trading_clients.market_stream import TimeSale, Trade
+from trading_clients.market_stream import Quote, TimeSale, Trade
+from trading_clients.options import parse_occ
 
 from trading_scalper.domain import TradeProposal
 from trading_scalper.plan import Level, SessionPlan
@@ -35,14 +50,22 @@ class SetupDetector:
         *,
         tolerance: float = 0.10,
         rearm_margin: float = 0.05,
+        break_margin: float = 0.05,
+        spread_max_pct: float = 0.10,
     ) -> None:
         self._plan_source = plan_source
         self._notify = notify
         self._propose = propose
         self._tolerance = tolerance
         self._rearm_margin = rearm_margin
+        self._break_margin = break_margin
+        self._spread_max_pct = spread_max_pct
         self._tape_side: dict[str, str] = {}
-        self._active: set[tuple[float, str]] = set()  # (level.price, side) currently tagged
+        self._quotes: dict[str, Quote] = {}  # symbol -> latest top-of-book (underlying + options)
+        self._active: set[tuple[float, str]] = set()  # (level.price, side) currently fired
+
+    def on_quote(self, quote: Quote) -> None:
+        self._quotes[quote.symbol] = quote
 
     def on_trade(self, trade: Trade) -> None:
         self._evaluate(trade.symbol, trade.price)
@@ -55,34 +78,81 @@ class SetupDetector:
         plan = self._plan_source()
         if plan is None or plan.symbol != symbol:
             return
+        tape = self._tape_side.get(symbol, "mixed")
         for level in plan.levels:
             key = (level.price, level.side)
-            distance = abs(price - level.price)
-            if distance <= self._tolerance:
-                if key not in self._active and _lean_allows(plan.lean, level.side):
+            confirming = _confirming_side(level)
+            if self._in_zone(level, price, confirming):
+                if (
+                    key not in self._active
+                    and _lean_allows(plan.lean, confirming)
+                    and tape == confirming
+                ):
                     self._active.add(key)
                     self._fire(plan, symbol, level)
-            elif key in self._active and distance > self._tolerance + self._rearm_margin:
-                self._active.discard(key)  # left the band -> re-arm this level
+            elif key in self._active and self._cleared(level, price, confirming):
+                self._active.discard(key)  # left the zone -> re-arm this level
+
+    def _in_zone(self, level: Level, price: float, confirming: str) -> bool:
+        """Geometry gate: fade = within tolerance; break = crossed by break_margin."""
+        if level.mode == "break":
+            if confirming == "buy":
+                return price >= level.price + self._break_margin
+            return price <= level.price - self._break_margin
+        return abs(price - level.price) <= self._tolerance
+
+    def _cleared(self, level: Level, price: float, confirming: str) -> bool:
+        """Re-arm gate: fade = left the band; break = retraced back across the level."""
+        if level.mode == "break":
+            return price <= level.price if confirming == "buy" else price >= level.price
+        return abs(price - level.price) > self._tolerance + self._rearm_margin
 
     def _fire(self, plan: SessionPlan, symbol: str, level: Level) -> None:
-        """Prompt the human, and (if the level names a contract) propose the bracket."""
+        """Prompt the human; propose the bracket if there's a contract with a tradeable spread."""
         message = self._message(symbol, level)
-        self._notify(message)
         if level.contract and self._propose is not None:
-            self._propose(
-                TradeProposal(
-                    contract=level.contract,
-                    quantity=plan.contracts,
-                    stop_pct=plan.default_stop_pct,
-                    target_pct=plan.target_pct,
-                    reason=message,
+            if self._spread_ok(level.contract):
+                self._notify(message)
+                self._propose(
+                    TradeProposal(
+                        contract=level.contract,
+                        quantity=plan.contracts,
+                        stop_pct=plan.default_stop_pct,
+                        target_pct=plan.target_pct,
+                        reason=message,
+                    )
                 )
-            )
+            else:
+                self._notify(f"{message} — option spread too wide; alert only, no paper fill")
+        else:
+            self._notify(message)
+
+    def _spread_ok(self, contract: str) -> bool:
+        """Spread gate (proposal only): True unless the option's quoted spread is too wide."""
+        q = self._quotes.get(contract)
+        if q is None or q.bid is None or q.ask is None or q.ask <= 0:
+            return True  # no quote to judge — best-effort, don't block
+        return (q.ask - q.bid) / q.ask <= self._spread_max_pct
 
     def _message(self, symbol: str, level: Level) -> str:
         tape = _TAPE_PHRASE.get(self._tape_side.get(symbol, "mixed"), "tape mixed")
-        return f"{symbol} tagged {level.price:g} {level.side} — {tape}; plan stop {level.stop:g}"
+        verb = "broke" if level.mode == "break" else "tagged"
+        return (
+            f"{symbol} {verb} {level.price:g} {level.side} [{level.mode}] — "
+            f"{tape}{self._book_note(symbol)}; plan stop {level.stop:g}"
+        )
+
+    def _book_note(self, symbol: str) -> str:
+        """Soft top-of-book imbalance annotation (never a gate — inside-quote only)."""
+        q = self._quotes.get(symbol)
+        if q is None or q.bid_size is None or q.ask_size is None:
+            return ""
+        sizes = f" {q.bid_size}x{q.ask_size}"
+        if q.bid_size > q.ask_size * 1.5:
+            return f"; book bid-heavy{sizes}"
+        if q.ask_size > q.bid_size * 1.5:
+            return f"; book offer-heavy{sizes}"
+        return f"; book balanced{sizes}"
 
 
 def _tape_side(ts: TimeSale) -> str:
@@ -93,17 +163,33 @@ def _tape_side(ts: TimeSale) -> str:
     return "mixed"
 
 
-def _lean_allows(lean: str, side: str) -> bool:
+def _confirming_side(level: Level) -> str:
+    """The tape aggressor side that confirms this level's trade direction (buy/sell)."""
+    if level.contract is not None:
+        try:
+            _root, _exp, opt_type, _strike = parse_occ(level.contract)
+            return "buy" if opt_type == "call" else "sell"
+        except (IndexError, ValueError):
+            pass  # malformed contract — fall back to side + mode
+    # alert-only (or unparseable): derive direction from side + mode
+    # (break inverts the fade mapping: a resistance breakout is a long, not a short)
+    bullish = (level.side == "support") == (level.mode != "break")
+    return "buy" if bullish else "sell"
+
+
+def _lean_allows(lean: str, confirming: str) -> bool:
+    """Gate on the trade *direction* (buy=long, sell=short), so break-mode flips work."""
     if lean == "both":
         return True
     if lean == "long-only":
-        return side == "support"
+        return confirming == "buy"
     if lean == "short-only":
-        return side == "resistance"
+        return confirming == "sell"
     return False  # no-trade / unknown
 
 
 def watch_setups(feed: MarketDataFeed, detector: SetupDetector) -> None:
-    """Wire the underlying tape into the detector (trades + timesales)."""
+    """Wire the underlying tape + quotes into the detector (quotes, trades, timesales)."""
+    feed.on_quote(detector.on_quote)
     feed.on_trade(detector.on_trade)
     feed.on_timesale(detector.on_timesale)

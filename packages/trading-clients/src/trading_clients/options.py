@@ -529,6 +529,111 @@ def classify_positioning(p: dict[str, float | int | None]) -> str:
     return "Balanced"
 
 
+def _zero_gamma_crossing(rows: list[dict[str, float]]) -> float | None:
+    """Strike (linearly interpolated) where cumulative signed gamma crosses zero.
+
+    Walks strikes ascending, accumulating ``net_gex``; returns the price where the
+    running total flips sign — a coarse proxy for the gamma-flip level. ``None`` if
+    it never flips (single-sign profile). The *true* flip needs re-pricing gamma at
+    each candidate spot; this uses the chain's reported (current-spot) gammas, which
+    is good enough as a regime tripwire, not a model.
+    """
+    cum = 0.0
+    points: list[tuple[float, float]] = []
+    for r in rows:
+        cum += r["net_gex"]
+        points.append((r["strike"], cum))
+    if points and points[0][1] == 0.0:
+        return points[0][0]
+    for (k0, c0), (k1, c1) in zip(points, points[1:], strict=False):
+        if c1 == 0.0:
+            return k1
+        if (c0 < 0) != (c1 < 0):  # straddles zero between these two strikes
+            return k0 + (-c0 / (c1 - c0)) * (k1 - k0)
+    return None
+
+
+def gamma_exposure_profile(
+    chain: list[dict],
+    spot: float,
+    multiplier: int = CONTRACT_MULTIPLIER,
+) -> dict[str, object]:
+    """Dealer gamma-exposure profile from an option chain (pure, no I/O).
+
+    Per strike, dollar gamma = ``gamma * open_interest * multiplier * spot**2 * 0.01``,
+    signed +1 for calls and -1 for puts (the standard dealer-long-calls /
+    short-puts convention): a positive total => dealers net long gamma =>
+    vol-suppressing / pinning regime; negative => vol-amplifying / trending.
+
+    Reads ``o["greeks"]["gamma"]``, ``o["open_interest"]``, ``o["strike"]``,
+    ``o["option_type"]`` — the same chain shape ``options_positioning`` consumes.
+
+    Returns a dict with:
+      total_gex   signed dollar gamma summed across the chain
+      regime      "positive" | "negative"
+      call_wall   strike with the largest positive (call) dollar gamma, or None
+      put_wall    strike with the largest put dollar-gamma magnitude, or None
+      zero_gamma  spot where the strike-ordered cumulative signed gamma crosses
+                  zero (see ``_zero_gamma_crossing``), or None
+      by_strike   [{strike, call_gex, put_gex, net_gex}] ascending by strike
+    """
+    if spot <= 0:
+        return {
+            "total_gex": 0.0,
+            "regime": "positive",
+            "call_wall": None,
+            "put_wall": None,
+            "zero_gamma": None,
+            "by_strike": [],
+        }
+
+    spot2 = spot * spot
+    by_strike: dict[float, dict[str, float]] = {}
+    for o in chain:
+        ot = o.get("option_type")
+        if ot not in ("call", "put"):
+            continue
+        strike = o.get("strike")
+        if strike is None:
+            continue
+        oi = int(o.get("open_interest") or 0)
+        if oi <= 0:
+            continue
+        gamma = (o.get("greeks") or {}).get("gamma")
+        if gamma is None:
+            continue
+        dollar = float(gamma) * oi * multiplier * spot2 * 0.01
+        entry = by_strike.setdefault(float(strike), {"call_gex": 0.0, "put_gex": 0.0})
+        if ot == "call":
+            entry["call_gex"] += dollar
+        else:
+            entry["put_gex"] -= dollar  # puts contribute negative gamma
+
+    rows: list[dict[str, float]] = [
+        {
+            "strike": k,
+            "call_gex": by_strike[k]["call_gex"],
+            "put_gex": by_strike[k]["put_gex"],
+            "net_gex": by_strike[k]["call_gex"] + by_strike[k]["put_gex"],
+        }
+        for k in sorted(by_strike)
+    ]
+    total = sum(r["net_gex"] for r in rows)
+    call_rows = [r for r in rows if r["call_gex"] > 0]
+    put_rows = [r for r in rows if r["put_gex"] < 0]
+    call_wall = max(call_rows, key=lambda r: r["call_gex"], default=None)
+    put_wall = min(put_rows, key=lambda r: r["put_gex"], default=None)
+
+    return {
+        "total_gex": total,
+        "regime": "positive" if total >= 0 else "negative",
+        "call_wall": call_wall["strike"] if call_wall else None,
+        "put_wall": put_wall["strike"] if put_wall else None,
+        "zero_gamma": _zero_gamma_crossing(rows),
+        "by_strike": rows,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Strategy detection
 # ---------------------------------------------------------------------------

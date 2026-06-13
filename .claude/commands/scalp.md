@@ -68,11 +68,11 @@ Run this before the open (or early in the session). One command that produces th
 
 **Step 0 — clock.** Call `get_market_clock`. If pre-market, VWAP/timesales have no current-session data → build levels from the **prior** session (note it). If open, use live data.
 
-**Step 1 — regime (the day-type filter).** Call `get_dix_gex`. Read GEX sign + **1-month percentile**, and translate to a scalp playbook:
-- **Positive GEX, high percentile** → strong dealer pin. Range/mean-revert day: fade the edges back to VWAP, dip-buys reliable.
-- **Positive GEX, LOW percentile (≤~10)** → suppression is *thinning*. Still a pin, but **fragile** — a volume break can extend and round-trip the fade. Flag this explicitly; it's the trap.
-- **Negative GEX** → trend/momentum day. Go *with* breakouts; do not fade.
-- Note DIX (accumulation vs distribution) and any divergence flag as background, not a same-day trigger.
+**Step 1 — regime + the gamma map (the day-type filter).** Call **`get_gamma_profile $ARGUMENTS.symbol`** — the instrument-specific GEX read: the **regime sign**, the **call wall / put wall** (the strikes that act as magnets in +GEX / accelerants in −GEX — your actual edges, not arbitrary lines), and the **zero-gamma flip** (the price at which the regime itself flips). Then call `get_dix_gex` as the **SPX-wide sanity prior** (EOD, one day stale): GEX sign + **1-month percentile** for the fragility read, plus DIX accumulation/distribution as background. Translate to a scalp playbook:
+- **Positive GEX** → dealers suppress vol. Range/mean-revert day: **fade the walls** back toward the flip/VWAP (`regime: pin`, `mode: fade`). Call wall caps, put wall supports.
+- **Positive GEX but low SqueezeMetrics percentile (≤~10) / small total GEX** → suppression is *thinning*. Still a pin, but **fragile** — a volume break can round-trip the fade. Flag it (`regime: fragile-pin`); it's the trap.
+- **Negative GEX** → dealers amplify. Trend/momentum day: **trade the break** through the walls (`regime: breakout-trend`, `mode: break`), never fade. The zero-gamma flip is the line that, once crossed, confirms the trending regime.
+- DIX divergence is background, not a same-day trigger.
 
 **Step 2 — daily bias (a weak prior, not a verdict).** Call `get_technical_indicators` (daily). Use it for **levels + day-type only**: **ADX** (>25 = real trend, <20 = chop/no-trend) and **+DI/-DI** set whether it's even a trend day and which way; price vs **SMA20/SMA50** + Bollinger bands are *levels* feeding Step 3; **ATR** is the range envelope for Step 5. **RSI / MACD / OBV here are multi-week state — they color the lean and the fragility check, never an intraday entry.** Output one line: "which direction am I *allowed* to scalp, and is it even a trend day." **State the override rule:** the intraday tape (VWAP + structure) overrules this daily bias for a same-day scalp — on a conflict, the tape wins; the daily read just sets the lean.
 
@@ -96,9 +96,13 @@ For deeper structural S/R, defer to `/ta $ARGUMENTS.symbol` rather than re-deriv
 
 The `trading-scalper` paper daemon (see `docs/scalper-automation.md`) watches these same edges off the live tape and **paper-trades** them — prompting you to enter and auto-placing the same option bracket in an in-memory broker so the detector builds a reviewable track record. The plan file **is** the handoff: prep draws the map, the daemon watches it. Emit it now.
 
-1. **Resolve a tradeable option contract per lean-permitted edge.** The detector maps **support → buy a call**, **resistance → buy a put**, and only fires the edges today's `lean` allows (`long-only` → support, `short-only` → resistance, `both` → either). So attach a `contract` **only** to the edges the lean permits — a contract on a forbidden edge never fires and just wastes a subscribe slot. Leave the rest alert-only (no `contract`).
+1. **Resolve a tradeable option contract per wall, and set its `mode`.** The walls from Step 1 are the edges; *how* you trade an edge is the regime, so the call/put mapping is **mode-dependent**:
+   - **Positive GEX → `mode: fade`** (mean-revert at the wall): **put wall (support) → buy a CALL**, **call wall (resistance) → buy a PUT**.
+   - **Negative GEX → `mode: break`** (momentum through the wall): the mapping **inverts** — **call wall (resistance) → buy a CALL** (breakout up), **put wall (support) → buy a PUT** (breakdown).
+
+   The detector reads the option's call/put from the `contract` and fires only when the tape agrees (a call wants buyers lifting offers; a put wants sellers hitting bids) — and for a `break` level only after price *crosses* the wall with follow-through, not on the first poke. **`lean` now gates on trade direction, not the level's side:** `long-only` permits any CALL/long (including a breakout call at a resistance wall), `short-only` any PUT/short, `both` either, `no-trade` none. Attach a `contract` **only** to walls the lean permits; leave the rest alert-only (no `contract`).
    - `get_option_expirations $ARGUMENTS.symbol` → take the **nearest** expiry (0DTE if today is an expiration date, else 1DTE — a true scalp trades the front daily).
-   - `get_option_chain` (that expiry + the relevant side) → pick the strike **closest to the level's underlying price** (ATM-at-the-level), or one strike OTM in the trade direction for more gamma. **Confirm it's penny-wide with real size** (chain bid/ask, `get_iv_metrics` liquidity) — a wide or dead strike isn't scalpable; if a level has no liquid contract, leave it alert-only.
+   - `get_option_chain` (that expiry + the relevant side) → pick the strike **closest to the wall's underlying price** (ATM-at-the-wall), or one strike OTM in the trade direction for more gamma. **Confirm it's penny-wide with real size** (chain bid/ask, `get_iv_metrics` liquidity) — a wide or dead strike isn't scalpable; if a wall has no liquid contract, leave it alert-only.
    - Use the **exact `symbol` the chain returns** (OCC format, e.g. `QQQ260612C00720000`). Do **not** hand-construct it — a strike-padding slip feeds the daemon a dead Tradier subscribe.
 
 2. **Write the file** (Write tool) to `~/.trading/scalp/{date}-{symbol}.yaml` — `{date}` = the session date `YYYY-MM-DD`, `{symbol}` = SPY/QQQ. Shape:
@@ -106,22 +110,26 @@ The `trading-scalper` paper daemon (see `docs/scalper-automation.md`) watches th
 ```yaml
 date: 2026-06-12          # session date — MUST match the daemon's run date or it won't load
 symbol: QQQ
-regime: fragile-pin       # pin | fragile-pin | breakout-trend  (from Step 1)
+regime: fragile-pin       # pin | fragile-pin | breakout-trend  (from Step 1 GEX sign)
 lean: both                # long-only | short-only | both | no-trade  (Step 1 + Step 2)
 contracts: 1              # qty per setup
 default_stop_pct: 0.20    # child stop-loss   = entry premium * (1 - pct)
 target_pct: 0.20          # child take-profit = entry premium * (1 + pct)
-levels:                   # underlying prices; each names the option to BUY if it tags
-  - {price: 719.40, side: support,    stop: 718.90, contract: "QQQ260612C00720000"}
-  - {price: 723.10, side: resistance, stop: 723.70, contract: "QQQ260612P00723000"}
+levels:                   # the gamma walls; each names the option to BUY if it tags
+  # POSITIVE GEX → fade: put wall (support) → CALL, call wall (resistance) → PUT
+  - {price: 719.40, side: support,    stop: 718.90, mode: fade, contract: "QQQ260612C00720000"}
+  - {price: 723.10, side: resistance, stop: 723.70, mode: fade, contract: "QQQ260612P00723000"}
 session_caps:             # recorded for your discipline (see caveat) — not daemon-enforced
   max_trades: 3
   daily_stop_usd: 150
-notes: "GEX +ve low %ile — pin fragile; fade only to VWAP, never a breakout"
+notes: "Fragile pin: total GEX +ve but thin. Fade walls to the 721 zero-gamma flip; a break of 721 on volume = regime flipped to trend — stop fading."
 ```
+
+**Negative-GEX (trend) day** — set `regime: breakout-trend`, `mode: break` on every level, and **invert** the contract mapping: **call wall (resistance) → CALL** (breakout up), **put wall (support) → PUT** (breakdown). The detector then fires only on a *cross + follow-through* of the wall, not a touch. The **zero-gamma flip is a human-watched regime line** — put it in `notes` and the Step 5 invalidation, not as a level (the detector's tape-gated fire is one-directional, so it can't cleanly ping a bidirectional regime cross).
 
 3. **State these caveats after writing — they are easy to get wrong:**
    - **The bracket is a percent of the *option premium*, not the underlying.** `default_stop_pct` / `target_pct` default to **−20 % / +20 %**, matching the Webull native 1st-Trigger bracket you place by hand. `level.stop` (an underlying price) is **alert-text only** — the daemon never uses it for the paper stop.
+   - **`mode` + tape gate the fire.** `fade` fires on a touch-and-reject within the band; `break` fires only after price crosses the wall with follow-through. Either way the daemon also needs the **tape to confirm** (a call needs buyers lifting offers; a put needs sellers hitting bids) and skips the paper fill if the option's quoted spread is too wide — a confirmed-but-wide setup still alerts (work a limit) but won't paper-trade. There is **no bare-touch heads-up**: an unconfirmed tag stays silent.
    - **`session_caps` are recorded, not enforced.** The paper daemon dropped the old discipline engine; max-trades / daily-stop live in the file for *your* record (and the Step 7 checklist) — honor them yourself.
    - **The subscribe list is fixed at launch.** The daemon subscribes to these contracts at startup; adding a *new* contract mid-session needs a restart (levels/lean still hot-reload for alerting).
    - **Graceful degrade:** a level with no `contract` is alert-only; no file at all = the daemon stays silent.

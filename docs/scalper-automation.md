@@ -119,10 +119,17 @@ price yields one prompt + one paper bracket, not a spam stream.
    underlyings *and* the plan's option contracts; emits quote/trade/timesale.
    `drive_paper_fills` fans every print into the `PaperBroker` matching engine, so
    option prints fill the bracket and underlying prints feed the detector.
-2. **`SetupDetector` + `Notifier`** — on a level tag (lean-filtered, tape-
-   annotated) it `notify`s the human (console line + terminal bell) and, if the
-   level names an option `contract`, emits a `TradeProposal`. A level with no
-   contract is alert-only.
+2. **`SetupDetector` + `Notifier`** — fires only a *confirmed* setup, gated on
+   three things already on the wire: **geometry** keyed to the level's `mode`
+   (`fade` = touch-and-reject within the band, the +GEX trade; `break` =
+   cross-the-wall-with-follow-through, the −GEX trade), **lean** (on the trade
+   *direction* — a call/long needs `long-only`/`both`, a put/short
+   `short-only`/`both`), and **tape** (the print aggressor must agree with the
+   option's call/put). On a confirmed fire it `notify`s the human (console line +
+   bell) and, if the level names a `contract` whose quoted spread is tradeable,
+   emits a `TradeProposal`; a confirmed-but-wide spread still alerts but is not
+   paper-filled (honest fills). There is no bare-touch heads-up. Underlying
+   top-of-book size imbalance is a soft annotation, never a gate.
 3. **`PaperBroker.place_bracket`** — opens the proposed contract at market and
    rests an OCO stop-loss (`entry*(1-stop_pct)`) / take-profit (`entry*(1+target_pct)`)
    pair, mirroring the native Webull bracket. Position + realized P&L are computed
@@ -143,20 +150,25 @@ dated, hand-editable flat file:
 ```yaml
 date: 2026-06-12
 symbol: QQQ
-regime: fragile-pin          # pin | fragile-pin | breakout-trend
+regime: fragile-pin          # pin | fragile-pin | breakout-trend  (GEX sign)
 lean: both                   # long-only | short-only | both | no-trade
 contracts: 1                 # quantity per setup
 default_stop_pct: 0.20       # child stop-loss = entry * (1 - pct)
 target_pct: 0.20             # child take-profit = entry * (1 + pct)
-levels:                      # each edge + the option to buy if it tags
-  - {price: 719.40, side: support,    stop: 718.90, contract: "QQQ260612C00720000"}
-  - {price: 723.10, side: resistance, stop: 723.70, contract: "QQQ260612P00723000"}
-notes: "GEX +ve low %ile — pin fragile; fade only to VWAP, never a breakout"
+levels:                      # the gamma walls + the option to buy if it triggers
+  # +GEX → fade: put wall (support) → CALL, call wall (resistance) → PUT
+  - {price: 719.40, side: support,    stop: 718.90, mode: fade, contract: "QQQ260612C00720000"}
+  - {price: 723.10, side: resistance, stop: 723.70, mode: fade, contract: "QQQ260612P00723000"}
+notes: "Fragile pin: fade the walls to the zero-gamma flip; a break of it = trend, stop fading"
 ```
 
-- `levels` are *underlying* prices that drive the detector. Each `contract` is the
-  *option* to buy when that level tags (a support → call, a resistance → put: you
-  pick the strike in `/scalp prep`). `level.stop` is now **alert-text only** — the
+- `levels` are *underlying* prices (ideally the GEX **walls** from
+  `get_gamma_profile`) that drive the detector. Each `mode` picks the trigger
+  geometry — `fade` (touch-and-reject) or `break` (cross-and-follow-through) — and
+  the `contract` is the *option* to buy when it triggers. The call/put mapping is
+  mode-dependent: in `fade` a support → call and a resistance → put; in `break`
+  this **inverts** (a resistance breakout → call, a support breakdown → put). You
+  pick the strike in `/scalp prep`. `level.stop` is **alert-text only** — the
   bracket's stop/target are a percent of the *option* premium.
 - The daemon loads today's file on launch and **hot-reloads on change** (re-run
   `/scalp prep` and edited levels/lean are picked up). **Caveat:** the Tradier
@@ -164,8 +176,9 @@ notes: "GEX +ve low %ile — pin fragile; fade only to VWAP, never a breakout"
   a restart.
 - **Missing file = graceful degrade:** no plan → the detector is silent (no
   prompts, no paper trades). A level with no `contract` → alert-only.
-- `/scalp prep` **writes this file** — it resolves a liquid 0-1DTE option per
-  lean-permitted edge (support → call, resistance → put) off the chain and emits
+- `/scalp prep` **writes this file** — it reads the regime + gamma walls from
+  `get_gamma_profile`, sets each level's `mode` from the GEX sign, resolves a
+  liquid 0-1DTE option per wall off the chain (mode-correct call/put), and emits
   the YAML; the file stays hand-editable to nudge an edge before the open.
 
 This is the seam: **skill draws the map → `~/.trading/scalp/*.yaml` → daemon

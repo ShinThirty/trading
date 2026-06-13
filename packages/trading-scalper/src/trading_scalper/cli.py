@@ -133,7 +133,7 @@ def _print_banner(
         )
         for lvl in plan.levels:
             tag = f"→ buy {lvl.contract}" if lvl.contract else "(alert-only, no contract)"
-            print(f"  {lvl.side:<10} {lvl.price:g}  {tag}")
+            print(f"  {lvl.side:<10} {lvl.price:g} [{lvl.mode}]  {tag}")
         if plan.notes:
             print(f"  notes: {plan.notes}")
     else:

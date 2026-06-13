@@ -395,6 +395,96 @@ async def get_options_positioning(
     return "\n".join(sections)
 
 
+@mcp.tool()
+async def get_gamma_profile(
+    ctx: Context,
+    symbol: str,
+    expiration: str | None = None,
+    dte_max: int = 7,
+) -> str:
+    """Dealer gamma-exposure (GEX) profile for an underlying: walls + zero-gamma flip.
+
+    Computes signed dollar gamma per strike from the option chain (+call / -put),
+    then surfaces the regime sign, the call wall (largest positive call gamma), the
+    put wall (largest put gamma magnitude), and the zero-gamma flip (the price where
+    net dealer gamma changes sign — cross it and the regime flips from pinning to
+    trending). Positive total => dealers net long gamma => vol-suppressing /
+    mean-reverting; negative => vol-amplifying / trending.
+
+    For SPY/QQQ this is the regime input the /scalp prep level map keys off: in +GEX
+    fade the walls back toward the flip; in -GEX trade the break, never fade.
+
+    Caveats: the open-interest base is daily-settled (OCC), so positioning is one
+    session stale; the gammas re-anchor to the current spot on each call. The
+    zero-gamma level is a cumulative-crossing proxy, not a re-priced surface.
+
+    symbol: underlying (e.g. QQQ, SPY).
+    expiration: a single expiration (YYYY-MM-DD). If None, aggregates the chain
+      across expirations within dte_max (default 7 — the 0-1DTE scalp window).
+    dte_max: max DTE to include when expiration is None.
+
+    Requires [tradier] section in ~/.tradingrc.
+    """
+    tradier = _tradier(ctx)
+    today = date.today()
+    if expiration is not None:
+        target_exps = [expiration]
+    else:
+        exp_resp = await tradier.get(t.EXPIRATIONS, t.GetExpirationsRequest(symbol))
+        if not exp_resp.dates:
+            return f"(no expirations for {symbol})"
+        target_exps = [
+            d for d in exp_resp.dates if 0 <= (date.fromisoformat(d) - today).days <= dte_max
+        ]
+        if not target_exps:
+            return f"(no expirations for {symbol} within {dte_max} DTE)"
+
+    quote_resp, *chain_resps = await asyncio.gather(
+        tradier.get(t.QUOTES, t.GetQuotesRequest(symbol, greeks=False)),
+        *[tradier.get(t.CHAIN, t.GetChainRequest(symbol, exp, greeks=True)) for exp in target_exps],
+    )
+    if not quote_resp.quotes:
+        return f"(no quote for {symbol})"
+    spot = float(quote_resp.quotes[0].get("last") or quote_resp.quotes[0].get("close", 0))
+    if not spot:
+        return f"(no usable price for {symbol})"
+
+    chain: list[dict] = []
+    for chain_resp in chain_resps:
+        if chain_resp.options:
+            chain.extend(chain_resp.options)
+    if not chain:
+        return f"(no option chains for {symbol})"
+
+    p = opts.gamma_exposure_profile(chain, spot)
+    regime = str(p["regime"])
+    total_v = p["total_gex"]
+    total = float(total_v) if isinstance(total_v, (int, float)) else 0.0
+    playbook = (
+        "dealers net long gamma — vol-suppressing / pinning; fade the walls back to the flip"
+        if regime == "positive"
+        else "dealers net short gamma — vol-amplifying / trending; trade the break, don't fade"
+    )
+
+    def _lvl(v: object) -> str:
+        return f"${fmt_number(float(v))}" if isinstance(v, (int, float)) else "n/a"
+
+    dte_label = (
+        target_exps[0] if expiration is not None else f"{len(target_exps)} exp ≤ {dte_max} DTE"
+    )
+    summary = {
+        "Underlying": f"${fmt_number(spot)}",
+        "Coverage": dte_label,
+        "Regime": f"{regime.upper()} GEX",
+        "Total GEX": f"{total / 1e9:+.2f} $Bn / 1% move",
+        "Call Wall": _lvl(p["call_wall"]),
+        "Put Wall": _lvl(p["put_wall"]),
+        "Zero-Gamma Flip": _lvl(p["zero_gamma"]),
+        "Read": playbook,
+    }
+    return f"## {symbol.upper()} Gamma Exposure\n\n{kv_table(summary)}"
+
+
 # ── Strategy + roll analysis ────────────────────────────────
 
 
