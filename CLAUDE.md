@@ -6,11 +6,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-uv workspace monorepo with three packages:
+uv workspace monorepo with four packages:
 
 1. **trading-clients** — Shared API clients, endpoint definitions, and pure-computation helpers for Webull, Tradier, Finnhub, FMP, FRED, Alpha Vantage, Reddit, and many more providers. Also contains standalone math modules (BSM pricing, options analytics, technical indicators, regime classification). Pure library — no server or Lambda dependencies.
 2. **trading-mcp** — MCP server that exposes brokerage operations, option chains, fundamentals, news, economic data, and sentiment as MCP tools. Depends on trading-clients + mcp[cli]. Publishes the active pipeline universe to S3 on every mutation so Lambda watchers can filter to pipeline names.
 3. **trading-alerts** — AWS Lambda fleet of 13 trigger-based market/macro alert watchers. Per-watcher EventBridge schedules invoke a single dispatcher Lambda; each watcher emits AlertEvents that post to Discord with mute buttons + DynamoDB-backed dedup. Depends on trading-clients + boto3 + pynacl (no MCP dependency).
+4. **trading-scalper** — Local **paper** entry-detector for intraday SPY/QQQ options scalps (see [docs/scalper-automation.md](docs/scalper-automation.md)). Pivoted 2026-06-12 from the old assist-only stop-enforcer once Webull desktop's native option bracket (1st-Trigger Stop + OCO stop/target) made the auto-stop redundant. New job: (1) **prompt** when the underlying tags a blessed session-plan level (`SetupDetector` + `Notifier`, lean-filtered, tape-annotated); (2) on every prompt **auto-execute the same option bracket** — entry + OCO stop-loss/take-profit — in an in-memory `PaperBroker.place_bracket`; (3) **persist** fills + a realized-P&L summary (`PaperPersister` → `~/.trading/scalp/paper/{date}.jsonl` + `-summary.json`) so the detector's track record is reviewable. Paper-only — there is no live-order path; the old `RiskReducingOnly` invariant is gone (the daemon now *opens*), replaced by a zero-real-capital safety story. Two ports: `MarketDataFeed` (Tradier streaming) + `BrokerExecution` (`PaperBroker`). The session plan is a dated, hand-editable YAML naming an option `contract` per level (levels/lean hot-reload; a new contract mid-session needs a restart). `cli.build_session` is the composition root behind the `trading-scalper` entry point; `--demo-setup CONTRACT[:QTY[:PRICE]]` runs the loop offline. Removed in the pivot: `AutoStop`/`PositionWatcher`, `DisciplineEngine`, the `RiskReducingOnly` guard, and the live exit-only `WebullBroker` (recoverable from git if live-autonomy is revisited). Roadmap: Tastytrade DXLink greeks feed (the one real data upgrade); autonomous live entry only after a long paper track record. Depends on trading-clients[streaming] + pyyaml.
 
 ## Commands
 
@@ -45,6 +46,8 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │       ├── rate_limit.py            # Token bucket rate limiter
 │   │       ├── webull_client.py         # HMAC-SHA1 auth, token mgmt
 │   │       ├── tradier_client.py        # Bearer token auth
+│   │       ├── tradier_stream_client.py # Tradier streaming transport (session create + WebSocket + pure wire parsing); production-only. [streaming] extra
+│   │       ├── market_stream.py         # Provider-neutral streaming value types (Quote/Trade/TimeSale) — what any feed emits
 │   │       ├── finnhub_client.py        # API key auth
 │   │       ├── fmp_client.py            # API key auth
 │   │       ├── fred_client.py           # API key auth
@@ -209,7 +212,8 @@ trading-mcp/                             # monorepo root (uv workspace)
 ```
 trading-clients (httpx[http2])
   ├── trading-mcp (+ fastmcp + yfinance)
-  └── trading-alerts (+ boto3 + pynacl)
+  ├── trading-alerts (+ boto3 + pynacl)
+  └── trading-scalper (+ pyyaml; paper entry-detector; uses trading-clients[streaming])
 ```
 
 ### Data Flow — MCP Server
@@ -262,7 +266,7 @@ signature) handles button clicks (`mute:<seconds>:<dedup_key>`) and the
 | Provider | Role | Auth |
 |---|---|---|
 | **Webull** (required) | Brokerage: account, orders, positions | HMAC-SHA1 + token |
-| **Tradier** | Option chains, greeks, IV, quotes; read-only account (profile, balances, positions, orders) folded into the portfolio aggregation | Bearer token |
+| **Tradier** | Option chains, greeks, IV, quotes; read-only account (profile, balances, positions, orders) folded into the portfolio aggregation; **streaming market data** (top-of-book quote + trade + timesale via WebSocket) powering the scalper feed — production-only | Bearer token |
 | **Finnhub** | News, earnings calendar, key metrics | API key |
 | **FMP** | Financial statements, company profiles, sector performance | API key |
 | **FRED** | Macroeconomic data (CPI, GDP, VIX, rates) | API key |

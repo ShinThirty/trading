@@ -1,5 +1,5 @@
 ---
-description: Intraday SPY/QQQ options scalp workflow — pre-session prep (regime + daily bias + level map + discipline checklist) and post-session trade-grading review. Built to enforce discipline, not to generate more setups.
+description: Intraday SPY/QQQ options scalp workflow — pre-session prep (regime + daily bias + level map + discipline checklist) and post-session trade-grading review. Prep also writes the trading-scalper daemon's session-plan YAML (levels + per-level option contract). Built to enforce discipline, not to generate more setups.
 arguments:
   - name: symbol
     description: Ticker — SPY or QQQ only. Defaults to QQQ if omitted.
@@ -64,7 +64,7 @@ Parse `$ARGUMENTS.mode`: empty → `prep` (default). Valid: `prep`, `review`, `c
 
 ## Mode `prep` — pre-session setup (the Step A sheet)
 
-Run this before the open (or early in the session). One command that produces the day's map + the rules.
+Run this before the open (or early in the session). One command that produces the day's map + the rules, and writes the `trading-scalper` daemon's session-plan file so the daemon watches (and paper-trades) the same edges.
 
 **Step 0 — clock.** Call `get_market_clock`. If pre-market, VWAP/timesales have no current-session data → build levels from the **prior** session (note it). If open, use live data.
 
@@ -92,7 +92,44 @@ For deeper structural S/R, defer to `/ta $ARGUMENTS.symbol` rather than re-deriv
 - **Invalidation:** the price that flips the regime (range edge breaking on volume = pin over).
 - **Expected range / sizing input:** ATR(14) from Step 2 as % of price → the realistic intraday range; size targets/stops as fractions of it.
 
-**Step 6 — the discipline checklist (ALWAYS print this last, verbatim-style):**
+**Step 6 — write the daemon's session plan (`~/.trading/scalp/{date}-{symbol}.yaml`).**
+
+The `trading-scalper` paper daemon (see `docs/scalper-automation.md`) watches these same edges off the live tape and **paper-trades** them — prompting you to enter and auto-placing the same option bracket in an in-memory broker so the detector builds a reviewable track record. The plan file **is** the handoff: prep draws the map, the daemon watches it. Emit it now.
+
+1. **Resolve a tradeable option contract per lean-permitted edge.** The detector maps **support → buy a call**, **resistance → buy a put**, and only fires the edges today's `lean` allows (`long-only` → support, `short-only` → resistance, `both` → either). So attach a `contract` **only** to the edges the lean permits — a contract on a forbidden edge never fires and just wastes a subscribe slot. Leave the rest alert-only (no `contract`).
+   - `get_option_expirations $ARGUMENTS.symbol` → take the **nearest** expiry (0DTE if today is an expiration date, else 1DTE — a true scalp trades the front daily).
+   - `get_option_chain` (that expiry + the relevant side) → pick the strike **closest to the level's underlying price** (ATM-at-the-level), or one strike OTM in the trade direction for more gamma. **Confirm it's penny-wide with real size** (chain bid/ask, `get_iv_metrics` liquidity) — a wide or dead strike isn't scalpable; if a level has no liquid contract, leave it alert-only.
+   - Use the **exact `symbol` the chain returns** (OCC format, e.g. `QQQ260612C00720000`). Do **not** hand-construct it — a strike-padding slip feeds the daemon a dead Tradier subscribe.
+
+2. **Write the file** (Write tool) to `~/.trading/scalp/{date}-{symbol}.yaml` — `{date}` = the session date `YYYY-MM-DD`, `{symbol}` = SPY/QQQ. Shape:
+
+```yaml
+date: 2026-06-12          # session date — MUST match the daemon's run date or it won't load
+symbol: QQQ
+regime: fragile-pin       # pin | fragile-pin | breakout-trend  (from Step 1)
+lean: both                # long-only | short-only | both | no-trade  (Step 1 + Step 2)
+contracts: 1              # qty per setup
+default_stop_pct: 0.20    # child stop-loss   = entry premium * (1 - pct)
+target_pct: 0.20          # child take-profit = entry premium * (1 + pct)
+levels:                   # underlying prices; each names the option to BUY if it tags
+  - {price: 719.40, side: support,    stop: 718.90, contract: "QQQ260612C00720000"}
+  - {price: 723.10, side: resistance, stop: 723.70, contract: "QQQ260612P00723000"}
+session_caps:             # recorded for your discipline (see caveat) — not daemon-enforced
+  max_trades: 3
+  daily_stop_usd: 150
+notes: "GEX +ve low %ile — pin fragile; fade only to VWAP, never a breakout"
+```
+
+3. **State these caveats after writing — they are easy to get wrong:**
+   - **The bracket is a percent of the *option premium*, not the underlying.** `default_stop_pct` / `target_pct` default to **−20 % / +20 %**, matching the Webull native 1st-Trigger bracket you place by hand. `level.stop` (an underlying price) is **alert-text only** — the daemon never uses it for the paper stop.
+   - **`session_caps` are recorded, not enforced.** The paper daemon dropped the old discipline engine; max-trades / daily-stop live in the file for *your* record (and the Step 7 checklist) — honor them yourself.
+   - **The subscribe list is fixed at launch.** The daemon subscribes to these contracts at startup; adding a *new* contract mid-session needs a restart (levels/lean still hot-reload for alerting).
+   - **Graceful degrade:** a level with no `contract` is alert-only; no file at all = the daemon stays silent.
+   - **Run it:** `uv run --package trading-scalper trading-scalper --symbols $ARGUMENTS.symbol`. After the close, review `~/.trading/scalp/paper/{date}.jsonl` + `{date}-summary.json`, or `/scalp $ARGUMENTS.symbol review` against your real Webull fills.
+
+**No-trade day:** still write the file with `lean: no-trade` and your reference levels but **no `contract` fields** — the daemon prints the banner and stays silent (never prompts, never paper-trades).
+
+**Step 7 — the discipline checklist (ALWAYS print this last, verbatim-style):**
 
 > **Before every click:**
 > - [ ] Name the **level + target + stop** out loud. Can't name all three → it's not a trade.
@@ -102,7 +139,7 @@ For deeper structural S/R, defer to `/ta $ARGUMENTS.symbol` rather than re-deriv
 > - [ ] Size is **A+-only large**; impulse trades are small or skipped.
 > - [ ] In a **trade window** (9:30–10:30 / 3:00–4:00), not the 11:30–2:00 chop.
 >
-> **Session caps:** max __ trades, daily stop −$__ (ask the user to set both if not already fixed).
+> **Session caps:** max __ trades, daily stop −$__ (ask the user to set both if not already fixed). These are the `session_caps` values in the Step 6 daemon plan — the daemon records them, but *you* enforce them.
 
 ---
 

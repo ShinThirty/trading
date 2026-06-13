@@ -15,6 +15,7 @@ members = [
     "trading-alerts",
     "trading-clients",
     "trading-mcp",
+    "trading-scalper",
     "trading-workspace",
 ]
 
@@ -1947,6 +1948,9 @@ dependencies = [
 sentiment = [
     { name = "playwright" },
 ]
+streaming = [
+    { name = "websockets" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -1954,8 +1958,9 @@ requires-dist = [
     { name = "openpyxl" },
     { name = "pdfplumber" },
     { name = "playwright", marker = "extra == 'sentiment'", specifier = ">=1.48" },
+    { name = "websockets", marker = "extra == 'streaming'", specifier = ">=13" },
 ]
-provides-extras = ["sentiment"]
+provides-extras = ["sentiment", "streaming"]
 
 [[package]]
 name = "trading-mcp"
@@ -1978,6 +1983,21 @@ requires-dist = [
     { name = "trading-clients", extras = ["sentiment"], editable = "packages/trading-clients" },
     { name = "yfinance", specifier = ">=1.2" },
     { name = "youtube-transcript-api", specifier = ">=1.2.4" },
+]
+
+[[package]]
+name = "trading-scalper"
+version = "0.1.0"
+source = { editable = "packages/trading-scalper" }
+dependencies = [
+    { name = "pyyaml" },
+    { name = "trading-clients", extra = ["streaming"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pyyaml", specifier = ">=6" },
+    { name = "trading-clients", extras = ["streaming"], editable = "packages/trading-clients" },
 ]
 
 [[package]]

@@ -14,6 +14,9 @@ dependencies = [
 # require a real-browser context). Opt-in extra so trading-alerts' Lambda
 # build stays lean.
 sentiment = ["playwright>=1.48"]
+# websockets is only needed by tradier_stream_client (the scalper's live feed).
+# Opt-in extra for the same reason — trading-alerts never imports it.
+streaming = ["websockets>=13"]
 
 [build-system]
 requires = ["hatchling"]
