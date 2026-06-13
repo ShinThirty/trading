@@ -529,28 +529,31 @@ def classify_positioning(p: dict[str, float | int | None]) -> str:
     return "Balanced"
 
 
-def _zero_gamma_crossing(rows: list[dict[str, float]]) -> float | None:
-    """Strike (linearly interpolated) where cumulative signed gamma crosses zero.
+def _zero_gamma_crossing(rows: list[dict[str, float]], spot: float) -> float | None:
+    """Strike (linearly interpolated) where cumulative signed gamma crosses zero,
+    choosing the crossing *nearest spot*.
 
-    Walks strikes ascending, accumulating ``net_gex``; returns the price where the
-    running total flips sign — a coarse proxy for the gamma-flip level. ``None`` if
-    it never flips (single-sign profile). The *true* flip needs re-pricing gamma at
-    each candidate spot; this uses the chain's reported (current-spot) gammas, which
-    is good enough as a regime tripwire, not a model.
+    Walks strikes ascending, accumulating ``net_gex``, and collects every price where
+    the running total flips sign. The chain spans deep ITM/OTM strikes whose near-zero
+    gamma makes the cumulative wobble around zero far from the money, so the *first*
+    crossing scanning up is usually a low-strike artifact (it returned the chain's
+    bottom strike on real QQQ data); the only crossing with regime meaning is the one
+    closest to the current spot. ``None`` if the cumulative never flips (single-sign
+    profile). The *true* flip needs re-pricing gamma at each candidate spot; this uses
+    the chain's reported (current-spot) gammas — a proxy, not a model.
     """
     cum = 0.0
     points: list[tuple[float, float]] = []
     for r in rows:
         cum += r["net_gex"]
         points.append((r["strike"], cum))
-    if points and points[0][1] == 0.0:
-        return points[0][0]
+    crossings: list[float] = []
     for (k0, c0), (k1, c1) in zip(points, points[1:], strict=False):
-        if c1 == 0.0:
-            return k1
-        if (c0 < 0) != (c1 < 0):  # straddles zero between these two strikes
-            return k0 + (-c0 / (c1 - c0)) * (k1 - k0)
-    return None
+        if (c0 < 0) != (c1 < 0):  # sign straddles zero between these two strikes
+            crossings.append(k0 + (-c0 / (c1 - c0)) * (k1 - k0))
+    if not crossings:
+        return None
+    return min(crossings, key=lambda k: abs(k - spot))
 
 
 def gamma_exposure_profile(
@@ -573,8 +576,8 @@ def gamma_exposure_profile(
       regime      "positive" | "negative"
       call_wall   strike with the largest positive (call) dollar gamma, or None
       put_wall    strike with the largest put dollar-gamma magnitude, or None
-      zero_gamma  spot where the strike-ordered cumulative signed gamma crosses
-                  zero (see ``_zero_gamma_crossing``), or None
+      zero_gamma  the cumulative-signed-gamma zero crossing nearest spot (see
+                  ``_zero_gamma_crossing``), or None
       by_strike   [{strike, call_gex, put_gex, net_gex}] ascending by strike
     """
     if spot <= 0:
@@ -629,7 +632,7 @@ def gamma_exposure_profile(
         "regime": "positive" if total >= 0 else "negative",
         "call_wall": call_wall["strike"] if call_wall else None,
         "put_wall": put_wall["strike"] if put_wall else None,
-        "zero_gamma": _zero_gamma_crossing(rows),
+        "zero_gamma": _zero_gamma_crossing(rows, spot),
         "by_strike": rows,
     }
 

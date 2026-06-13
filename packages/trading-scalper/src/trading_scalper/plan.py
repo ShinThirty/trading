@@ -15,6 +15,12 @@ premium (``default_stop_pct`` / ``target_pct``), so ``level.stop`` (an underlyin
 price) is alert-text only. Each level also carries a ``mode`` — ``fade``
 (touch-and-reject, the positive-GEX setup) or ``break`` (cross-and-follow-through,
 the negative-GEX setup) — which the detector uses to pick its trigger geometry.
+
+``zero_gamma`` is the prep-time gamma-flip price (one per session). It is *not* a
+tradeable level — the detector watches the underlying cross it and fires a
+non-trading "re-run /scalp prep, the regime may be inverting" alert. The detector
+never recomputes GEX (the stream carries no OI/greeks), so this stays the static
+prep-time number; a cross means *reassess*, not an automatic fade↔break switch.
 """
 
 from dataclasses import dataclass, field
@@ -40,6 +46,7 @@ class SessionPlan:
     symbol: str
     regime: str
     lean: str  # "long-only" | "short-only" | "both" | "no-trade"
+    zero_gamma: float | None = None  # the prep-time gamma flip — tripwire, not a tradeable level
     levels: list[Level] = field(default_factory=list)
     default_stop_pct: float = 0.20  # child stop-loss = entry * (1 - pct)
     target_pct: float = 0.20  # child take-profit = entry * (1 + pct)
@@ -72,6 +79,7 @@ def load_session_plan(path: Path) -> SessionPlan:
         symbol=str(data.get("symbol", "")),
         regime=str(data.get("regime", "")),
         lean=str(data.get("lean", "no-trade")),  # unspecified -> safest: don't alert
+        zero_gamma=(float(data["zero_gamma"]) if data.get("zero_gamma") is not None else None),
         levels=levels,
         default_stop_pct=float(data.get("default_stop_pct", 0.20)),
         target_pct=float(data.get("target_pct", 0.20)),

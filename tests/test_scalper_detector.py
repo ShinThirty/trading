@@ -240,6 +240,82 @@ def test_underlying_book_imbalance_annotated() -> None:
     assert len(notes) == 1 and "book bid-heavy 500x100" in notes[0]
 
 
+# ── zero-gamma tripwire ─────────────────────────────────────
+
+
+def _flip_plan(flip: float | None = 719.95) -> SessionPlan:
+    return SessionPlan(
+        date="2026-06-12",
+        symbol="QQQ",
+        regime="fragile-pin",
+        lean="no-trade",  # tripwire must fire even when no trading is allowed
+        zero_gamma=flip,
+        levels=[],
+    )
+
+
+def _flip_detector(notes: list[str], flip: float | None = 719.95) -> SetupDetector:
+    return SetupDetector(lambda: _flip_plan(flip), notes.append, flip_margin=0.10)
+
+
+def test_flip_first_tick_only_records_side() -> None:
+    notes: list[str] = []
+    _flip_detector(notes).on_trade(Trade("QQQ", 721.00))  # above flip, but first obs
+    assert notes == []  # learns the side, does not alert
+
+
+def test_flip_fires_on_down_cross() -> None:
+    notes: list[str] = []
+    det = _flip_detector(notes)
+    det.on_trade(Trade("QQQ", 721.00))  # start above
+    det.on_trade(Trade("QQQ", 719.80))  # cross below by > margin -> fire
+    assert len(notes) == 1
+    assert "zero-gamma flip 719.95" in notes[0] and "below" in notes[0]
+    assert "re-run /scalp prep" in notes[0] and "stop fading" in notes[0]
+
+
+def test_flip_fires_on_up_cross() -> None:
+    notes: list[str] = []
+    det = _flip_detector(notes)
+    det.on_trade(Trade("QQQ", 719.00))  # start below
+    det.on_trade(Trade("QQQ", 720.10))  # cross above by > margin -> fire
+    assert len(notes) == 1 and "above" in notes[0] and "reasserting" in notes[0]
+
+
+def test_flip_debounces_within_margin_band() -> None:
+    notes: list[str] = []
+    det = _flip_detector(notes)
+    det.on_trade(Trade("QQQ", 721.00))  # above
+    det.on_trade(Trade("QQQ", 719.90))  # only 0.05 below flip (< margin) -> no fire
+    det.on_trade(Trade("QQQ", 720.00))  # back up within band -> no fire
+    assert notes == []
+
+
+def test_flip_refires_on_recross() -> None:
+    notes: list[str] = []
+    det = _flip_detector(notes)
+    det.on_trade(Trade("QQQ", 721.00))  # above
+    det.on_trade(Trade("QQQ", 719.70))  # down-cross -> fire
+    det.on_trade(Trade("QQQ", 720.20))  # up-cross -> fire again (each genuine cross flags)
+    assert len(notes) == 2 and "below" in notes[0] and "above" in notes[1]
+
+
+def test_flip_silent_when_plan_has_no_flip() -> None:
+    notes: list[str] = []
+    det = _flip_detector(notes, flip=None)
+    det.on_trade(Trade("QQQ", 721.00))
+    det.on_trade(Trade("QQQ", 700.00))  # huge move, but no flip to cross
+    assert notes == []
+
+
+def test_flip_ignores_non_underlying_symbol() -> None:
+    notes: list[str] = []
+    det = _flip_detector(notes)
+    det.on_trade(Trade("SPY", 721.00))  # plan is QQQ -> filtered before the tripwire
+    det.on_trade(Trade("SPY", 719.00))
+    assert notes == []
+
+
 # ── Notifier ────────────────────────────────────────────────
 
 

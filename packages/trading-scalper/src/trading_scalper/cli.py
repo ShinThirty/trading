@@ -134,6 +134,8 @@ def _print_banner(
         for lvl in plan.levels:
             tag = f"→ buy {lvl.contract}" if lvl.contract else "(alert-only, no contract)"
             print(f"  {lvl.side:<10} {lvl.price:g} [{lvl.mode}]  {tag}")
+        if plan.zero_gamma is not None:
+            print(f"  zero-gamma flip {plan.zero_gamma:g}  (tripwire — alerts on cross, no trade)")
         if plan.notes:
             print(f"  notes: {plan.notes}")
     else:

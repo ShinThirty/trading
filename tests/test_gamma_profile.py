@@ -31,6 +31,23 @@ def test_profile_walls_regime_and_flip() -> None:
     assert len(p["by_strike"]) == 3  # strikes 95, 100, 105 (100 merges call+put)
 
 
+def test_flip_picks_crossing_nearest_spot() -> None:
+    # Two zero crossings: a deep low-strike artifact (~81.7) and a near-spot one (~95.4).
+    # The real QQQ chain wobbles around zero far from the money, so the *first* crossing
+    # scanning up is junk — the flip must be the crossing closest to spot.
+    # spot=100 → net per strike = sign * gamma(0.001) * OI * 100 * 100**2 * 0.01 = sign * OI * 10
+    chain = [
+        _opt("call", 80, 10, gamma=0.001),  # net +100  → cum +100
+        _opt("put", 85, 30, gamma=0.001),  # net -300  → cum -200  (cross ~81.7 between 80,85)
+        _opt("call", 98, 25, gamma=0.001),  # net +250  → cum  +50  (cross ~95.4 between 85,98)
+        _opt("call", 110, 5, gamma=0.001),  # net  +50  → cum +100
+    ]
+    p = gamma_exposure_profile(chain, spot=100.0)
+
+    assert p["zero_gamma"] == approx(95.4, abs=0.05)  # near-spot, NOT the ~81.7 artifact
+    assert p["regime"] == "positive"
+
+
 def test_negative_regime_when_puts_dominate() -> None:
     chain = [
         _opt("put", 95, 3000),  # -1_500_000

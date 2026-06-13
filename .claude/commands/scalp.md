@@ -115,6 +115,7 @@ lean: both                # long-only | short-only | both | no-trade  (Step 1 + 
 contracts: 1              # qty per setup
 default_stop_pct: 0.20    # child stop-loss   = entry premium * (1 - pct)
 target_pct: 0.20          # child take-profit = entry premium * (1 + pct)
+zero_gamma: 721.00        # the gamma flip — bidirectional tripwire; alerts on a cross, no trade
 levels:                   # the gamma walls; each names the option to BUY if it tags
   # POSITIVE GEX → fade: put wall (support) → CALL, call wall (resistance) → PUT
   - {price: 719.40, side: support,    stop: 718.90, mode: fade, contract: "QQQ260612C00720000"}
@@ -125,7 +126,9 @@ session_caps:             # recorded for your discipline (see caveat) — not da
 notes: "Fragile pin: total GEX +ve but thin. Fade walls to the 721 zero-gamma flip; a break of 721 on volume = regime flipped to trend — stop fading."
 ```
 
-**Negative-GEX (trend) day** — set `regime: breakout-trend`, `mode: break` on every level, and **invert** the contract mapping: **call wall (resistance) → CALL** (breakout up), **put wall (support) → PUT** (breakdown). The detector then fires only on a *cross + follow-through* of the wall, not a touch. The **zero-gamma flip is a human-watched regime line** — put it in `notes` and the Step 5 invalidation, not as a level (the detector's tape-gated fire is one-directional, so it can't cleanly ping a bidirectional regime cross).
+**Negative-GEX (trend) day** — set `regime: breakout-trend`, `mode: break` on every level, and **invert** the contract mapping: **call wall (resistance) → CALL** (breakout up), **put wall (support) → PUT** (breakdown). The detector then fires only on a *cross + follow-through* of the wall, not a touch.
+
+**Always set `zero_gamma`** to the flip price from Step 1 (`get_gamma_profile`). It's a dedicated **bidirectional tripwire**, not a tradeable level: the daemon fires a *non-trading* "regime may be inverting — re-run `/scalp prep`" alert when the underlying crosses it either way. This is the cheap guard against the worst loss mode — a stale regime label feeding each level's `mode`, so the bot fades a level that's actually breaking. The daemon **never recomputes GEX** (the stream has no OI/greeks), so the flip stays this static number; on a cross, *you* re-pull the map. Take the flip from the **front expiration** — call `get_gamma_profile` with `expiration` set to the session's 0DTE date, not the default ≤7-DTE aggregate, which smears the 0DTE flip (on real QQQ the aggregate returned a degenerate above-spot value; the front expiration gave the clean near-spot pin).
 
 3. **State these caveats after writing — they are easy to get wrong:**
    - **The bracket is a percent of the *option premium*, not the underlying.** `default_stop_pct` / `target_pct` default to **−20 % / +20 %**, matching the Webull native 1st-Trigger bracket you place by hand. `level.stop` (an underlying price) is **alert-text only** — the daemon never uses it for the paper stop.

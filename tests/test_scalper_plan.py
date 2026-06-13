@@ -113,6 +113,20 @@ def test_contract_and_bracket_default_when_absent(tmp_path: Path) -> None:
     assert plan.contracts == 1
 
 
+def test_load_parses_zero_gamma_flip(tmp_path: Path) -> None:
+    p = tmp_path / "plan.yaml"
+    p.write_text(
+        "date: 2026-06-12\nsymbol: QQQ\nregime: fragile-pin\nlean: both\nzero_gamma: 719.95\n"
+    )
+    assert load_session_plan(p).zero_gamma == 719.95
+
+
+def test_zero_gamma_defaults_to_none_when_absent(tmp_path: Path) -> None:
+    p = tmp_path / "2026-06-12-QQQ.yaml"
+    _write(p)  # the original sample names no zero_gamma
+    assert load_session_plan(p).zero_gamma is None
+
+
 def test_load_parses_level_mode_and_defaults_to_fade(tmp_path: Path) -> None:
     p = tmp_path / "plan.yaml"
     p.write_text(

@@ -155,6 +155,7 @@ lean: both                   # long-only | short-only | both | no-trade
 contracts: 1                 # quantity per setup
 default_stop_pct: 0.20       # child stop-loss = entry * (1 - pct)
 target_pct: 0.20             # child take-profit = entry * (1 + pct)
+zero_gamma: 721.00           # the gamma flip — tripwire, alerts on a cross (no trade)
 levels:                      # the gamma walls + the option to buy if it triggers
   # +GEX → fade: put wall (support) → CALL, call wall (resistance) → PUT
   - {price: 719.40, side: support,    stop: 718.90, mode: fade, contract: "QQQ260612C00720000"}
@@ -170,6 +171,15 @@ notes: "Fragile pin: fade the walls to the zero-gamma flip; a break of it = tren
   this **inverts** (a resistance breakout → call, a support breakdown → put). You
   pick the strike in `/scalp prep`. `level.stop` is **alert-text only** — the
   bracket's stop/target are a percent of the *option* premium.
+- `zero_gamma` is the **gamma-flip tripwire** (one price, not a level). The
+  detector watches the underlying cross it in *either* direction and fires a
+  *non-trading* "the regime may be inverting — re-run `/scalp prep`" alert; it
+  proposes no trade. It is the cheap mitigation for the top residual risk — a
+  stale regime label (yesterday's OI) feeding each level's `mode`, so the bot
+  fades a level that's actually breaking. The detector **never recomputes GEX**
+  (the stream has no OI/greeks); the flip stays the static prep-time number, so a
+  cross means *reassess*, not an automatic fade↔break switch. Omit it (or set
+  null) to disable the tripwire.
 - The daemon loads today's file on launch and **hot-reloads on change** (re-run
   `/scalp prep` and edited levels/lean are picked up). **Caveat:** the Tradier
   subscribe list is fixed at startup, so adding a *new* contract mid-session needs

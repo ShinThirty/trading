@@ -27,6 +27,13 @@ Hysteresis: ``_active`` is set only on a *confirmed* fire, so an unconfirmed tag
 keeps re-evaluating in-zone until the tape turns, then fires once; it re-arms
 when price leaves the zone. Tape direction comes from timesales, so a level seen
 only by trades (no timesale) waits for a tape print before it can confirm.
+
+Separately, the **zero-gamma tripwire** (``_check_flip``) watches the underlying
+cross the plan's static flip price in *either* direction and fires a non-trading
+"the regime may be inverting — re-run /scalp prep" alert. It is not gated on
+lean/tape/contract and proposes nothing; it never recomputes GEX (the stream has
+no OI/greeks) — it reuses the prep-time number, so a cross means *reassess*, not
+an automatic fade↔break switch.
 """
 
 from collections.abc import Callable
@@ -52,6 +59,7 @@ class SetupDetector:
         rearm_margin: float = 0.05,
         break_margin: float = 0.05,
         spread_max_pct: float = 0.10,
+        flip_margin: float = 0.10,
     ) -> None:
         self._plan_source = plan_source
         self._notify = notify
@@ -60,9 +68,11 @@ class SetupDetector:
         self._rearm_margin = rearm_margin
         self._break_margin = break_margin
         self._spread_max_pct = spread_max_pct
+        self._flip_margin = flip_margin
         self._tape_side: dict[str, str] = {}
         self._quotes: dict[str, Quote] = {}  # symbol -> latest top-of-book (underlying + options)
         self._active: set[tuple[float, str]] = set()  # (level.price, side) currently fired
+        self._flip_side: dict[str, str] = {}  # symbol -> "above" | "below" the zero-gamma flip
 
     def on_quote(self, quote: Quote) -> None:
         self._quotes[quote.symbol] = quote
@@ -78,6 +88,7 @@ class SetupDetector:
         plan = self._plan_source()
         if plan is None or plan.symbol != symbol:
             return
+        self._check_flip(plan, symbol, price)
         tape = self._tape_side.get(symbol, "mixed")
         for level in plan.levels:
             key = (level.price, level.side)
@@ -92,6 +103,30 @@ class SetupDetector:
                     self._fire(plan, symbol, level)
             elif key in self._active and self._cleared(level, price, confirming):
                 self._active.discard(key)  # left the zone -> re-arm this level
+
+    def _check_flip(self, plan: SessionPlan, symbol: str, price: float) -> None:
+        """Zero-gamma tripwire — a *non-trading* 'reassess' alert on a bidirectional
+        cross of the plan's static flip price.
+
+        The detector never recomputes GEX (the stream carries no OI/greeks), so this
+        reuses the prep-time flip number: a cross means the regime *may* be inverting,
+        and the right action is for the human to re-run ``/scalp prep`` for a fresh
+        map — not an automatic fade↔break switch. A ``flip_margin`` band debounces
+        tick-noise right on the line; the first observation only records the side.
+        """
+        flip = plan.zero_gamma
+        if flip is None:
+            return
+        prev = self._flip_side.get(symbol)
+        if prev is None:
+            self._flip_side[symbol] = "above" if price >= flip else "below"
+            return
+        if prev == "below" and price >= flip + self._flip_margin:
+            self._flip_side[symbol] = "above"
+            self._notify(_flip_message(symbol, price, flip, "up"))
+        elif prev == "above" and price <= flip - self._flip_margin:
+            self._flip_side[symbol] = "below"
+            self._notify(_flip_message(symbol, price, flip, "down"))
 
     def _in_zone(self, level: Level, price: float, confirming: str) -> bool:
         """Geometry gate: fade = within tolerance; break = crossed by break_margin."""
@@ -153,6 +188,20 @@ class SetupDetector:
         if q.ask_size > q.bid_size * 1.5:
             return f"; book offer-heavy{sizes}"
         return f"; book balanced{sizes}"
+
+
+def _flip_message(symbol: str, price: float, flip: float, direction: str) -> str:
+    """Tripwire alert text. Down-cross = leaving the +GEX (pinning) zone into −GEX
+    (trending) in the normal flip-below-spot case — the dangerous one (stop fading);
+    up-cross = pinning may be reasserting. Either way: re-pull the gamma map."""
+    if direction == "down":
+        arrow, regime = "↓ below", "pinning may be giving way to trending — stop fading walls"
+    else:
+        arrow, regime = "↑ above", "pinning may be reasserting"
+    return (
+        f"⚠ {symbol} crossed the zero-gamma flip {flip:g} {arrow} ({price:g}) — "
+        f"regime may be inverting; re-run /scalp prep for a fresh map ({regime})"
+    )
 
 
 def _tape_side(ts: TimeSale) -> str:
