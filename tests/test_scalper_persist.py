@@ -9,8 +9,15 @@ import json
 from pathlib import Path
 
 import pytest
+from trading_scalper.domain import FireRecord
 from trading_scalper.paper import PaperBroker
-from trading_scalper.persist import PaperPersister, default_fills_path, default_summary_path
+from trading_scalper.persist import (
+    PaperPersister,
+    SignalLog,
+    default_fills_path,
+    default_signals_path,
+    default_summary_path,
+)
 
 
 def _persister(broker: PaperBroker, tmp_path: Path) -> PaperPersister:
@@ -84,3 +91,36 @@ def test_default_paths() -> None:
     assert default_summary_path("2026-06-12", root=Path("/tmp/x")) == Path(
         "/tmp/x/2026-06-12-summary.json"
     )
+    assert default_signals_path("2026-06-12", root=Path("/tmp/x")) == Path(
+        "/tmp/x/2026-06-12-signals.jsonl"
+    )
+
+
+def _fire_record(**overrides: object) -> FireRecord:
+    base = dict(
+        symbol="QQQ",
+        level=719.40,
+        side="support",
+        mode="fade",
+        confirming="buy",
+        price=719.42,
+        contract="QQQ260612C00720000",
+        velocity=-0.3612,
+        cum_confirming_size=25,
+        cum_contrary_size=4,
+        book_imbalance=600,
+    )
+    return FireRecord(**(base | overrides))  # type: ignore[arg-type]
+
+
+def test_signal_log_appends_a_row_per_fire(tmp_path: Path) -> None:
+    log = SignalLog(tmp_path / "signals.jsonl", clock=lambda: "2026-06-12T13:00:00+00:00")
+    log.record(_fire_record())
+    log.record(_fire_record(confirming="sell", contract=None, velocity=None))
+
+    rows = [json.loads(line) for line in log.path.read_text().splitlines()]
+    assert log.n_fires == 2 and len(rows) == 2
+    assert rows[0]["ts"] == "2026-06-12T13:00:00+00:00"
+    assert rows[0]["velocity"] == pytest.approx(-0.3612)
+    assert rows[0]["cum_confirming_size"] == 25 and rows[0]["book_imbalance"] == 600
+    assert rows[1]["velocity"] is None and rows[1]["contract"] is None  # alert-only, no time base

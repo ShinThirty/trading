@@ -87,3 +87,33 @@ class TradeProposal:
     stop_pct: float
     target_pct: float
     reason: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class FireRecord:
+    """Telemetry captured the instant a setup fires — **recorded, never a gate**.
+
+    The B4 velocity/absorption signals (``velocity`` / ``cum_confirming_size`` /
+    ``cum_contrary_size`` / ``book_imbalance``) are logged on *every* confirmed fire
+    so the paper run can later mine which of them separate winners from losers.
+    They do **not** influence whether the setup fires — that decision stays geometry
+    + lean + tape. ``velocity`` is the signed underlying $/s over the trailing tape
+    window (``None`` when fewer than two timestamped prints are in it); the cumulative
+    sizes are summed tape volume over that same window, split by aggressor side
+    relative to the setup's confirming direction; ``book_imbalance`` is the
+    underlying top-of-book ``bid_size - ask_size`` at the fire (``None`` if unquoted).
+    A wall-clock ``ts`` is stamped by the writer, not here, so the detector stays
+    clock-free and deterministic.
+    """
+
+    symbol: str
+    level: float  # the blessed level price
+    side: str  # support | resistance
+    mode: str  # fade | break
+    confirming: str  # buy | sell — the tape side that confirmed
+    price: float  # underlying price at the fire
+    contract: str | None  # OCC, or None for an alert-only level
+    velocity: float | None
+    cum_confirming_size: int
+    cum_contrary_size: int
+    book_imbalance: int | None

@@ -35,7 +35,9 @@ prompts actually make money. See memory `project-scalper-pivot`.
 2. **Auto-execute on paper** — on every prompt, place the *same* option bracket
    (entry + child stop-loss + take-profit, OCO) in an in-memory `PaperBroker`.
 3. **Persist for review** — periodically write the paper ledger (fills + realized
-   P&L) to disk so a session's detector performance is reviewable afterward.
+   P&L) to disk so a session's detector performance is reviewable afterward, plus a
+   per-fire **B4 velocity/absorption telemetry** log (recorded, not gated) so the
+   run can later learn which setup conditions separate winners from losers.
 
 ## Safety model: paper-only
 
@@ -101,6 +103,7 @@ MarketDataFeed (Tradier WS)
 SetupDetector ── price tags a blessed level   │
    │  filtered by lean, tape-annotated         │
    ├──▶ Notifier (console + bell)  ── "enter QQQ 721P here"   (points the eyes)
+   ├──▶ FireRecord ──▶ SignalLog ── per-fire B4 velocity/absorption telemetry JSONL
    └──▶ TradeProposal ──▶ PaperBroker.place_bracket ◀─────────┘
                               │  fills entry + rests OCO stop/target off the option tape
                               │  order events
@@ -138,6 +141,15 @@ price yields one prompt + one paper bracket, not a spam stream.
    fill to `~/.trading/scalp/paper/{date}.jsonl` and rewrites a
    `{date}-summary.json` (realized P&L + open positions) on a timer and once on
    shutdown.
+5. **`SignalLog`** — the detector's `record` sink; appends one row per *confirmed
+   fire* to `~/.trading/scalp/paper/{date}-signals.jsonl` carrying the **B4
+   velocity/absorption telemetry** (trailing-window underlying velocity in $/s,
+   cumulative confirming vs contrary tape size, top-of-book imbalance) next to the
+   setup identity. **Recorded, never a gate** — separate from the fills log on
+   purpose, so an alert-only or spread-suppressed fire (no paper fill) is still
+   captured. The paper run mines these against the realized win/loss to learn which
+   metrics actually separate winners from losers *before* any of them is allowed to
+   veto a setup.
 
 ## The `/scalp` handoff — the session plan (daily file)
 
@@ -233,7 +245,9 @@ trading-clients (httpx[http2]; + websockets via [streaming] extra)
 - **Phone-push notifier** — reuse the `trading-alerts` Discord bot to land prompts
   on your phone. v1 is desk-only console + bell.
 - **Round-trip report** — reconstruct paired entries/exits from the fills JSONL
-  into a per-trade P&L table for review.
+  into a per-trade P&L table for review, joined to the `{date}-signals.jsonl`
+  telemetry so each trade's realized win/loss sits next to its fire-time
+  velocity/absorption — the dataset that decides whether any B4 metric earns a gate.
 - **Autonomous entry (live)** — only after a long paper track record proves the
   detector. This re-introduces a live broker that *opens* (a different shape from
   the old exit-only one) and a real risk-budget; the Webull gRPC order-push then

@@ -8,6 +8,7 @@ long fires at a resistance level under long-only), once-per-tag hysteresis, the
 spread gate on the proposal, and the soft book-imbalance annotation.
 """
 
+import pytest
 from trading_clients.market_stream import Quote, TimeSale, Trade
 from trading_scalper.detector import SetupDetector
 from trading_scalper.notify import Notifier
@@ -314,6 +315,73 @@ def test_flip_ignores_non_underlying_symbol() -> None:
     det.on_trade(Trade("SPY", 721.00))  # plan is QQQ -> filtered before the tripwire
     det.on_trade(Trade("SPY", 719.00))
     assert notes == []
+
+
+# ── B4 velocity/absorption telemetry (recorded, never gated) ─
+
+
+def _ts(symbol: str, price: float, *, size: int, side: str, ms: int) -> TimeSale:
+    """A timestamped, sized timesale whose aggressor side is forced via the quote."""
+    if side == "buy":
+        return TimeSale(symbol, price=price, size=size, bid=price - 0.02, ask=price, ms=ms)
+    return TimeSale(symbol, price=price, size=size, bid=price, ask=price + 0.02, ms=ms)
+
+
+def _recording_detector(records: list, lean: str = "long-only") -> SetupDetector:
+    return SetupDetector(
+        lambda: _plan(lean), lambda _m: None, record=records.append, tolerance=0.10
+    )
+
+
+def test_fire_records_velocity_and_confirming_size() -> None:
+    records: list = []
+    det = _recording_detector(records)
+    # two buy prints, 0.5s apart, falling 719.60 -> 719.42 into support; second is in-band
+    det.on_timesale(_ts("QQQ", 719.60, size=10, side="buy", ms=1000))  # out of band, recorded
+    det.on_timesale(_ts("QQQ", 719.42, size=15, side="buy", ms=1500))  # in band -> fire
+    assert len(records) == 1
+    r = records[0]
+    assert r.confirming == "buy"
+    assert r.cum_confirming_size == 25  # 10 + 15 within the window
+    assert r.cum_contrary_size == 0
+    assert r.velocity == pytest.approx((719.42 - 719.60) / 0.5)  # -0.36 $/s, falling in
+
+
+def test_fire_records_contrary_size_separately() -> None:
+    records: list = []
+    det = _recording_detector(records)
+    det.on_timesale(_ts("QQQ", 719.80, size=30, side="sell", ms=1000))  # contrary, out of band
+    det.on_timesale(_ts("QQQ", 719.42, size=12, side="buy", ms=1300))  # confirming, in band -> fire
+    r = records[0]
+    assert r.cum_confirming_size == 12 and r.cum_contrary_size == 30
+
+
+def test_fire_records_book_imbalance() -> None:
+    records: list = []
+    det = _recording_detector(records)
+    det.on_quote(Quote("QQQ", bid=719.39, ask=719.43, bid_size=800, ask_size=200))
+    det.on_timesale(_buy_ts("QQQ", 719.41))
+    assert records[0].book_imbalance == 600  # 800 - 200
+
+
+def test_fire_records_alert_only_level() -> None:
+    records: list = []
+    det = _recording_detector(records)  # _plan levels carry no contract
+    det.on_timesale(_buy_ts("QQQ", 719.41))
+    assert len(records) == 1 and records[0].contract is None
+
+
+def test_velocity_is_none_without_timestamps() -> None:
+    records: list = []
+    det = _recording_detector(records)
+    det.on_timesale(_buy_ts("QQQ", 719.41))  # _buy_ts carries no ms
+    assert records[0].velocity is None
+
+
+def test_record_sink_is_optional() -> None:
+    notes: list[str] = []
+    _detector("long-only", notes).on_timesale(_buy_ts("QQQ", 719.41))  # no record sink
+    assert len(notes) == 1  # still fires + notifies, no crash without a recorder
 
 
 # ── Notifier ────────────────────────────────────────────────

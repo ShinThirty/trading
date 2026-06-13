@@ -7,6 +7,7 @@ realizes; a confirmed tag with no option price yet soft-warns instead of trading
 and the subscribe list folds in the plan's option contracts.
 """
 
+import json
 from collections.abc import Callable
 from pathlib import Path
 
@@ -88,6 +89,7 @@ def _session(
         date="2026-06-12",
         fills_path=tmp_path / "fills.jsonl",
         summary_path=tmp_path / "summary.json",
+        signals_path=tmp_path / "signals.jsonl",
     )
 
 
@@ -111,6 +113,20 @@ def test_confirmed_tag_auto_places_a_bracket(tmp_path: Path) -> None:
     feed.emit_timesale(_buy_ts("QQQ", 719.41))  # confirmed support tag -> auto-bracket
 
     assert broker.net_position("QQQ_C") == 1  # entry filled, OCO children resting
+
+
+def test_confirmed_tag_logs_a_signal_row(tmp_path: Path) -> None:
+    feed, broker = FakeFeed(), PaperBroker()
+    session = _session(feed, broker, tmp_path, plan_source=lambda: _plan("both", "QQQ_C"))
+
+    feed.emit_trade(Trade("QQQ_C", 4.00))  # seed the option price
+    feed.emit_timesale(_buy_ts("QQQ", 719.41))  # confirmed support tag -> fire + telemetry
+
+    assert session.signals.n_fires == 1
+    rows = [json.loads(line) for line in session.signals.path.read_text().splitlines()]
+    assert len(rows) == 1
+    assert rows[0]["symbol"] == "QQQ" and rows[0]["contract"] == "QQQ_C"
+    assert rows[0]["confirming"] == "buy" and rows[0]["mode"] == "fade"
 
 
 def test_bracket_stop_fill_flattens_and_realizes(tmp_path: Path) -> None:

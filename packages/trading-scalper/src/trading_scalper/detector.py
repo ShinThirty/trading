@@ -28,6 +28,13 @@ keeps re-evaluating in-zone until the tape turns, then fires once; it re-arms
 when price leaves the zone. Tape direction comes from timesales, so a level seen
 only by trades (no timesale) waits for a tape print before it can confirm.
 
+On every confirmed fire the detector also emits a ``FireRecord`` of **B4
+velocity/absorption telemetry** (trailing-window underlying velocity, cumulative
+confirming vs contrary tape size, top-of-book imbalance) through an optional
+``record`` sink. This is *recorded, never gated* — the paper run needs the raw
+numbers next to the eventual win/loss to learn which of them actually separate
+winners from losers before any of them is allowed to veto a setup.
+
 Separately, the **zero-gamma tripwire** (``_check_flip``) watches the underlying
 cross the plan's static flip price in *either* direction and fires a non-trading
 "the regime may be inverting — re-run /scalp prep" alert. It is not gated on
@@ -36,16 +43,28 @@ no OI/greeks) — it reuses the prep-time number, so a cross means *reassess*, n
 an automatic fade↔break switch.
 """
 
+from collections import deque
 from collections.abc import Callable
+from typing import NamedTuple
 
 from trading_clients.market_stream import Quote, TimeSale, Trade
 from trading_clients.options import parse_occ
 
-from trading_scalper.domain import TradeProposal
+from trading_scalper.domain import FireRecord, TradeProposal
 from trading_scalper.plan import Level, SessionPlan
 from trading_scalper.ports import MarketDataFeed
 
 _TAPE_PHRASE = {"buy": "tape lifting offers", "sell": "tape hitting bids", "mixed": "tape mixed"}
+
+
+class _Tick(NamedTuple):
+    """One trailing-window tape print. ``side`` is the aggressor (timesale) or
+    ``"unknown"`` for a bare trade that carries no bid/ask to classify it."""
+
+    ms: int | None
+    price: float
+    size: int
+    side: str  # "buy" | "sell" | "unknown"
 
 
 class SetupDetector:
@@ -60,6 +79,9 @@ class SetupDetector:
         break_margin: float = 0.05,
         spread_max_pct: float = 0.10,
         flip_margin: float = 0.10,
+        record: Callable[[FireRecord], None] | None = None,
+        window_s: float = 5.0,
+        window_max: int = 256,
     ) -> None:
         self._plan_source = plan_source
         self._notify = notify
@@ -69,7 +91,11 @@ class SetupDetector:
         self._break_margin = break_margin
         self._spread_max_pct = spread_max_pct
         self._flip_margin = flip_margin
+        self._record = record
+        self._window_s = window_s
+        self._window_max = window_max
         self._tape_side: dict[str, str] = {}
+        self._tape: dict[str, deque[_Tick]] = {}  # symbol -> trailing-window prints (B4 telemetry)
         self._quotes: dict[str, Quote] = {}  # symbol -> latest top-of-book (underlying + options)
         self._active: set[tuple[float, str]] = set()  # (level.price, side) currently fired
         self._flip_side: dict[str, str] = {}  # symbol -> "above" | "below" the zero-gamma flip
@@ -78,10 +104,13 @@ class SetupDetector:
         self._quotes[quote.symbol] = quote
 
     def on_trade(self, trade: Trade) -> None:
+        self._push_tape(trade.symbol, trade.price, trade.size, "unknown", trade.ms)
         self._evaluate(trade.symbol, trade.price)
 
     def on_timesale(self, ts: TimeSale) -> None:
-        self._tape_side[ts.symbol] = _tape_side(ts)
+        side = _tape_side(ts)
+        self._tape_side[ts.symbol] = side
+        self._push_tape(ts.symbol, ts.price, ts.size, side, ts.ms)
         self._evaluate(ts.symbol, ts.price)
 
     def _evaluate(self, symbol: str, price: float) -> None:
@@ -100,9 +129,45 @@ class SetupDetector:
                     and tape == confirming
                 ):
                     self._active.add(key)
-                    self._fire(plan, symbol, level)
+                    self._fire(plan, symbol, level, price, confirming)
             elif key in self._active and self._cleared(level, price, confirming):
                 self._active.discard(key)  # left the zone -> re-arm this level
+
+    def _push_tape(
+        self, symbol: str, price: float, size: int | None, side: str, ms: int | None
+    ) -> None:
+        """Append a print to the symbol's trailing window, then prune by age.
+
+        Length is hard-capped (``window_max``) so a ms-less feed can't grow it
+        unbounded; when prints carry timestamps it's additionally trimmed to the
+        last ``window_s`` seconds, the window the velocity/absorption read uses.
+        """
+        dq = self._tape.get(symbol)
+        if dq is None:
+            dq = self._tape[symbol] = deque(maxlen=self._window_max)
+        dq.append(_Tick(ms, price, size or 0, side))
+        if ms is not None:
+            cutoff = ms - int(self._window_s * 1000)
+            while dq and dq[0].ms is not None and dq[0].ms < cutoff:
+                dq.popleft()
+
+    def _tape_metrics(self, symbol: str, confirming: str) -> tuple[float | None, int, int]:
+        """(velocity $/s, cumulative confirming-side size, cumulative contrary-side
+        size) over the trailing window — the B4 telemetry, computed only at fire time."""
+        dq = self._tape.get(symbol)
+        if not dq:
+            return None, 0, 0
+        contrary = "sell" if confirming == "buy" else "buy"
+        cum_conf = sum(t.size for t in dq if t.side == confirming)
+        cum_contra = sum(t.size for t in dq if t.side == contrary)
+        return _velocity(dq), cum_conf, cum_contra
+
+    def _book_imbalance(self, symbol: str) -> int | None:
+        """Underlying top-of-book ``bid_size - ask_size`` at the fire (None if unquoted)."""
+        q = self._quotes.get(symbol)
+        if q is None or q.bid_size is None or q.ask_size is None:
+            return None
+        return q.bid_size - q.ask_size
 
     def _check_flip(self, plan: SessionPlan, symbol: str, price: float) -> None:
         """Zero-gamma tripwire — a *non-trading* 'reassess' alert on a bidirectional
@@ -142,8 +207,32 @@ class SetupDetector:
             return price <= level.price if confirming == "buy" else price >= level.price
         return abs(price - level.price) > self._tolerance + self._rearm_margin
 
-    def _fire(self, plan: SessionPlan, symbol: str, level: Level) -> None:
-        """Prompt the human; propose the bracket if there's a contract with a tradeable spread."""
+    def _fire(
+        self, plan: SessionPlan, symbol: str, level: Level, price: float, confirming: str
+    ) -> None:
+        """Prompt the human; propose the bracket if there's a contract with a tradeable spread.
+
+        Emits the B4 ``FireRecord`` first, on *every* fire — alert-only and
+        spread-suppressed setups included — so the telemetry log holds one row per
+        confirmed setup regardless of whether a paper fill follows.
+        """
+        if self._record is not None:
+            velocity, cum_conf, cum_contra = self._tape_metrics(symbol, confirming)
+            self._record(
+                FireRecord(
+                    symbol=symbol,
+                    level=level.price,
+                    side=level.side,
+                    mode=level.mode,
+                    confirming=confirming,
+                    price=price,
+                    contract=level.contract,
+                    velocity=velocity,
+                    cum_confirming_size=cum_conf,
+                    cum_contrary_size=cum_contra,
+                    book_imbalance=self._book_imbalance(symbol),
+                )
+            )
         message = self._message(symbol, level)
         if level.contract and self._propose is not None:
             if self._spread_ok(level.contract):
@@ -202,6 +291,23 @@ def _flip_message(symbol: str, price: float, flip: float, direction: str) -> str
         f"⚠ {symbol} crossed the zero-gamma flip {flip:g} {arrow} ({price:g}) — "
         f"regime may be inverting; re-run /scalp prep for a fresh map ({regime})"
     )
+
+
+def _velocity(dq: deque[_Tick]) -> float | None:
+    """Signed underlying $/s across the window's first→last *timestamped* prints.
+
+    ``None`` when fewer than two prints carry a timestamp (e.g. a sandbox feed) or
+    they share one — there's no time base to divide by. Sign follows price: negative
+    = falling into the level, positive = rising into it.
+    """
+    stamped = [(t.ms, t.price) for t in dq if t.ms is not None]
+    if len(stamped) < 2:
+        return None
+    (ms0, p0), (ms1, p1) = stamped[0], stamped[-1]
+    dt = (ms1 - ms0) / 1000.0
+    if dt <= 0:
+        return None
+    return (p1 - p0) / dt
 
 
 def _tape_side(ts: TimeSale) -> str:

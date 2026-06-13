@@ -10,7 +10,8 @@ simply that no real capital is ever at risk, so the daemon opening positions
 (which the old assist-only guard forbade) is now its whole job.
 
     feed (Tradier WS) ──underlying tape──▶ SetupDetector ──▶ notify(human)
-                       │                                  └─▶ propose ─▶ PaperBroker.place_bracket
+                       │                                  ├─▶ propose ─▶ PaperBroker.place_bracket
+                       │                                  └─▶ record  ─▶ SignalLog (B4 telemetry)
                        └──option tape──▶ PaperBroker (fills entry + OCO children)
                                               │ order events
                                               ▼
@@ -33,20 +34,27 @@ from trading_scalper.domain import TradeProposal
 from trading_scalper.feed import TradierFeed, drive_paper_fills
 from trading_scalper.notify import Notifier
 from trading_scalper.paper import PaperBroker
-from trading_scalper.persist import PaperPersister, default_fills_path, default_summary_path
+from trading_scalper.persist import (
+    PaperPersister,
+    SignalLog,
+    default_fills_path,
+    default_signals_path,
+    default_summary_path,
+)
 from trading_scalper.plan import PlanStore, SessionPlan, default_plan_path
 from trading_scalper.ports import MarketDataFeed
 
 
 @dataclass(slots=True)
 class ScalpSession:
-    """The wired-up bundle: feed, paper broker, detector, notifier, persister."""
+    """The wired-up bundle: feed, paper broker, detector, notifier, persister, signal log."""
 
     feed: MarketDataFeed
     broker: PaperBroker
     detector: SetupDetector
     notifier: Notifier
     persister: PaperPersister
+    signals: SignalLog
 
 
 def make_executor(broker: PaperBroker, notifier: Notifier) -> Callable[[TradeProposal], None]:
@@ -82,16 +90,21 @@ def build_session(
     date: str,
     fills_path: Path | None = None,
     summary_path: Path | None = None,
+    signals_path: Path | None = None,
     interval: float = 30.0,
 ) -> ScalpSession:
     """Wire detector → proposal → paper bracket → persisted ledger onto the tape.
 
     Stop/target/qty are read from the plan at fire time (in the detector), so this
     composition is plan-driven; the CLI ``--stop-pct``/``--target-pct``/``--contracts``
-    only feed the offline ``--demo-setup`` path.
+    only feed the offline ``--demo-setup`` path. The detector's ``record`` sink lands
+    the B4 telemetry in a per-fire ``SignalLog`` alongside the fills/summary.
     """
     notifier = notifier or Notifier()
-    detector = SetupDetector(plan_source, notifier.notify, make_executor(broker, notifier))
+    signals = SignalLog(signals_path or default_signals_path(date))
+    detector = SetupDetector(
+        plan_source, notifier.notify, make_executor(broker, notifier), record=signals.record
+    )
     persister = PaperPersister(
         broker,
         date=date,
@@ -102,7 +115,12 @@ def build_session(
     drive_paper_fills(feed, broker)  # option + underlying prints fill the engine
     watch_setups(feed, detector)  # underlying tape → detector
     return ScalpSession(
-        feed=feed, broker=broker, detector=detector, notifier=notifier, persister=persister
+        feed=feed,
+        broker=broker,
+        detector=detector,
+        notifier=notifier,
+        persister=persister,
+        signals=signals,
     )
 
 
@@ -205,7 +223,10 @@ async def _run(args: argparse.Namespace) -> None:
     finally:
         await stream.close()
         session.persister.write_summary()
-        print("\nscalp session closed.")
+        print(
+            f"\nscalp session closed — {session.signals.n_fires} fires logged → "
+            f"{session.signals.path}"
+        )
 
 
 def _tradier_http_msg(exc: httpx.HTTPStatusError) -> str:
