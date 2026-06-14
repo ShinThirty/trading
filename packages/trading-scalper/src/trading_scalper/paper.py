@@ -1,8 +1,11 @@
 """In-memory paper broker: a synthetic matching engine for forward-testing.
 
-Zero I/O, in-memory only. A MARKET order fills immediately at the order's
-reference price (or the last traded price seen via ``trade``); a LIMIT / STOP
-order rests until a simulated tape print crosses it. Every fill emits the same
+Zero I/O, in-memory only. A MARKET order fills immediately at the *marketable*
+side of the book — the ask for a buy, the bid for a sell, so the paper entry
+pays the spread the way a real marketable order would (falling back to the last
+traded price seen via ``trade`` when there's no quote yet, or to an explicit
+reference); a LIMIT / STOP order rests until a simulated tape print crosses it.
+Every fill emits the same
 ``OrderEvent`` shape a real broker would push, so downstream consumers (the
 ``PaperPersister``) are broker-agnostic.
 
@@ -61,6 +64,7 @@ class PaperBroker:
         self._ids = count(1)
         self._ledger = Ledger(multiplier=multiplier)
         self._last: dict[str, float] = {}
+        self._book: dict[str, tuple[float | None, float | None]] = {}  # symbol -> (bid, ask)
         self._resting: dict[OrderId, _Resting] = {}
         self._oco: dict[OrderId, OrderId] = {}  # resting id -> its OCO sibling id
         self._callbacks: list[Callable[[OrderEvent], None]] = []
@@ -71,7 +75,7 @@ class PaperBroker:
         if order.type is OrderType.MARKET:
             price = order.limit_price
             if price is None:
-                price = self._last.get(order.symbol)
+                price = self._marketable_price(order.symbol, order.side)
             if price is None:
                 raise ValueError(
                     f"PaperBroker has no price for {order.symbol}; pass limit_price "
@@ -101,7 +105,9 @@ class PaperBroker:
         ``entry*(1+target_pct)``, linked so a fill on one cancels the other.
         Returns ``(entry_id, stop_id, target_id)``.
         """
-        entry_price = reference if reference is not None else self._last.get(symbol)
+        entry_price = (
+            reference if reference is not None else self._marketable_price(symbol, Side.BUY)
+        )
         if entry_price is None:
             raise ValueError(
                 f"PaperBroker has no price for {symbol}; pass reference or seed one via trade()"
@@ -141,6 +147,15 @@ class PaperBroker:
         self._callbacks.append(cb)
 
     # ── synthetic tape (Phase 2 wires the live feed here) ───
+    def quote(self, symbol: str, bid: float | None, ask: float | None) -> None:
+        """Record top-of-book so a MARKET order fills at the marketable side.
+
+        A quote never triggers a resting order — only a tape print (``trade``)
+        crosses a STOP/LIMIT. This just lets the entry pay the spread instead of
+        printing through it at the (better) last trade.
+        """
+        self._book[symbol] = (bid, ask)
+
     def trade(self, symbol: str, price: float) -> None:
         """Simulate a tape print: record the price and fill any order it crosses."""
         self._last[symbol] = price
@@ -162,6 +177,15 @@ class PaperBroker:
                 self.cancel(sibling)  # OCO: this leg filled, kill the other
 
     # ── internals ───────────────────────────────────────────
+    def _marketable_price(self, symbol: str, side: Side) -> float | None:
+        """Price a MARKET order crosses to: the ask for a buy, the bid for a sell
+        (you pay the spread), falling back to the last print when there's no quote."""
+        bid, ask = self._book.get(symbol, (None, None))
+        quote = ask if side is Side.BUY else bid
+        if quote is not None and quote > 0:
+            return quote
+        return self._last.get(symbol)
+
     def _fill(self, order_id: OrderId, order: Order, price: float) -> None:
         self._ledger.record(order.symbol, order.side is Side.BUY, order.quantity, price)
         self._emit(

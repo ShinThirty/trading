@@ -23,12 +23,12 @@ def test_profile_walls_regime_and_flip() -> None:
     ]
     p = gamma_exposure_profile(chain, spot=100.0)
 
-    assert p["total_gex"] == approx(500_000.0)
-    assert p["regime"] == "positive"
-    assert p["call_wall"] == 105.0  # largest positive call gamma
-    assert p["put_wall"] == 95.0  # largest put gamma magnitude
-    assert p["zero_gamma"] == approx(102.5)  # cum crosses zero between 100 and 105
-    assert len(p["by_strike"]) == 3  # strikes 95, 100, 105 (100 merges call+put)
+    assert p.total_gex == approx(500_000.0)
+    assert p.regime == "positive"
+    assert p.call_wall == 105.0  # largest positive call gamma
+    assert p.put_wall == 95.0  # largest put gamma magnitude
+    assert p.zero_gamma == approx(102.5)  # cum crosses zero between 100 and 105
+    assert len(p.by_strike) == 3  # strikes 95, 100, 105 (100 merges call+put)
 
 
 def test_flip_picks_crossing_nearest_spot() -> None:
@@ -44,8 +44,8 @@ def test_flip_picks_crossing_nearest_spot() -> None:
     ]
     p = gamma_exposure_profile(chain, spot=100.0)
 
-    assert p["zero_gamma"] == approx(95.4, abs=0.05)  # near-spot, NOT the ~81.7 artifact
-    assert p["regime"] == "positive"
+    assert p.zero_gamma == approx(95.4, abs=0.05)  # near-spot, NOT the ~81.7 artifact
+    assert p.regime == "positive"
 
 
 def test_negative_regime_when_puts_dominate() -> None:
@@ -55,11 +55,11 @@ def test_negative_regime_when_puts_dominate() -> None:
     ]
     p = gamma_exposure_profile(chain, spot=100.0)
 
-    assert p["total_gex"] == approx(-1_000_000.0)
-    assert p["regime"] == "negative"
-    assert p["call_wall"] == 105.0
-    assert p["put_wall"] == 95.0
-    assert p["zero_gamma"] is None  # cumulative stays negative — never flips
+    assert p.total_gex == approx(-1_000_000.0)
+    assert p.regime == "negative"
+    assert p.call_wall == 105.0
+    assert p.put_wall == 95.0
+    assert p.zero_gamma is None  # cumulative stays negative — never flips
 
 
 def test_skips_missing_greeks_and_zero_oi() -> None:
@@ -70,13 +70,13 @@ def test_skips_missing_greeks_and_zero_oi() -> None:
     ]
     p = gamma_exposure_profile(chain, spot=100.0)
 
-    assert len(p["by_strike"]) == 1
-    assert p["call_wall"] == 105.0
-    assert p["put_wall"] is None
-    assert p["regime"] == "positive"
+    assert len(p.by_strike) == 1
+    assert p.call_wall == 105.0
+    assert p.put_wall is None
+    assert p.regime == "positive"
 
 
 def test_nonpositive_spot_is_empty() -> None:
     p = gamma_exposure_profile([_opt("call", 105, 1000)], spot=0.0)
-    assert p["by_strike"] == []
-    assert p["call_wall"] is None and p["zero_gamma"] is None
+    assert p.by_strike == []
+    assert p.call_wall is None and p.zero_gamma is None

@@ -97,7 +97,7 @@ class SetupDetector:
         self._tape_side: dict[str, str] = {}
         self._tape: dict[str, deque[_Tick]] = {}  # symbol -> trailing-window prints (B4 telemetry)
         self._quotes: dict[str, Quote] = {}  # symbol -> latest top-of-book (underlying + options)
-        self._active: set[tuple[float, str]] = set()  # (level.price, side) currently fired
+        self._active: set[Level] = set()  # levels currently fired (re-arm on leaving the zone)
         self._flip_side: dict[str, str] = {}  # symbol -> "above" | "below" the zero-gamma flip
 
     def on_quote(self, quote: Quote) -> None:
@@ -120,7 +120,7 @@ class SetupDetector:
         self._check_flip(plan, symbol, price)
         tape = self._tape_side.get(symbol, "mixed")
         for level in plan.levels:
-            key = (level.price, level.side)
+            key = level  # the whole level: two levels at one price+side (diff mode/contract) co-arm
             confirming = _confirming_side(level)
             if self._in_zone(level, price, confirming):
                 if (
@@ -148,7 +148,9 @@ class SetupDetector:
         dq.append(_Tick(ms, price, size or 0, side))
         if ms is not None:
             cutoff = ms - int(self._window_s * 1000)
-            while dq and dq[0].ms is not None and dq[0].ms < cutoff:
+            # drop aged prints AND any leading timestamp-less one, so a single ms=None
+            # head (a bare trade) can't pin the window and keep stale prints alive
+            while dq and (dq[0].ms is None or dq[0].ms < cutoff):
                 dq.popleft()
 
     def _tape_metrics(self, symbol: str, confirming: str) -> tuple[float | None, int, int]:
@@ -256,6 +258,8 @@ class SetupDetector:
         q = self._quotes.get(contract)
         if q is None or q.bid is None or q.ask is None or q.ask <= 0:
             return True  # no quote to judge — best-effort, don't block
+        if q.bid > q.ask:
+            return False  # crossed/locked book — un-modelable, don't paper-fill
         return (q.ask - q.bid) / q.ask <= self._spread_max_pct
 
     def _message(self, symbol: str, level: Level) -> str:

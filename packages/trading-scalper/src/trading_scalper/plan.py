@@ -23,6 +23,8 @@ never recomputes GEX (the stream carries no OI/greeks), so this stays the static
 prep-time number; a cross means *reassess*, not an automatic fade↔break switch.
 """
 
+import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -91,14 +93,38 @@ def load_session_plan(path: Path) -> SessionPlan:
 
 
 class PlanStore:
-    """Caches today's plan and reloads it when the file's mtime changes."""
+    """Caches today's plan and reloads it when the file's mtime changes.
 
-    def __init__(self, path: Path) -> None:
+    Reloading is **crash-safe**: the plan is hand-edited mid-session, so a typo'd
+    or half-written edit is caught, reported via ``on_error``, and the last-good
+    plan is kept — the daemon keeps running on the prior map rather than dying on
+    a bad parse. The mtime is advanced even on a failed parse so a persistently
+    broken file isn't re-read on every read. The ``stat()`` is throttled to
+    ``reload_interval`` seconds so a once-a-session edit isn't a syscall on every
+    market tick (``current`` is called from the detector's per-tick hot path).
+    """
+
+    def __init__(
+        self,
+        path: Path,
+        *,
+        on_error: Callable[[str], None] | None = None,
+        reload_interval: float = 2.0,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
         self._path = path
+        self._on_error = on_error
+        self._reload_interval = reload_interval
+        self._clock = clock
         self._mtime: float | None = None
         self._plan: SessionPlan | None = None
+        self._checked: float | None = None
 
     def current(self) -> SessionPlan | None:
+        now = self._clock()
+        if self._checked is not None and now - self._checked < self._reload_interval:
+            return self._plan  # throttle: skip the stat() within the reload window
+        self._checked = now
         try:
             mtime = self._path.stat().st_mtime
         except FileNotFoundError:
@@ -106,6 +132,12 @@ class PlanStore:
             self._mtime = None
             return None
         if mtime != self._mtime:
-            self._plan = load_session_plan(self._path)
-            self._mtime = mtime
+            self._mtime = mtime  # advance first so a broken file doesn't re-parse every check
+            try:
+                self._plan = load_session_plan(self._path)
+            except Exception as exc:  # a malformed hand-edit must not kill the daemon
+                if self._on_error is not None:
+                    self._on_error(
+                        f"plan reload failed ({self._path.name}): {exc} — keeping the prior plan"
+                    )
         return self._plan

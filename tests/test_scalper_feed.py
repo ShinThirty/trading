@@ -53,12 +53,18 @@ def test_drive_paper_fills_triggers_a_resting_stop_off_the_tape() -> None:
     assert paper.net_position("QQQ") == 0
 
 
-def test_drive_paper_fills_only_wires_prints_not_quotes() -> None:
+def test_quotes_set_the_book_but_never_trigger_resting_orders() -> None:
     feed = _feed()
     paper = PaperBroker()
     drive_paper_fills(feed, paper)
-    paper.place(Order("QQQ", Side.BUY, 1, OrderType.MARKET, limit_price=5.00))
-    paper.place(Order("QQQ", Side.SELL, 1, OrderType.STOP, stop_price=4.50))
+    paper.place(Order("QQQ", Side.SELL, 1, OrderType.STOP, stop_price=4.50))  # protective stop
 
-    feed._dispatch(Quote("QQQ", bid=4.0, ask=4.1))  # a quote must not move the engine
+    feed._dispatch(Quote("QQQ", bid=4.0, ask=4.1))  # a quote must not cross a resting order
+    assert paper.net_position("QQQ") == 0  # stop untouched (was never long)
+
+    # but the quote DID set the book: a market buy now fills at the ask, not a stale last
+    fills: list[float] = []
+    paper.on_order_event(lambda e: fills.append(e.fill_price) if e.fill_price else None)
+    paper.place(Order("QQQ", Side.BUY, 1, OrderType.MARKET))
     assert paper.net_position("QQQ") == 1
+    assert fills == [4.1]  # filled at the offer (paid the spread), not the bid/last

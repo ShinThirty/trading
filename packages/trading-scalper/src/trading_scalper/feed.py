@@ -6,9 +6,11 @@ out to its subscribers. ``run`` drives the underlying auto-reconnecting stream;
 the routing is verifiable without a live socket.
 
 ``drive_paper_fills`` is the Phase-2 wiring that connects the live tape to the
-PaperBroker matching engine: every trade/timesale print advances the broker, so
-MARKET orders fill at the last price and resting STOP/LIMIT orders trigger when
-the tape crosses them.
+PaperBroker matching engine: every trade/timesale print advances the broker so
+resting STOP/LIMIT orders trigger when the tape crosses them, and every quote
+updates the broker's top-of-book so a MARKET entry fills at the marketable side
+(the ask) rather than printing through at the last trade. Quotes never trigger a
+resting order — only prints do.
 """
 
 from collections.abc import Callable
@@ -67,9 +69,11 @@ class TradierFeed:
 def drive_paper_fills(feed: MarketDataFeed, broker: PaperBroker) -> None:
     """Wire the live tape to the paper matching engine.
 
-    Each trade/timesale print advances ``PaperBroker`` so MARKET orders fill at
-    the last price and resting STOP/LIMIT orders trigger when the tape crosses
-    them. Quotes are not wired in — only prints move the engine.
+    Each trade/timesale print advances ``PaperBroker`` so resting STOP/LIMIT
+    orders trigger when the tape crosses them; each quote updates the broker's
+    top-of-book so a MARKET entry fills at the marketable side (the ask). Quotes
+    never move the engine — only prints trigger a resting order.
     """
     feed.on_trade(lambda t: broker.trade(t.symbol, t.price))
     feed.on_timesale(lambda ts: broker.trade(ts.symbol, ts.price))
+    feed.on_quote(lambda q: broker.quote(q.symbol, q.bid, q.ask))

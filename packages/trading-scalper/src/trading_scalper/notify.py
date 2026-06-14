@@ -5,8 +5,8 @@ a timestamped line, optionally prefixed with the BEL character (``\\a``) so the
 terminal dings. Desk-only and portable — no platform-specific notification API
 (phone-push via the trading-alerts Discord bot is a deferred upgrade).
 
-``Notifier.notify`` is the single injected callback both ``SetupDetector`` and
-``DisciplineEngine`` emit through.
+``Notifier.notify`` is the single injected callback ``SetupDetector`` (and the
+plan-reload guard) emit through.
 """
 
 from collections.abc import Callable

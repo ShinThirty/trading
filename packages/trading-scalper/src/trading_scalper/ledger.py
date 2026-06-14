@@ -1,9 +1,9 @@
 """Cost-basis ledger: positions and realized P&L from a fill stream.
 
 A pure, deterministic primitive — the single verifiable place all the
-position-and-P&L arithmetic lives, so nothing downstream (PaperBroker, the
-DisciplineEngine) does ad hoc math. P&L is in dollars via the contract
-multiplier (100 for options, 1 for the underlying).
+position-and-P&L arithmetic lives, so nothing downstream (the PaperBroker) does
+ad hoc math. P&L is in dollars via the contract multiplier (100 for options, 1
+for the underlying).
 
 Average-cost basis: a reducing fill realizes
 ``(exit - avg_cost) * closed_qty * multiplier``, signed by position direction; a

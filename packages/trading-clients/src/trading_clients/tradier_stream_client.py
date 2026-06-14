@@ -20,6 +20,7 @@ from collections.abc import AsyncIterator
 
 import httpx
 import websockets
+from websockets.exceptions import WebSocketException
 
 from trading_clients.market_stream import MarketEvent, Quote, TimeSale, Trade
 
@@ -186,6 +187,12 @@ class TradierStreamClient:
                     raise  # fatal: bad/sandbox token — don't spin on backoff
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, max_backoff)
-            except Exception:
+            except (
+                httpx.TransportError,
+                OSError,
+                TimeoutError,
+                WebSocketException,
+            ):
+                # transient transport faults (drop, reset, timeout) — reconnect on backoff
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, max_backoff)

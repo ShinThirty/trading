@@ -5,7 +5,7 @@ Operates on option chain dicts (from Tradier) and OHLCV bar data.
 """
 
 from math import exp, log, sqrt
-from typing import TypedDict
+from typing import NamedTuple, TypedDict
 
 from trading_clients.bsm import bsm_price, lognormal_cdf
 from trading_clients.endpoint import CONTRACT_MULTIPLIER
@@ -556,11 +556,23 @@ def _zero_gamma_crossing(rows: list[dict[str, float]], spot: float) -> float | N
     return min(crossings, key=lambda k: abs(k - spot))
 
 
+class GammaProfile(NamedTuple):
+    """Typed result of ``gamma_exposure_profile`` — so callers read ``.call_wall``
+    instead of narrowing a ``dict[str, object]``."""
+
+    total_gex: float  # signed dollar gamma summed across the chain
+    regime: str  # "positive" | "negative"
+    call_wall: float | None  # strike of the largest +call dollar gamma
+    put_wall: float | None  # strike of the largest put dollar-gamma magnitude
+    zero_gamma: float | None  # cumulative-signed-gamma zero crossing nearest spot
+    by_strike: list[dict[str, float]]  # [{strike, call_gex, put_gex, net_gex}] ascending
+
+
 def gamma_exposure_profile(
     chain: list[dict],
     spot: float,
     multiplier: int = CONTRACT_MULTIPLIER,
-) -> dict[str, object]:
+) -> GammaProfile:
     """Dealer gamma-exposure profile from an option chain (pure, no I/O).
 
     Per strike, dollar gamma = ``gamma * open_interest * multiplier * spot**2 * 0.01``,
@@ -581,14 +593,7 @@ def gamma_exposure_profile(
       by_strike   [{strike, call_gex, put_gex, net_gex}] ascending by strike
     """
     if spot <= 0:
-        return {
-            "total_gex": 0.0,
-            "regime": "positive",
-            "call_wall": None,
-            "put_wall": None,
-            "zero_gamma": None,
-            "by_strike": [],
-        }
+        return GammaProfile(0.0, "positive", None, None, None, [])
 
     spot2 = spot * spot
     by_strike: dict[float, dict[str, float]] = {}
@@ -627,14 +632,14 @@ def gamma_exposure_profile(
     call_wall = max(call_rows, key=lambda r: r["call_gex"], default=None)
     put_wall = min(put_rows, key=lambda r: r["put_gex"], default=None)
 
-    return {
-        "total_gex": total,
-        "regime": "positive" if total >= 0 else "negative",
-        "call_wall": call_wall["strike"] if call_wall else None,
-        "put_wall": put_wall["strike"] if put_wall else None,
-        "zero_gamma": _zero_gamma_crossing(rows, spot),
-        "by_strike": rows,
-    }
+    return GammaProfile(
+        total_gex=total,
+        regime="positive" if total >= 0 else "negative",
+        call_wall=call_wall["strike"] if call_wall else None,
+        put_wall=put_wall["strike"] if put_wall else None,
+        zero_gamma=_zero_gamma_crossing(rows, spot),
+        by_strike=rows,
+    )
 
 
 # ---------------------------------------------------------------------------

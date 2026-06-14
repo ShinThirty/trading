@@ -97,11 +97,12 @@ def test_build_session_wires_tape_and_quote_consumers(tmp_path: Path) -> None:
     feed, broker = FakeFeed(), PaperBroker()
     session = _session(feed, broker, tmp_path)
 
-    # drive_paper_fills + watch_setups each register on trade + timesale;
-    # only watch_setups registers on quote (the detector's spread/book read).
+    # both drive_paper_fills + watch_setups register on every channel: trade and
+    # timesale advance the engine + feed the detector; quote sets the broker's
+    # book (entry fills at the ask) + the detector's spread/book read.
     assert len(feed._trade) == 2
     assert len(feed._timesale) == 2
-    assert len(feed._quote) == 1
+    assert len(feed._quote) == 2
     assert isinstance(session.persister, PaperPersister)
 
 

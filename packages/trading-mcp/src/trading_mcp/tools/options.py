@@ -457,17 +457,14 @@ async def get_gamma_profile(
         return f"(no option chains for {symbol})"
 
     p = opts.gamma_exposure_profile(chain, spot)
-    regime = str(p["regime"])
-    total_v = p["total_gex"]
-    total = float(total_v) if isinstance(total_v, (int, float)) else 0.0
     playbook = (
         "dealers net long gamma — vol-suppressing / pinning; fade the walls back to the flip"
-        if regime == "positive"
+        if p.regime == "positive"
         else "dealers net short gamma — vol-amplifying / trending; trade the break, don't fade"
     )
 
-    def _lvl(v: object) -> str:
-        return f"${fmt_number(float(v))}" if isinstance(v, (int, float)) else "n/a"
+    def _lvl(v: float | None) -> str:
+        return f"${fmt_number(v)}" if v is not None else "n/a"
 
     dte_label = (
         target_exps[0] if expiration is not None else f"{len(target_exps)} exp ≤ {dte_max} DTE"
@@ -475,11 +472,11 @@ async def get_gamma_profile(
     summary = {
         "Underlying": f"${fmt_number(spot)}",
         "Coverage": dte_label,
-        "Regime": f"{regime.upper()} GEX",
-        "Total GEX": f"{total / 1e9:+.2f} $Bn / 1% move",
-        "Call Wall": _lvl(p["call_wall"]),
-        "Put Wall": _lvl(p["put_wall"]),
-        "Zero-Gamma Flip": _lvl(p["zero_gamma"]),
+        "Regime": f"{p.regime.upper()} GEX",
+        "Total GEX": f"{p.total_gex / 1e9:+.2f} $Bn / 1% move",
+        "Call Wall": _lvl(p.call_wall),
+        "Put Wall": _lvl(p.put_wall),
+        "Zero-Gamma Flip": _lvl(p.zero_gamma),
         "Read": playbook,
     }
     return f"## {symbol.upper()} Gamma Exposure\n\n{kv_table(summary)}"

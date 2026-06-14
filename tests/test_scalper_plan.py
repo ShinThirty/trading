@@ -57,7 +57,7 @@ def test_lean_defaults_to_no_trade_when_absent(tmp_path: Path) -> None:
 def test_plan_store_hot_reloads_on_change(tmp_path: Path) -> None:
     p = tmp_path / "2026-06-12-QQQ.yaml"
     _write(p, lean="long-only")
-    store = PlanStore(p)
+    store = PlanStore(p, reload_interval=0.0)  # disable throttle: re-stat every call
     first = store.current()
     assert first is not None and first.lean == "long-only"
 
@@ -67,8 +67,38 @@ def test_plan_store_hot_reloads_on_change(tmp_path: Path) -> None:
     assert second is not None and second.lean == "no-trade"
 
 
+def test_plan_store_keeps_last_good_on_malformed_edit(tmp_path: Path) -> None:
+    p = tmp_path / "2026-06-12-QQQ.yaml"
+    _write(p, lean="long-only")
+    errors: list[str] = []
+    store = PlanStore(p, reload_interval=0.0, on_error=errors.append)
+    assert store.current().lean == "long-only"  # type: ignore[union-attr]
+
+    p.write_text("levels:\n  - {side: support}\n")  # missing price/stop -> raises on load
+    os.utime(p, (time.time() + 10, time.time() + 10))
+    survived = store.current()
+
+    assert survived is not None and survived.lean == "long-only"  # last-good kept, no crash
+    assert errors and "plan reload failed" in errors[0]
+
+
+def test_plan_store_throttles_reload_within_interval(tmp_path: Path) -> None:
+    p = tmp_path / "2026-06-12-QQQ.yaml"
+    _write(p, lean="long-only")
+    now = [0.0]
+    store = PlanStore(p, reload_interval=2.0, clock=lambda: now[0])
+    assert store.current().lean == "long-only"  # type: ignore[union-attr]
+
+    _write(p, lean="no-trade")
+    os.utime(p, (time.time() + 10, time.time() + 10))
+    now[0] = 1.0  # inside the 2s window -> the edit is NOT picked up yet
+    assert store.current().lean == "long-only"  # type: ignore[union-attr]
+    now[0] = 5.0  # past the window -> re-stat picks up the edit
+    assert store.current().lean == "no-trade"  # type: ignore[union-attr]
+
+
 def test_plan_store_missing_file_degrades_to_none(tmp_path: Path) -> None:
-    store = PlanStore(tmp_path / "absent.yaml")
+    store = PlanStore(tmp_path / "absent.yaml", reload_interval=0.0)
     assert store.current() is None
 
 

@@ -196,10 +196,10 @@ async def _run(args: argparse.Namespace) -> None:
 
     primary = args.symbols[0]
     plan_path = default_plan_path(primary, args.date)
-    plan_store = PlanStore(plan_path)
+    notifier = Notifier(bell=not args.no_bell)
+    plan_store = PlanStore(plan_path, on_error=notifier.notify)  # bad hot-edit -> warn, keep last
     plan = plan_store.current()
 
-    notifier = Notifier(bell=not args.no_bell)
     broker = PaperBroker()
     stream = TradierStreamClient(cfg.tradier.api_token)
     feed = TradierFeed(stream)
@@ -244,9 +244,18 @@ def main() -> None:
         "--symbols", nargs="+", default=["QQQ"], help="underlying tape symbols (first drives plan)"
     )
     ap.add_argument("--date", default=date.today().isoformat(), help="plan date YYYY-MM-DD")
-    ap.add_argument("--stop-pct", type=float, default=0.20, help="demo-setup stop %% of premium")
-    ap.add_argument("--target-pct", type=float, default=0.20, help="demo-setup target %% premium")
-    ap.add_argument("--contracts", type=int, default=1, help="demo-setup quantity")
+    ap.add_argument(
+        "--stop-pct", type=float, default=0.20, help="(--demo-setup only) stop %% of premium"
+    )
+    ap.add_argument(
+        "--target-pct", type=float, default=0.20, help="(--demo-setup only) target %% of premium"
+    )
+    ap.add_argument(
+        "--contracts",
+        type=int,
+        default=1,
+        help="(--demo-setup only) quantity; live qty is plan-set",
+    )
     ap.add_argument("--no-bell", action="store_true", help="silence the terminal bell")
     ap.add_argument(
         "--demo-setup",
