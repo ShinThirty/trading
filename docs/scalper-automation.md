@@ -11,6 +11,9 @@ option contract per level); this app *watches the map* during the session, point
 your eyes at a level the instant price tags it, and forward-tests the trade on
 paper.
 
+> Learning to read the map by eye — tape, VWAP, volume profile, gamma walls, L2 —
+> is its own skill: see [chart-reading-curriculum.md](chart-reading-curriculum.md).
+
 ## Why this exists (and the pivot that shaped it)
 
 The original design was an **assist-only stop-enforcer**: it watched for a manual
