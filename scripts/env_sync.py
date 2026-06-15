@@ -1,13 +1,23 @@
 #!/usr/bin/env python3
 """Sync the trading environment between machines via an encrypted S3 bundle.
 
-State bundled:
+State bundled (full-snapshot tarball, re-uploaded whole on every push):
   - ~/.tradingrc                                   (API credentials, Webull token)
-  - ~/.trading/                                    (SQLite DB: pipeline, rolls, decisions, cache)
+  - ~/.trading/trading.db                          (SQLite DB: pipeline, rolls, decisions, cache)
+        ^ the ONLY thing bundled from ~/.trading — named explicitly, not swept;
+          new state there rides nothing until added to the list deliberately.
   - ~/.claude/projects/.../memory/                 (Claude auto-memory)
   - ~/Documents/analysis/                          (per-ticker research notes)
 
-Transport: S3.   Encryption: age (X25519 keypair).   Snapshot: sqlite3 backup API.
+Synced separately (incremental — only new/changed files move):
+  - ~/.trading/scalp/                              (paper-detector plans + fills/signals)
+        → s3://<bucket>/scalp/ via `aws s3 sync`. This archive is append-only
+        (write-once-per-day) and non-sensitive (index price levels + paper fills,
+        no creds), so it rides its own prefix instead of inflating — and being
+        re-uploaded whole with — the encrypted snapshot bundle on every push.
+
+Transport: S3.   Encryption: age (X25519 keypair) for the bundle, SSE-S3 for scalp.
+Snapshot: sqlite3 backup API.
 
 Usage:
   uv run scripts/env_sync.py push       Bundle local state, encrypt, upload to S3
@@ -110,6 +120,14 @@ BUCKET = "trading-env-113477077840"
 S3_URI = f"s3://{BUCKET}"
 KEY_BUNDLE = "trading-env.tar.gz.age"
 
+# The scalp paper-detector archive (session plans + fills/signals) is append-only
+# and non-sensitive, so it rides its OWN S3 prefix via incremental `aws s3 sync`
+# rather than the full-snapshot bundle: a year of write-once session logs never
+# inflates (or gets re-uploaded whole with) the encrypted env bundle. SCALP_DIR
+# is carved out of the bundle's tracked set + push staging + pull restore below.
+SCALP_DIR = TRADING_DIR / "scalp"
+SCALP_PREFIX = "scalp/"  # s3://<bucket>/scalp/
+
 # age identity (X25519 keypair) used to encrypt/decrypt the bundle without a
 # passphrase prompt. ONE keypair is shared across machines: create it once with
 # `setup-key`, then copy the file to every machine that syncs (same path, or
@@ -149,13 +167,12 @@ def tracked_files() -> list[Path]:
     files: list[Path] = []
     if TRADINGRC.exists():
         files.append(TRADINGRC)
-    if TRADING_DIR.exists():
-        for p in TRADING_DIR.rglob("*"):
-            if not p.is_file() or p.name in {".last_sync", MCP_LOCK_NAME}:
-                continue
-            if p.name.endswith(("-wal", "-shm")):
-                continue
-            files.append(p)
+    # Only trading.db is bundled from ~/.trading; everything else there is either
+    # transient (-wal/-shm, the lock, the marker) or synced on its own prefix
+    # (scalp/). Name what's bundled explicitly — don't sweep the directory, so a
+    # new file landing under ~/.trading can't silently ride along. Add deliberately.
+    if TRADING_DB.exists():
+        files.append(TRADING_DB)
     if MEMORY_DIR.exists():
         files.extend(p for p in MEMORY_DIR.rglob("*") if p.is_file())
     if DOCS_DIR.exists():
@@ -383,6 +400,51 @@ def _is_dirty(local_sync_ts: int, local_sig: str | None) -> bool:
     return latest_local_mtime() > local_sync_ts
 
 
+def sync_scalp_push() -> None:
+    """Incrementally upload the scalp archive to its own prefix (only new/changed files).
+
+    `aws s3 sync` compares size + mtime and transfers just what differs, so a
+    session push moves the day's few KB, not the whole accumulated archive. The
+    data is non-sensitive (index price levels + paper fills, no creds), so it
+    rides server-side encryption (SSE-S3) instead of the bundle's age key.
+    """
+    if not SCALP_DIR.exists():
+        return
+    dst = f"{S3_URI}/{SCALP_PREFIX}"
+    print(f"Syncing scalp archive → {dst} ...")
+    subprocess.run(["aws", "s3", "sync", str(SCALP_DIR), dst, "--sse", "AES256"], check=True)
+
+
+def sync_scalp_pull() -> None:
+    """Incrementally download the scalp archive (no --delete — history is never pruned)."""
+    src = f"{S3_URI}/{SCALP_PREFIX}"
+    SCALP_DIR.mkdir(parents=True, exist_ok=True)
+    print(f"Syncing scalp archive ← {src} ...")
+    subprocess.run(["aws", "s3", "sync", src, str(SCALP_DIR)], check=True)
+
+
+def scalp_pending() -> tuple[int, int] | None:
+    """(to-push, to-pull) scalp file counts via two `aws s3 sync --dryrun` passes.
+
+    Metadata-only (no transfer). Returns None if the dir is absent; counts default
+    to 0 on any aws error so status degrades quietly. Scalp is decoupled from the
+    bundle's push_ts, so this is the only signal that paper logs need syncing.
+    """
+    if not SCALP_DIR.exists():
+        return None
+    dst = f"{S3_URI}/{SCALP_PREFIX}"
+
+    def _count(src: str, dest: str) -> int:
+        res = subprocess.run(
+            ["aws", "s3", "sync", src, dest, "--dryrun"], capture_output=True, text=True
+        )
+        if res.returncode != 0:
+            return 0
+        return sum(1 for line in res.stdout.splitlines() if line.lstrip().startswith("(dryrun)"))
+
+    return _count(str(SCALP_DIR), dst), _count(dst, str(SCALP_DIR))
+
+
 def cmd_push(args: argparse.Namespace) -> None:
     require("age", "age-keygen", "aws")
     recipient = age_recipient()
@@ -410,26 +472,16 @@ def cmd_push(args: argparse.Namespace) -> None:
         if TRADINGRC.exists():
             shutil.copy2(TRADINGRC, staging / ".tradingrc")
 
-        # Stage .trading/ with a snapshot DB instead of the live file.
-        if TRADING_DIR.exists():
+        # Stage trading.db (and only trading.db) as a consistent snapshot — the
+        # sole bundled member of ~/.trading. scalp/ syncs on its own prefix
+        # (sync_scalp_push); -wal/-shm, the lock, and the marker are transient.
+        # New persistent state under ~/.trading is intentionally NOT bundled —
+        # add it here explicitly if it ever should be.
+        if TRADING_DB.exists():
             staged_trading = staging / ".trading"
             staged_trading.mkdir()
-            for p in TRADING_DIR.iterdir():
-                if p.name in {
-                    "trading.db",
-                    "trading.db-wal",
-                    "trading.db-shm",
-                    ".last_sync",
-                    MCP_LOCK_NAME,
-                }:
-                    continue
-                if p.is_file():
-                    shutil.copy2(p, staged_trading / p.name)
-                elif p.is_dir():
-                    shutil.copytree(p, staged_trading / p.name)
-            if TRADING_DB.exists():
-                print("Snapshotting trading.db...")
-                snapshot_sqlite(staged_trading / "trading.db")
+            print("Snapshotting trading.db...")
+            snapshot_sqlite(staged_trading / "trading.db")
 
         # Stage memory dir under a fixed arcname (the source-machine slug would
         # not match the target machine's repo path).
@@ -491,6 +543,8 @@ def cmd_push(args: argparse.Namespace) -> None:
         write_marker(push_ts, host, live_sig)
         print(f"Pushed. Marker updated: {ts_to_str(push_ts)} ({host})")
 
+    sync_scalp_push()
+
 
 def cmd_pull(args: argparse.Namespace) -> None:
     require("age", "aws")
@@ -502,6 +556,11 @@ def cmd_pull(args: argparse.Namespace) -> None:
     remote = fetch_remote_meta()
     if not remote:
         sys.exit(f"No remote bundle found at {S3_URI}/")
+
+    # Scalp rides its own prefix and is decoupled from the bundle's push_ts, so a
+    # session that only added paper logs won't bump the marker — reconcile it on
+    # every pull, independent of whether the bundle itself is already in sync.
+    sync_scalp_pull()
 
     local_sync_ts, _, local_sig = read_marker()
 
@@ -548,19 +607,13 @@ def cmd_pull(args: argparse.Namespace) -> None:
         if src_rc.exists():
             shutil.copy2(src_rc, TRADINGRC)
 
-        src_trading = extract_dir / ".trading"
-        if src_trading.exists():
+        # Restore trading.db only — the sole bundled member of ~/.trading. A legacy
+        # bundle may also carry scalp/ or other entries; ignore them, since scalp
+        # now syncs on its own prefix (sync_scalp_pull) and nothing else is bundled.
+        src_db = extract_dir / ".trading" / "trading.db"
+        if src_db.exists():
             TRADING_DIR.mkdir(parents=True, exist_ok=True)
-            for entry in src_trading.iterdir():
-                dst = TRADING_DIR / entry.name
-                if dst.is_dir():
-                    shutil.rmtree(dst)
-                elif dst.exists():
-                    dst.unlink()
-                if entry.is_dir():
-                    shutil.copytree(entry, dst)
-                else:
-                    shutil.copy2(entry, dst)
+            shutil.copy2(src_db, TRADING_DB)
 
         src_mem = extract_dir / "memory"
         if src_mem.exists():
@@ -625,6 +678,14 @@ def cmd_status(_: argparse.Namespace) -> None:
         print("  Status: remote ahead — pull to update")
     else:
         print("  Status: local marker ahead of remote (unusual)")
+
+    pending = scalp_pending()
+    if pending is not None:
+        up, down = pending
+        if up or down:
+            print(f"  Scalp:     {up} to push, {down} to pull (separate prefix)")
+        else:
+            print("  Scalp:     in sync (separate prefix)")
 
 
 def cmd_setup_key(_: argparse.Namespace) -> None:
