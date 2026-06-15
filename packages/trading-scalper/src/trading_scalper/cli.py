@@ -30,7 +30,7 @@ from trading_clients.config import load_config
 from trading_clients.tradier_stream_client import TradierStreamClient
 
 from trading_scalper.detector import SetupDetector, watch_setups
-from trading_scalper.domain import TradeProposal
+from trading_scalper.domain import OrderId, TradeProposal
 from trading_scalper.feed import TradierFeed, drive_paper_fills
 from trading_scalper.notify import Notifier
 from trading_scalper.paper import PaperBroker
@@ -57,16 +57,24 @@ class ScalpSession:
     signals: SignalLog
 
 
-def make_executor(broker: PaperBroker, notifier: Notifier) -> Callable[[TradeProposal], None]:
-    """Build the proposal → paper-bracket executor; a missing price is a soft warn."""
+def make_executor(
+    broker: PaperBroker, notifier: Notifier
+) -> Callable[[TradeProposal], OrderId | None]:
+    """Build the proposal → paper-bracket executor; a missing price is a soft warn.
 
-    def execute(p: TradeProposal) -> None:
+    Returns the bracket's ``entry_id`` so the detector can stamp it on the fire's
+    ``FireRecord`` (the join key to the bracket's fills); ``None`` when no fill
+    happened (no price on the tape yet)."""
+
+    def execute(p: TradeProposal) -> OrderId | None:
         try:
-            broker.place_bracket(
+            entry_id, _stop_id, _target_id = broker.place_bracket(
                 p.contract, p.quantity, stop_pct=p.stop_pct, target_pct=p.target_pct
             )
+            return entry_id
         except ValueError:
             notifier.notify(f"(paper) skipped {p.contract}: no price on the tape yet")
+            return None
 
     return execute
 

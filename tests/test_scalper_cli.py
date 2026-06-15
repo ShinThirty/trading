@@ -130,6 +130,39 @@ def test_confirmed_tag_logs_a_signal_row(tmp_path: Path) -> None:
     assert rows[0]["confirming"] == "buy" and rows[0]["mode"] == "fade"
 
 
+def test_signal_row_joins_to_bracket_fills_on_bracket_id(tmp_path: Path) -> None:
+    feed, broker = FakeFeed(), PaperBroker()
+    session = _session(feed, broker, tmp_path, plan_source=lambda: _plan("both", "QQQ_C"))
+
+    feed.emit_trade(Trade("QQQ_C", 4.00))  # seed the option price
+    feed.emit_timesale(_buy_ts("QQQ", 719.41))  # confirmed tag -> bracket + signal row
+    feed.emit_trade(Trade("QQQ_C", 3.10))  # crosses the stop -> close, loss realized
+
+    signal = json.loads(session.signals.path.read_text().splitlines()[0])
+    fills = [json.loads(line) for line in session.persister.fills_path.read_text().splitlines()]
+    entry = next(f for f in fills if f["side"] == "BUY")
+    close = next(f for f in fills if f["side"] == "SELL")
+
+    # the fire's bracket_id ties it to the entry fill, and every leg shares the key...
+    assert signal["bracket_id"] == entry["order_id"] == entry["bracket_id"]
+    assert close["bracket_id"] == signal["bracket_id"]
+    # ...so the fire's features join to the realized win/loss label recorded on the close
+    assert entry["realized_delta"] == 0.0
+    assert close["realized_delta"] == pytest.approx((3.10 - 4.00) * 100)  # -90 loss label
+
+
+def test_alert_only_fire_records_null_bracket_id(tmp_path: Path) -> None:
+    feed, broker = FakeFeed(), PaperBroker()
+    session = _session(feed, broker, tmp_path, plan_source=lambda: _plan("both", contract=None))
+
+    feed.emit_timesale(_buy_ts("QQQ", 719.41))  # confirmed tag, but no contract -> no fill
+
+    signal = json.loads(session.signals.path.read_text().splitlines()[0])
+    assert (
+        signal["bracket_id"] is None
+    )  # nothing placed -> no join key, distinguishes no-fill fires
+
+
 def test_bracket_stop_fill_flattens_and_realizes(tmp_path: Path) -> None:
     feed, broker = FakeFeed(), PaperBroker()
     _session(feed, broker, tmp_path, plan_source=lambda: _plan("both", "QQQ_C"))

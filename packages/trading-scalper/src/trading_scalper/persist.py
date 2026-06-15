@@ -15,6 +15,13 @@ per *detector fire* (the B4 velocity/absorption telemetry), independent of fills
 a fire is logged even when it produces no paper fill (an alert-only level, or a
 confirmed setup whose option spread was too wide to model). The metadata is about
 the *setup at fire time*, not an eventual fill, so it isn't gated on a FILLED event.
+
+The two logs are joinable: a fire that places a bracket stamps the bracket's
+entry-order id as ``bracket_id`` on its signal row, and every fill of that bracket
+carries the same ``bracket_id`` in ``{date}.jsonl`` (with the close's ``realized_delta``
+as the win/loss label). So the paper run's *features* (per fire) join cleanly to
+their *outcome* (per close) on ``bracket_id`` — the labeled dataset a later
+calibration step needs, with no fragile contract+timestamp reconstruction.
 """
 
 import asyncio
@@ -71,6 +78,7 @@ class SignalLog:
             "confirming": rec.confirming,
             "price": rec.price,
             "contract": rec.contract,
+            "bracket_id": rec.bracket_id,  # join key → the bracket's fills (None if no fill)
             "velocity": round(rec.velocity, 4) if rec.velocity is not None else None,
             "cum_confirming_size": rec.cum_confirming_size,
             "cum_contrary_size": rec.cum_contrary_size,
@@ -110,10 +118,14 @@ class PaperPersister:
         row = {
             "ts": self._clock(),
             "order_id": ev.order_id,
+            "bracket_id": ev.bracket_id,  # the open this fill belongs to (join key)
             "symbol": ev.symbol,
             "side": ev.side.value,
             "qty": ev.filled_quantity,
             "fill_price": ev.fill_price,
+            "realized_delta": (
+                round(ev.realized_delta, 2) if ev.realized_delta is not None else None
+            ),  # win/loss label: 0 on the open, the close's P&L on the exit
         }
         with self.fills_path.open("a") as f:
             f.write(json.dumps(row) + "\n")

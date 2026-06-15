@@ -42,6 +42,11 @@ def test_fills_are_appended_as_jsonl(tmp_path: Path) -> None:
     assert rows[0]["side"] == "BUY" and rows[0]["fill_price"] == 4.00
     assert rows[1]["side"] == "SELL" and rows[1]["fill_price"] == 4.80
     assert all(r["symbol"] == "QQQ_C" for r in rows)
+    # both legs share the bracket key (the entry-order id), and the close carries the label
+    assert rows[0]["bracket_id"] == rows[0]["order_id"]  # entry: order id doubles as the key
+    assert rows[1]["bracket_id"] == rows[0]["order_id"]
+    assert rows[0]["realized_delta"] == 0.0  # opening fill realizes nothing
+    assert rows[1]["realized_delta"] == pytest.approx(80.0)  # +80 win label on the close
 
 
 def test_summary_has_realized_and_positions(tmp_path: Path) -> None:
@@ -105,6 +110,7 @@ def _fire_record(**overrides: object) -> FireRecord:
         confirming="buy",
         price=719.42,
         contract="QQQ260612C00720000",
+        bracket_id="paper-1",
         velocity=-0.3612,
         cum_confirming_size=25,
         cum_contrary_size=4,
@@ -123,4 +129,5 @@ def test_signal_log_appends_a_row_per_fire(tmp_path: Path) -> None:
     assert rows[0]["ts"] == "2026-06-12T13:00:00+00:00"
     assert rows[0]["velocity"] == pytest.approx(-0.3612)
     assert rows[0]["cum_confirming_size"] == 25 and rows[0]["book_imbalance"] == 600
+    assert rows[0]["bracket_id"] == "paper-1"  # join key to the bracket's fills
     assert rows[1]["velocity"] is None and rows[1]["contract"] is None  # alert-only, no time base

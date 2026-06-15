@@ -144,6 +144,23 @@ def test_bracket_stop_fills_and_cancels_target() -> None:
     assert (target_id, OrderStatus.CANCELLED) in statuses
 
 
+def test_bracket_legs_share_entry_id_and_close_carries_realized() -> None:
+    paper = PaperBroker()
+    events: list[OrderEvent] = []
+    paper.on_order_event(events.append)
+    entry_id, stop_id, _target_id = paper.place_bracket(
+        "QQQ_C", 1, stop_pct=0.20, target_pct=0.20, reference=4.00
+    )
+
+    paper.trade("QQQ_C", 3.10)  # stop fills -> loss
+
+    assert all(e.bracket_id == entry_id for e in events)  # every leg keyed to the entry id
+    entry_fill = next(e for e in events if e.order_id == entry_id)
+    stop_fill = next(e for e in events if e.order_id == stop_id and e.status is OrderStatus.FILLED)
+    assert entry_fill.realized_delta == 0.0  # the open realizes nothing
+    assert stop_fill.realized_delta == pytest.approx((3.10 - 4.00) * 100)  # -90 label on the close
+
+
 def test_place_bracket_without_price_raises() -> None:
     paper = PaperBroker()
     with pytest.raises(ValueError, match="no price"):

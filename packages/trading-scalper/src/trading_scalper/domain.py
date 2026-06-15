@@ -58,7 +58,15 @@ class Position:
 
 @dataclass(frozen=True, slots=True)
 class OrderEvent:
-    """A push update from the broker: an order changed status (e.g. filled)."""
+    """A push update from the broker: an order changed status (e.g. filled).
+
+    ``bracket_id`` is the entry-order id shared by all three legs of a
+    ``place_bracket`` (entry + OCO stop/target), so a closing fill can be tied
+    back to the open that spawned it — and, via the matching ``FireRecord``, to
+    the detector fire. ``realized_delta`` is the dollars this fill realized
+    (0 for an opening fill, the ledger's per-close P&L for a reducing one): the
+    recorded win/loss label, so the outcome never has to be re-derived offline.
+    """
 
     order_id: OrderId
     symbol: str
@@ -67,6 +75,8 @@ class OrderEvent:
     quantity: int
     filled_quantity: int = 0
     fill_price: float | None = None
+    bracket_id: OrderId | None = None
+    realized_delta: float | None = None
 
 
 type OrderEventCallback = Callable[[OrderEvent], None]
@@ -103,7 +113,12 @@ class FireRecord:
     relative to the setup's confirming direction; ``book_imbalance`` is the
     underlying top-of-book ``bid_size - ask_size`` at the fire (``None`` if unquoted).
     A wall-clock ``ts`` is stamped by the writer, not here, so the detector stays
-    clock-free and deterministic.
+    clock-free and deterministic. ``bracket_id`` is the **join key** to the
+    realized outcome: the entry-order id of the paper bracket this fire placed
+    (``None`` for an alert-only or spread-suppressed fire that produced no fill),
+    matching the ``bracket_id`` carried on every fill of that bracket — so the
+    paper run's features can be joined to their win/loss label without a fragile
+    contract+timestamp heuristic.
     """
 
     symbol: str
@@ -113,6 +128,7 @@ class FireRecord:
     confirming: str  # buy | sell — the tape side that confirmed
     price: float  # underlying price at the fire
     contract: str | None  # OCC, or None for an alert-only level
+    bracket_id: OrderId | None  # entry-order id of the placed bracket (join key); None if no fill
     velocity: float | None
     cum_confirming_size: int
     cum_contrary_size: int

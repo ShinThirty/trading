@@ -55,6 +55,7 @@ def _crosses(order: Order, price: float) -> bool:
 class _Resting:
     order_id: OrderId
     order: Order
+    bracket_id: OrderId | None = None  # entry-order id, when this leg belongs to a bracket
 
 
 class PaperBroker:
@@ -70,7 +71,7 @@ class PaperBroker:
         self._callbacks: list[Callable[[OrderEvent], None]] = []
 
     # ── BrokerExecution ─────────────────────────────────────
-    def place(self, order: Order) -> OrderId:
+    def place(self, order: Order, *, bracket_id: OrderId | None = None) -> OrderId:
         order_id = f"paper-{next(self._ids)}"
         if order.type is OrderType.MARKET:
             price = order.limit_price
@@ -81,11 +82,18 @@ class PaperBroker:
                     f"PaperBroker has no price for {order.symbol}; pass limit_price "
                     "as a reference or seed one via trade()"
                 )
-            self._fill(order_id, order, price)
+            self._fill(order_id, order, price, bracket_id=bracket_id)
         else:
-            self._resting[order_id] = _Resting(order_id, order)
+            self._resting[order_id] = _Resting(order_id, order, bracket_id)
             self._emit(
-                OrderEvent(order_id, order.symbol, order.side, OrderStatus.NEW, order.quantity)
+                OrderEvent(
+                    order_id,
+                    order.symbol,
+                    order.side,
+                    OrderStatus.NEW,
+                    order.quantity,
+                    bracket_id=bracket_id,
+                )
             )
         return order_id
 
@@ -103,7 +111,9 @@ class PaperBroker:
         Entry fills immediately at ``reference`` (or the last tape price); the
         child stop-loss rests at ``entry*(1-stop_pct)`` and the take-profit at
         ``entry*(1+target_pct)``, linked so a fill on one cancels the other.
-        Returns ``(entry_id, stop_id, target_id)``.
+        Returns ``(entry_id, stop_id, target_id)``; ``entry_id`` doubles as the
+        bracket's correlation key, stamped on every leg's ``OrderEvent`` so a
+        closing fill joins back to the open.
         """
         entry_price = (
             reference if reference is not None else self._marketable_price(symbol, Side.BUY)
@@ -114,13 +124,17 @@ class PaperBroker:
             )
         entry_id = f"paper-{next(self._ids)}"
         entry = Order(symbol, Side.BUY, quantity, OrderType.MARKET, limit_price=entry_price)
-        self._fill(entry_id, entry, entry_price)
+        self._fill(entry_id, entry, entry_price, bracket_id=entry_id)
 
         stop_px = round(entry_price * (1 - stop_pct), 2)
         target_px = round(entry_price * (1 + target_pct), 2)
-        stop_id = self.place(Order(symbol, Side.SELL, quantity, OrderType.STOP, stop_price=stop_px))
+        stop_id = self.place(
+            Order(symbol, Side.SELL, quantity, OrderType.STOP, stop_price=stop_px),
+            bracket_id=entry_id,
+        )
         target_id = self.place(
-            Order(symbol, Side.SELL, quantity, OrderType.LIMIT, limit_price=target_px)
+            Order(symbol, Side.SELL, quantity, OrderType.LIMIT, limit_price=target_px),
+            bracket_id=entry_id,
         )
         self._oco[stop_id] = target_id
         self._oco[target_id] = stop_id
@@ -132,7 +146,16 @@ class PaperBroker:
             return
         self._oco.pop(order_id, None)
         o = resting.order
-        self._emit(OrderEvent(order_id, o.symbol, o.side, OrderStatus.CANCELLED, o.quantity))
+        self._emit(
+            OrderEvent(
+                order_id,
+                o.symbol,
+                o.side,
+                OrderStatus.CANCELLED,
+                o.quantity,
+                bracket_id=resting.bracket_id,
+            )
+        )
 
     def positions(self) -> list[Position]:
         return [Position(s, self._ledger.net_qty(s)) for s in self._ledger.symbols()]
@@ -170,7 +193,7 @@ class PaperBroker:
                 fill_price = o.limit_price
             else:
                 fill_price = price
-            self._fill(order_id, o, fill_price)
+            self._fill(order_id, o, fill_price, bracket_id=resting.bracket_id)
             sibling = self._oco.pop(order_id, None)
             if sibling is not None:
                 self._oco.pop(sibling, None)
@@ -186,8 +209,10 @@ class PaperBroker:
             return quote
         return self._last.get(symbol)
 
-    def _fill(self, order_id: OrderId, order: Order, price: float) -> None:
-        self._ledger.record(order.symbol, order.side is Side.BUY, order.quantity, price)
+    def _fill(
+        self, order_id: OrderId, order: Order, price: float, *, bracket_id: OrderId | None = None
+    ) -> None:
+        realized = self._ledger.record(order.symbol, order.side is Side.BUY, order.quantity, price)
         self._emit(
             OrderEvent(
                 order_id,
@@ -197,6 +222,8 @@ class PaperBroker:
                 order.quantity,
                 filled_quantity=order.quantity,
                 fill_price=price,
+                bracket_id=bracket_id,
+                realized_delta=realized,
             )
         )
 

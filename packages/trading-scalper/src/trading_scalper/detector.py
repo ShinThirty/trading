@@ -50,7 +50,7 @@ from typing import NamedTuple
 from trading_clients.market_stream import Quote, TimeSale, Trade
 from trading_clients.options import parse_occ
 
-from trading_scalper.domain import FireRecord, TradeProposal
+from trading_scalper.domain import FireRecord, OrderId, TradeProposal
 from trading_scalper.plan import Level, SessionPlan
 from trading_scalper.ports import MarketDataFeed
 
@@ -72,7 +72,7 @@ class SetupDetector:
         self,
         plan_source: Callable[[], SessionPlan | None],
         notify: Callable[[str], None],
-        propose: Callable[[TradeProposal], None] | None = None,
+        propose: Callable[[TradeProposal], OrderId | None] | None = None,
         *,
         tolerance: float = 0.10,
         rearm_margin: float = 0.05,
@@ -214,10 +214,14 @@ class SetupDetector:
     ) -> None:
         """Prompt the human; propose the bracket if there's a contract with a tradeable spread.
 
-        Emits the B4 ``FireRecord`` first, on *every* fire — alert-only and
-        spread-suppressed setups included — so the telemetry log holds one row per
-        confirmed setup regardless of whether a paper fill follows.
+        Prompts and proposes first so the bracket's ``bracket_id`` (the placed
+        entry-order id, or ``None`` for an alert-only / spread-suppressed fire) can
+        be stamped on the ``FireRecord``. The record is then emitted on *every*
+        fire — alert-only and spread-suppressed setups included — so the telemetry
+        log holds one row per confirmed setup, joinable to the bracket's fills.
         """
+        message = self._message(symbol, level)
+        bracket_id = self._prompt(plan, level, message)
         if self._record is not None:
             velocity, cum_conf, cum_contra = self._tape_metrics(symbol, confirming)
             self._record(
@@ -229,17 +233,21 @@ class SetupDetector:
                     confirming=confirming,
                     price=price,
                     contract=level.contract,
+                    bracket_id=bracket_id,
                     velocity=velocity,
                     cum_confirming_size=cum_conf,
                     cum_contrary_size=cum_contra,
                     book_imbalance=self._book_imbalance(symbol),
                 )
             )
-        message = self._message(symbol, level)
+
+    def _prompt(self, plan: SessionPlan, level: Level, message: str) -> OrderId | None:
+        """Notify the human and, on a contract with a tradeable spread, place the paper
+        bracket; return its ``bracket_id`` (entry-order id) or ``None`` if nothing filled."""
         if level.contract and self._propose is not None:
             if self._spread_ok(level.contract):
                 self._notify(message)
-                self._propose(
+                return self._propose(
                     TradeProposal(
                         contract=level.contract,
                         quantity=plan.contracts,
@@ -248,10 +256,10 @@ class SetupDetector:
                         reason=message,
                     )
                 )
-            else:
-                self._notify(f"{message} — option spread too wide; alert only, no paper fill")
-        else:
-            self._notify(message)
+            self._notify(f"{message} — option spread too wide; alert only, no paper fill")
+            return None
+        self._notify(message)
+        return None
 
     def _spread_ok(self, contract: str) -> bool:
         """Spread gate (proposal only): True unless the option's quoted spread is too wide."""
