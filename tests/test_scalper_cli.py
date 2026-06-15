@@ -191,6 +191,7 @@ def test_break_mode_tag_with_clean_quote_places_bracket(tmp_path: Path) -> None:
 
     feed.emit_trade(Trade("QQQ260612C00723000", 2.00))  # seed option price
     feed.emit_quote(Quote("QQQ260612C00723000", bid=1.98, ask=2.00))  # clean, penny-wide
+    feed.emit_timesale(_buy_ts("QQQ", 723.00))  # below the level -> arm the break (no fire yet)
     feed.emit_timesale(_buy_ts("QQQ", 723.30))  # cross the level with follow-through buy tape
 
     assert broker.net_position("QQQ260612C00723000") == 1

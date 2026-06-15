@@ -136,6 +136,18 @@ price yields one prompt + one paper bracket, not a spam stream.
    emits a `TradeProposal`; a confirmed-but-wide spread still alerts but is not
    paper-filled (honest fills). There is no bare-touch heads-up. Underlying
    top-of-book size imbalance is a soft annotation, never a gate.
+   A **break** level additionally **arms** only after the detector has *witnessed*
+   price on the pre-break side (below a resistance breakout, above a support
+   breakdown): a break is a one-time edge event, but the geometry gate alone reads
+   "price is currently across the level" — true for the whole extended move — so a
+   cold start (or re-arm) with price already past the level stays silent until
+   price comes back and crosses again. The **wake guard** backs this up: a long gap
+   between print timestamps (`gap_s`, default 90s) means the stream was
+   suspended/disconnected (laptop sleep), so all arming + fired state is dropped —
+   every break level must re-witness its setup side before it can fire. Together
+   these stop a daemon that slept through the actual cross from waking up and firing
+   at the extended top (the 2026-06-15 paper-run loss mode). Fade levels need no
+   arming — they re-test their level all session and self-correct.
 3. **`PaperBroker.place_bracket`** — opens the proposed contract at market and
    rests an OCO stop-loss (`entry*(1-stop_pct)`) / take-profit (`entry*(1+target_pct)`)
    pair, mirroring the native Webull bracket. Position + realized P&L are computed

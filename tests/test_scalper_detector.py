@@ -16,6 +16,7 @@ from trading_scalper.plan import Level, SessionPlan
 
 _CALL = "QQQ260612C00720000"
 _BREAK_CALL = "QQQ260612C00723000"
+_BREAK_PUT = "QQQ260612P00719000"
 
 
 def _buy_ts(symbol: str, price: float) -> TimeSale:
@@ -138,6 +139,7 @@ def test_break_fires_only_after_cross_and_follow_through() -> None:
     notes: list[str] = []
     proposals: list = []
     det = SetupDetector(lambda: _break_plan(), notes.append, proposals.append, break_margin=0.05)
+    det.on_timesale(_buy_ts("QQQ", 723.00))  # below the level -> arm (witnessed the setup side)
     det.on_timesale(_buy_ts("QQQ", 723.11))  # a poke, not past the margin -> no fire
     assert notes == []
     det.on_timesale(_buy_ts("QQQ", 723.20))  # crosses by margin with buyers -> fire
@@ -148,15 +150,113 @@ def test_break_fires_only_after_cross_and_follow_through() -> None:
 def test_break_silent_without_follow_through_tape() -> None:
     notes: list[str] = []
     det = SetupDetector(lambda: _break_plan(), notes.append, break_margin=0.05)
-    det.on_timesale(_sell_ts("QQQ", 723.30))  # crossed, but sellers -> no follow-through
+    det.on_timesale(_sell_ts("QQQ", 723.00))  # below -> arm (arming is tape-agnostic)
+    det.on_timesale(_sell_ts("QQQ", 723.30))  # crossed + armed, but sellers -> no follow-through
     assert notes == []
 
 
 def test_break_call_fires_under_long_only_despite_resistance_side() -> None:
     notes: list[str] = []
     det = SetupDetector(lambda: _break_plan("long-only"), notes.append, break_margin=0.05)
+    det.on_timesale(_buy_ts("QQQ", 723.00))  # below the level -> arm
     det.on_timesale(_buy_ts("QQQ", 723.30))  # a breakout CALL is a long — long-only permits it
     assert len(notes) == 1
+
+
+# ── break arming: must witness the setup side (cold-start / wake guard) ──
+
+
+def _put_break_plan() -> SessionPlan:
+    return SessionPlan(
+        date="2026-06-12",
+        symbol="QQQ",
+        regime="breakout-trend",
+        lean="both",
+        levels=[Level(719.40, "support", 719.90, contract=_BREAK_PUT, mode="break")],
+        default_stop_pct=0.20,
+        target_pct=0.20,
+        contracts=1,
+    )
+
+
+def test_break_cold_start_above_level_does_not_fire() -> None:
+    # daemon comes up with price already extended past the break level — never having
+    # seen the setup side, it must not chase the top (the 2026-06-15 wake-into-top loss)
+    notes: list[str] = []
+    det = SetupDetector(lambda: _break_plan(), notes.append, break_margin=0.05)
+    det.on_timesale(_buy_ts("QQQ", 723.30))  # first-ever tick already broken out -> no fire
+    assert notes == []
+
+
+def test_break_fires_once_setup_side_is_witnessed() -> None:
+    notes: list[str] = []
+    det = SetupDetector(lambda: _break_plan(), notes.append, break_margin=0.05)
+    det.on_timesale(_buy_ts("QQQ", 723.30))  # extended -> still unarmed, no fire
+    det.on_timesale(_buy_ts("QQQ", 723.00))  # price returns below -> arm
+    assert notes == []
+    det.on_timesale(_buy_ts("QQQ", 723.20))  # fresh cross with follow-through -> fire
+    assert len(notes) == 1
+
+
+def test_break_support_breakdown_arms_from_above() -> None:
+    # symmetry: a support-breakdown PUT (confirming = sell) arms from *above* support
+    notes: list[str] = []
+    det = SetupDetector(lambda: _put_break_plan(), notes.append, break_margin=0.05)
+    det.on_timesale(_sell_ts("QQQ", 719.30))  # already below, never seen above -> no fire
+    assert notes == []
+    det.on_timesale(_sell_ts("QQQ", 719.60))  # above support -> arm
+    det.on_timesale(_sell_ts("QQQ", 719.30))  # breakdown with sellers -> fire
+    assert len(notes) == 1
+
+
+# ── stream-gap re-arm (the wake-from-sleep guard) ──
+
+
+def _bts(symbol: str, price: float, ms: int) -> TimeSale:
+    """A timestamped buy timesale (print at the offer)."""
+    return TimeSale(symbol, price=price, bid=price - 0.02, ask=price, ms=ms)
+
+
+def _sts(symbol: str, price: float, ms: int) -> TimeSale:
+    """A timestamped sell timesale (print at the bid)."""
+    return TimeSale(symbol, price=price, bid=price, ask=price + 0.02, ms=ms)
+
+
+def test_stream_gap_unarms_break_so_wake_into_extended_does_not_fire() -> None:
+    notes: list[str] = []
+    det = SetupDetector(lambda: _break_plan(), notes.append, break_margin=0.05, gap_s=90.0)
+    det.on_timesale(_bts("QQQ", 723.00, ms=1_000_000))  # below -> arm (pre-sleep)
+    det.on_timesale(_bts("QQQ", 744.50, ms=1_120_000))  # 120s gap, woke extended -> no break fire
+    assert not any("broke" in n for n in notes)  # the wake-into-top fire is suppressed
+    assert any("stream gap" in n for n in notes)  # and the re-arm is announced
+
+
+def test_small_gap_keeps_arming_and_break_still_fires() -> None:
+    notes: list[str] = []
+    det = SetupDetector(lambda: _break_plan(), notes.append, break_margin=0.05, gap_s=90.0)
+    det.on_timesale(_bts("QQQ", 723.00, ms=1_000_000))  # below -> arm
+    det.on_timesale(_bts("QQQ", 723.20, ms=1_005_000))  # 5s later, no gap, still armed -> fire
+    assert any("broke" in n for n in notes)
+    assert not any("stream gap" in n for n in notes)
+
+
+def test_gap_with_nothing_armed_is_silent() -> None:
+    notes: list[str] = []
+    det = SetupDetector(lambda: _break_plan(), notes.append, break_margin=0.05, gap_s=90.0)
+    det.on_timesale(_bts("QQQ", 744.50, ms=1_000_000))  # extended, never armed
+    det.on_timesale(_bts("QQQ", 744.60, ms=1_120_000))  # 120s gap, but nothing to drop -> silent
+    assert notes == []
+
+
+def test_stream_gap_unarms_breakdown_so_wake_into_extended_does_not_fire() -> None:
+    # the downside mirror: a support-breakdown PUT armed from above must also re-witness
+    # its setup side after a sleep, not fire on waking far below the level
+    notes: list[str] = []
+    det = SetupDetector(lambda: _put_break_plan(), notes.append, break_margin=0.05, gap_s=90.0)
+    det.on_timesale(_sts("QQQ", 719.60, ms=1_000_000))  # above support -> arm (pre-sleep)
+    det.on_timesale(_sts("QQQ", 700.00, ms=1_120_000))  # 120s gap, woke far below -> no fire
+    assert not any("broke" in n for n in notes)
+    assert any("stream gap" in n for n in notes)
 
 
 # ── TradeProposal emission + spread gate ────────────────────

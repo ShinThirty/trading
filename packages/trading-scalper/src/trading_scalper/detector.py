@@ -28,6 +28,20 @@ keeps re-evaluating in-zone until the tape turns, then fires once; it re-arms
 when price leaves the zone. Tape direction comes from timesales, so a level seen
 only by trades (no timesale) waits for a tape print before it can confirm.
 
+**Break arming** (``_armed``): a break is a *one-time* edge event, but the
+geometry gate (``_in_zone``) only asks "is price currently across the level?" —
+true for the whole extended move after the cross. So a break level fires only
+once the detector has *witnessed* price on the pre-break (setup) side — below a
+resistance breakout, above a support breakdown. A cold start (or a re-arm) with
+price already extended past the level stays un-armed and silent until price comes
+back and crosses again. Fade levels need no arming — they re-test their level all
+session, so they self-correct. **Gap re-arm** (``_check_gap``): a laptop *suspend*
+freezes the process without killing it, so ``_armed`` survives the sleep and would
+let the daemon fire at the extended top on wake. A long gap between print
+timestamps (``gap_s``) means the stream was suspended/disconnected, so all arming
++ fired state is dropped: every break level must re-witness its setup side before
+it can fire again. This is the guard that makes waking the machine safe.
+
 On every confirmed fire the detector also emits a ``FireRecord`` of **B4
 velocity/absorption telemetry** (trailing-window underlying velocity, cumulative
 confirming vs contrary tape size, top-of-book imbalance) through an optional
@@ -82,6 +96,7 @@ class SetupDetector:
         record: Callable[[FireRecord], None] | None = None,
         window_s: float = 5.0,
         window_max: int = 256,
+        gap_s: float = 90.0,
     ) -> None:
         self._plan_source = plan_source
         self._notify = notify
@@ -94,10 +109,13 @@ class SetupDetector:
         self._record = record
         self._window_s = window_s
         self._window_max = window_max
+        self._gap_ms = int(gap_s * 1000)  # inter-print gap that means the stream was suspended
         self._tape_side: dict[str, str] = {}
         self._tape: dict[str, deque[_Tick]] = {}  # symbol -> trailing-window prints (B4 telemetry)
         self._quotes: dict[str, Quote] = {}  # symbol -> latest top-of-book (underlying + options)
         self._active: set[Level] = set()  # levels currently fired (re-arm on leaving the zone)
+        self._armed: set[Level] = set()  # break levels that have witnessed their setup side
+        self._last_ms: dict[str, int] = {}  # symbol -> last print ts, for stream-gap detection
         self._flip_side: dict[str, str] = {}  # symbol -> "above" | "below" the zero-gamma flip
 
     def on_quote(self, quote: Quote) -> None:
@@ -105,26 +123,30 @@ class SetupDetector:
 
     def on_trade(self, trade: Trade) -> None:
         self._push_tape(trade.symbol, trade.price, trade.size, "unknown", trade.ms)
-        self._evaluate(trade.symbol, trade.price)
+        self._evaluate(trade.symbol, trade.price, trade.ms)
 
     def on_timesale(self, ts: TimeSale) -> None:
         side = _tape_side(ts)
         self._tape_side[ts.symbol] = side
         self._push_tape(ts.symbol, ts.price, ts.size, side, ts.ms)
-        self._evaluate(ts.symbol, ts.price)
+        self._evaluate(ts.symbol, ts.price, ts.ms)
 
-    def _evaluate(self, symbol: str, price: float) -> None:
+    def _evaluate(self, symbol: str, price: float, ms: int | None = None) -> None:
         plan = self._plan_source()
         if plan is None or plan.symbol != symbol:
             return
+        self._check_gap(symbol, ms)  # a long gap -> distrust arming, force a re-witness
         self._check_flip(plan, symbol, price)
         tape = self._tape_side.get(symbol, "mixed")
         for level in plan.levels:
             key = level  # the whole level: two levels at one price+side (diff mode/contract) co-arm
             confirming = _confirming_side(level)
+            if self._on_setup_side(level, price, confirming):
+                self._armed.add(key)  # witnessed the setup side -> eligible to fire on the cross
             if self._in_zone(level, price, confirming):
                 if (
                     key not in self._active
+                    and (level.mode != "break" or key in self._armed)
                     and _lean_allows(plan.lean, confirming)
                     and tape == confirming
                 ):
@@ -132,6 +154,29 @@ class SetupDetector:
                     self._fire(plan, symbol, level, price, confirming)
             elif key in self._active and self._cleared(level, price, confirming):
                 self._active.discard(key)  # left the zone -> re-arm this level
+
+    def _check_gap(self, symbol: str, ms: int | None) -> None:
+        """A long gap between consecutive prints = the stream froze (laptop suspend /
+        socket drop). The in-memory ``_armed`` / ``_active`` state survived the freeze
+        but no longer reflects reality, so drop it: every break level must re-witness
+        its setup side before it can fire again. Without this, a daemon that slept
+        through the actual cross wakes already-armed-and-extended and fires at the top."""
+        if ms is None:
+            return
+        last = self._last_ms.get(symbol)
+        self._last_ms[symbol] = ms
+        if last is not None and ms - last > self._gap_ms and (self._armed or self._active):
+            self._armed.clear()
+            self._active.clear()
+            self._notify(_gap_message(symbol, (ms - last) / 1000.0))
+
+    def _on_setup_side(self, level: Level, price: float, confirming: str) -> bool:
+        """True when price sits on the pre-break (setup) side of a *break* level —
+        at/below a resistance breakout, at/above a support breakdown. Observing this
+        arms the level. Fade levels need no arming (they re-test their level all day)."""
+        if level.mode != "break":
+            return False
+        return price <= level.price if confirming == "buy" else price >= level.price
 
     def _push_tape(
         self, symbol: str, price: float, size: int | None, side: str, ms: int | None
@@ -302,6 +347,14 @@ def _flip_message(symbol: str, price: float, flip: float, direction: str) -> str
     return (
         f"⚠ {symbol} crossed the zero-gamma flip {flip:g} {arrow} ({price:g}) — "
         f"regime may be inverting; re-run /scalp prep for a fresh map ({regime})"
+    )
+
+
+def _gap_message(symbol: str, gap_s: float) -> str:
+    """Operational notice on a detected stream discontinuity (suspend/disconnect)."""
+    return (
+        f"⚠ {symbol} stream gap {gap_s:.0f}s (suspend/disconnect?) — re-arming: break "
+        f"levels need a fresh setup-side touch before they can fire again"
     )
 
 
