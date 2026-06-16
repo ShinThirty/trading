@@ -447,11 +447,29 @@ def scalp_pending() -> tuple[int, int] | None:
 
 def cmd_push(args: argparse.Namespace) -> None:
     require("age", "age-keygen", "aws")
-    recipient = age_recipient()
     ensure_db_checkpointed()
 
     remote = fetch_remote_meta()
     local_sync_ts, _, _ = read_marker()
+    live_sig = live_signature()
+
+    # Nothing to bundle if the remote object already holds this exact content —
+    # content-hash is the manifest signature stored at push time, so a match means
+    # an encrypt + re-upload would be byte-for-byte redundant. Skip it entirely;
+    # scalp still reconciles below on its own prefix (it's decoupled from the bundle).
+    if remote and remote.get("content_hash") == live_sig and not args.force:
+        print(
+            f"Bundle already in sync with remote "
+            f"(unchanged since {ts_to_str(remote['push_ts'])} from {remote['hostname']}). "
+            "Skipping bundle upload."
+        )
+        if remote["push_ts"] != local_sync_ts:
+            # Remote holds identical content under a newer push (another machine
+            # pushed the same state); advance the marker so status reads in-sync.
+            write_marker(remote["push_ts"], remote["hostname"], live_sig)
+        sync_scalp_push()
+        return
+
     if remote and remote["push_ts"] > local_sync_ts and not args.force:
         print(
             f"WARNING: Remote was updated by {remote['hostname']} at "
@@ -461,7 +479,7 @@ def cmd_push(args: argparse.Namespace) -> None:
         if not confirm("Continue?"):
             sys.exit(1)
 
-    live_sig = live_signature()
+    recipient = age_recipient()
 
     with tempfile.TemporaryDirectory() as tmp_str:
         tmp = Path(tmp_str)
