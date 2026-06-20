@@ -37,6 +37,13 @@ Present as carry-forward items before starting any analysis.
 
    Cross-reference firing dimensions with the dimensional reads from items 1-2 (regime/ERP/curve) — verify they agree before acting. A Building score driven entirely by Positioning + Sentiment (both contrarian indicators that can stay extreme for months) is weaker evidence than one driven by Credit + Breadth + Curve. **Override conditions** in the playbook ("When to override" section) — single-dimension flicker, active macro overhang in memory, recent whipsaw.
 
+2b. **Private-credit channel check (leading indicator, manual — no MCP tool).** The bear-regime Credit dimension above is keyed on **public** HY OAS (`BAMLH0A0HYM2`), which lags. Private-credit / BDC redemption flows run *ahead* of it — the corner where AI-buildout and levered-SaaS stress shows up first because it's marked-to-model. This is the debt-channel sibling of the AI external-funding phase. Three reads, all manual research (private data — Stanger & Co., Barclays/Morningstar BDC notes, WSJ):
+   - **Redemption trajectory** — are quarterly redemption requests across the big nontraded BDCs / interval funds (Blackstone, BlackRock, Apollo, Ares, Blue Owl, Oaktree) accelerating or slowing vs prior quarter? Any large fund approaching or hitting its 5% quarterly gate?
+   - **New BDC sales** — is the marginal buyer back, or still collapsing? (April 2026 baseline: $1.6B, −74% YoY, lowest since May 2023.)
+   - **HY OAS confirmation** — re-pull `get_economic_data BAMLH0A0HYM2` and check whether public spreads have started to widen toward the private stress, or remain at cycle tights (the gap is the signal).
+
+   **Escalation rule:** this is a *watch*, not a trigger, as long as HY OAS stays tight. Escalate to action only when the leading-indicator chain reaches a **gating event AND HY OAS starts widening** — that's the convergence of the leading and lagging reads. When two+ of {redemption acceleration, new-sales collapse, software-loan-loss headlines} inflect together, shift [[project_late_cycle_posture]] from "pre-position" to "act" before HY OAS confirms. See [[project_private_credit_redemptions]] for the full 6-step chain and its links to [[project_ai_capex_funding_phase]] / [[project_circular_financing_buckets]].
+
 3. **Recent macro prints (last 14 days).** The five prints with dedicated texture tools are **NFP**, **CPI**, **PCE**, **GDP**, and **FOMC Decision**. Use today's date and known release schedules to determine which are fresh, then call the appropriate texture tool for each:
 
    - **NFP** (first Friday of each month): `get_jobs_report_texture` — headline + industry mix + U-6/participation/hours/household-vs-establishment divergence + BLS narrative including revisions.
