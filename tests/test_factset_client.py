@@ -8,6 +8,7 @@ both variants per day, or it silently falls back to a week-stale report.
 
 from datetime import date
 
+from trading_clients.endpoints.factset import FactsetEarningsInsightResponse
 from trading_clients.factset_client import _filenames_for
 
 
@@ -25,3 +26,25 @@ def test_filenames_for_plain_comes_first() -> None:
     names = _filenames_for(date(2026, 5, 21))
     assert names[0] == "EarningsInsight_052126.pdf"
     assert names[1] == "EarningsInsight_052126A.pdf"
+
+
+def test_forward_pe_as_of_note_shown_when_backfilled() -> None:
+    # Abbreviated editions omit the Valuation section; the client backfills the
+    # P/E from a prior edition and tags forward_pe_as_of so the output flags it.
+    resp = FactsetEarningsInsightResponse(
+        narrative="x",
+        forward_pe=20.1,
+        forward_pe_5y_avg=19.9,
+        forward_pe_as_of="June 12, 2026",
+    )
+    out = resp.to_output()
+    assert "Forward 12M P/E:** 20.1" in out
+    assert "as of June 12, 2026" in out
+
+
+def test_forward_pe_no_as_of_note_on_normal_week() -> None:
+    # When the latest edition carries the P/E, no provenance note is appended.
+    resp = FactsetEarningsInsightResponse(narrative="x", forward_pe=20.1)
+    out = resp.to_output()
+    assert "Forward 12M P/E:** 20.1" in out
+    assert "as of" not in out

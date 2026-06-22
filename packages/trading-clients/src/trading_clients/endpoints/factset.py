@@ -71,6 +71,9 @@ class FactsetEarningsInsightResponse:
     forward_pe_5y_avg: float | None = None
     forward_pe_10y_avg: float | None = None
     forward_pe_quarter_end: float | None = None
+    # Publish date of the edition the forward P/E came from, set only when it was
+    # backfilled from a prior report (this issue omitted the Valuation section).
+    forward_pe_as_of: str = ""
 
     # Market reaction asymmetry (beats vs misses, +/- 2 days around print)
     beat_reaction_pct: float | None = None  # e.g. +1.1%
@@ -182,7 +185,8 @@ class FactsetEarningsInsightResponse:
             if self.forward_pe_quarter_end is not None:
                 avgs.append(f"quarter-end {self.forward_pe_quarter_end:.1f}")
             avg_part = f" ({' | '.join(avgs)})" if avgs else ""
-            lines.append(f"**Forward 12M P/E:** {self.forward_pe:.1f}{avg_part}")
+            asof_part = f" _(as of {self.forward_pe_as_of})_" if self.forward_pe_as_of else ""
+            lines.append(f"**Forward 12M P/E:** {self.forward_pe:.1f}{avg_part}{asof_part}")
 
         # Reaction asymmetry
         if self.beat_reaction_pct is not None and self.miss_reaction_pct is not None:

@@ -102,40 +102,70 @@ class FactsetClient:
         """
         anchor = as_of_date or date.today()
         async with self._semaphore:
-            current = anchor
-            last_exc: Exception | None = None
-            for _ in range(MAX_DAYS_BACK):
-                # Skip Saturday (5) and Sunday (6) — FactSet never publishes on weekends.
-                if current.weekday() >= 5:
-                    current -= timedelta(days=1)
-                    continue
+            found = await self._walk_back(anchor)
+            if found is None:
+                raise RuntimeError(
+                    f"FactSet Earnings Insight not found in {MAX_DAYS_BACK} days "
+                    f"back from {anchor.isoformat()}"
+                )
+            parsed, resolved = found
 
-                cache_key = f"factset:insight:{current.isoformat()}"
-                cached = self._cache.get(cache_key, INSIGHT_TTL_SECONDS)
-                if cached is not None:
-                    return cached  # type: ignore[no-any-return]
+            # Abbreviated mid-cycle editions sometimes drop the Valuation section
+            # (the forward 12M P/E), e.g. the early-publish 2026-06-18 report.
+            # Backfill the P/E from the most recent prior edition that carries it
+            # so ERP / bear-regime reads don't go blind for a week. The number
+            # moves slowly week-to-week; forward_pe_as_of records the source date.
+            if parsed.forward_pe is None:
+                prior = await self._walk_back(
+                    resolved - timedelta(days=1), require_forward_pe=True
+                )
+                if prior is not None:
+                    src, src_date = prior
+                    parsed.forward_pe = src.forward_pe
+                    parsed.forward_pe_5y_avg = src.forward_pe_5y_avg
+                    parsed.forward_pe_10y_avg = src.forward_pe_10y_avg
+                    parsed.forward_pe_quarter_end = src.forward_pe_quarter_end
+                    parsed.forward_pe_as_of = src.publish_date or src_date.isoformat()
+            return parsed
 
+    async def _walk_back(
+        self, anchor: date, require_forward_pe: bool = False
+    ) -> tuple[FactsetEarningsInsightResponse, date] | None:
+        """Walk back from `anchor` to the most-recent weekday with a live PDF.
+
+        Returns the parsed response + its resolved date, or None if nothing is
+        found within MAX_DAYS_BACK. When `require_forward_pe` is set, editions
+        that omit the forward 12M P/E (abbreviated reports) are skipped so the
+        caller gets a report that actually carries the valuation number.
+        """
+        current = anchor
+        for _ in range(MAX_DAYS_BACK):
+            # Skip Saturday (5) and Sunday (6) — FactSet never publishes on weekends.
+            if current.weekday() >= 5:
+                current -= timedelta(days=1)
+                continue
+
+            cache_key = f"factset:insight:{current.isoformat()}"
+            parsed = self._cache.get(cache_key, INSIGHT_TTL_SECONDS)
+            if parsed is None:
                 pdf_bytes: bytes | None = None
                 for filename in _filenames_for(current):
                     try:
                         pdf_bytes = await self._fetch_pdf(filename)
                         break
                     except httpx.HTTPStatusError as e:
-                        if e.response.status_code == 404:
-                            last_exc = e
-                            continue
-                        raise
+                        if e.response.status_code != 404:
+                            raise
                 if pdf_bytes is None:
                     current -= timedelta(days=1)
                     continue
-                pages_text = _extract_pages(pdf_bytes)
-                parsed = FactsetEarningsInsightResponse.from_response(pages_text)
+                parsed = FactsetEarningsInsightResponse.from_response(_extract_pages(pdf_bytes))
                 self._cache.put(cache_key, parsed)
-                return parsed
-            raise RuntimeError(
-                f"FactSet Earnings Insight not found in {MAX_DAYS_BACK} days "
-                f"back from {anchor.isoformat()}: {last_exc}"
-            )
+
+            if not require_forward_pe or parsed.forward_pe is not None:
+                return parsed, current
+            current -= timedelta(days=1)
+        return None
 
     async def _fetch_pdf(self, filename: str) -> bytes:
         await self._limiter.acquire()

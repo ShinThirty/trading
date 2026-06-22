@@ -17,6 +17,7 @@ by openpyxl in NaaimHistoryResponse.from_response.
 
 import asyncio
 import re
+from datetime import date, timedelta
 from typing import Any
 
 import httpx
@@ -26,7 +27,9 @@ from trading_clients.endpoints.naaim import NaaimHistoryResponse
 from trading_clients.rate_limit import RateLimiter
 
 BASE_URL = "https://www.naaim.org"
-INDEX_PATH = "/programs/naaim-exposure-index/"
+# The WordPress media library indexes the weekly XLSX even though the program
+# page (Bricks-theme migration, 2026-06) no longer emits a static link.
+MEDIA_PATH = "/wp-json/wp/v2/media"
 
 # 6h cache: NAAIM is weekly, but a long TTL avoids re-downloading the 86KB
 # XLSX during a back-to-back briefing → review session.
@@ -80,16 +83,62 @@ class NaaimClient:
             return parsed
 
     async def _discover_xlsx_url(self) -> str:
-        """GET the program page and return the latest USE_Data XLSX URL."""
+        """Return the newest USE_Data XLSX URL.
+
+        The program page no longer links the file (Elementor → Bricks migration,
+        2026-06), but the weekly XLSX is still published at the predictable
+        wp-content/uploads path and indexed in the WordPress media library.
+        Primary discovery is the REST media endpoint (newest-first); if that's
+        unavailable we walk back recent Wednesdays against the stable
+        upload-path convention.
+        """
         await self._limiter.acquire()
-        resp = await self._http.get(f"{BASE_URL}{INDEX_PATH}")
-        resp.raise_for_status()
-        match = _XLSX_RE.search(resp.text)
-        if not match:
-            raise RuntimeError(
-                "NAAIM page did not contain a USE_Data XLSX link — page layout may have changed"
+        resp = await self._http.get(
+            f"{BASE_URL}{MEDIA_PATH}",
+            params={
+                "search": "USE_Data-since-Inception",
+                "per_page": 10,
+                "orderby": "date",
+                "order": "desc",
+            },
+        )
+        if resp.status_code == 200:
+            try:
+                items = resp.json()
+            except ValueError:
+                items = []
+            for item in items if isinstance(items, list) else []:
+                if not isinstance(item, dict):
+                    continue
+                match = _XLSX_RE.search(item.get("source_url", "") or "")
+                if match:
+                    return match.group(0)
+
+        fallback = await self._discover_via_upload_path()
+        if fallback:
+            return fallback
+
+        raise RuntimeError(
+            "NAAIM USE_Data XLSX not found via REST media API or upload-path probe "
+            "— site layout may have changed"
+        )
+
+    async def _discover_via_upload_path(self) -> str | None:
+        """Probe the predictable uploads path for recent Wednesday publishes."""
+        today = date.today()
+        # NAAIM publishes Wednesday for the prior week; start at the most recent.
+        most_recent_wed = today - timedelta(days=(today.weekday() - 2) % 7)
+        for weeks_back in range(8):
+            d = most_recent_wed - timedelta(weeks=weeks_back)
+            url = (
+                f"{BASE_URL}/wp-content/uploads/{d:%Y}/{d:%m}/"
+                f"USE_Data-since-Inception_{d:%Y-%m-%d}.xlsx"
             )
-        return match.group(0)
+            await self._limiter.acquire()
+            resp = await self._http.head(url)
+            if resp.status_code == 200:
+                return url
+        return None
 
     async def _fetch_bytes(self, url: str) -> bytes:
         await self._limiter.acquire()

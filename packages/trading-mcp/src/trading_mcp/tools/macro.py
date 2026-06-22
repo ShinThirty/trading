@@ -177,6 +177,8 @@ async def get_equity_risk_premium(ctx: Context) -> str:
     meta_parts: list[str] = []
     if publish_date:
         meta_parts.append(f"FactSet {publish_date}")
+    if fs_resp.forward_pe_as_of:
+        meta_parts.append(f"P/E from {fs_resp.forward_pe_as_of} edition (latest omitted it)")
     if dgs10_date:
         meta_parts.append(f"DGS10 {dgs10_date}")
     if meta_parts:
