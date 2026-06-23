@@ -594,6 +594,86 @@ def test_reversal_fire_records_telemetry_with_mode() -> None:
     assert records[0].confirming == "sell"  # PUT → sell-confirming, recorded for the join
 
 
+# ── per-level re-fire cooldown (caps the machine-gun during a regime mismatch) ──
+
+
+def test_cooldown_blocks_rapid_refire_of_same_level() -> None:
+    # an oscillating wall re-arms on every re-entry; the cooldown stops the re-fire until
+    # cooldown_s has passed (the 2026-06-18 740-fade machine-gun, capped)
+    notes: list[str] = []
+    det = SetupDetector(
+        lambda: _plan("both"), notes.append, cooldown_s=10.0, tolerance=0.10, rearm_margin=0.05
+    )
+    det.on_timesale(_bts("QQQ", 719.41, ms=0))  # tag + confirm -> fire (cooldown stamped at 0)
+    assert len(notes) == 1
+    det.on_timesale(_bts("QQQ", 720.10, ms=2000))  # leave the band -> re-arm
+    det.on_timesale(_bts("QQQ", 719.40, ms=4000))  # re-enter 4s later -> still cooling, suppressed
+    assert len(notes) == 1
+    det.on_timesale(_bts("QQQ", 720.10, ms=6000))  # leave again
+    det.on_timesale(
+        _bts("QQQ", 719.40, ms=12_000)
+    )  # re-enter 12s after fire -> cooled off -> fires
+    assert len(notes) == 2
+
+
+def test_cooldown_is_per_level_not_global() -> None:
+    # one level cooling must not silence a different level — the cap is per setup, not global
+    notes: list[str] = []
+    det = SetupDetector(
+        lambda: _plan("both"), notes.append, cooldown_s=300.0, tolerance=0.10, rearm_margin=0.05
+    )
+    det.on_timesale(_bts("QQQ", 719.41, ms=0))  # support fade fires
+    det.on_timesale(_sts("QQQ", 723.10, ms=1000))  # resistance fade — different level -> fires
+    assert len(notes) == 2
+
+
+def test_cooldown_is_noop_without_timestamps() -> None:
+    # a ms-less feed has no time base, so the cooldown degrades to a no-op (re-fires on re-entry)
+    notes: list[str] = []
+    det = SetupDetector(
+        lambda: _plan("both"), notes.append, cooldown_s=300.0, tolerance=0.10, rearm_margin=0.05
+    )
+    det.on_timesale(_buy_ts("QQQ", 719.41))  # ms-less fire
+    det.on_timesale(_buy_ts("QQQ", 720.10))  # leave the band -> re-arm
+    det.on_timesale(_buy_ts("QQQ", 719.40))  # re-enter immediately -> no time base -> re-fires
+    assert len(notes) == 2
+
+
+def test_cooldown_caps_oscillating_wall_reversal() -> None:
+    # #0 composes with #3: a wall that pokes-and-snaps repeatedly fires the reversal once,
+    # then the cooldown suppresses the next snap-back within the window
+    notes: list[str] = []
+    proposals: list = []
+    det = SetupDetector(
+        lambda: _verdict_plan("both"), notes.append, proposals.append, cooldown_s=60.0, **_VKW
+    )
+    det.on_timesale(_bts("QQQ", 739.0, ms=0))  # inside -> arm
+    det.on_timesale(_bts("QQQ", 740.20, ms=1000))  # cross out
+    det.on_timesale(_bts("QQQ", 739.85, ms=2000))  # snap back -> REVERSAL fires (cooldown at 2000)
+    det.on_timesale(_bts("QQQ", 739.80, ms=3000))  # well inside -> tracker re-arms
+    det.on_timesale(_bts("QQQ", 740.20, ms=4000))  # cross out again
+    det.on_timesale(_bts("QQQ", 739.85, ms=5000))  # snap back 3s later -> verdict, but cooling
+    assert len([p for p in proposals if p.contract == _REV_PUT]) == 1
+
+
+def test_stream_gap_clears_refire_cooldown() -> None:
+    # a gap forces fresh re-witnessing, so a post-gap fire is a NEW setup and must not inherit
+    # the pre-gap cooldown — even though only 200s (< the 300s cooldown) elapsed
+    notes: list[str] = []
+    det = SetupDetector(
+        lambda: _plan("both"),
+        notes.append,
+        cooldown_s=300.0,
+        gap_s=90.0,
+        tolerance=0.10,
+        rearm_margin=0.05,
+    )
+    det.on_timesale(_bts("QQQ", 719.41, ms=1_000_000))  # support fade fires (cooldown stamped)
+    det.on_timesale(_bts("QQQ", 719.41, ms=1_200_000))  # 200s gap -> cooldown dropped -> re-fires
+    assert len([n for n in notes if "support" in n]) == 2
+    assert any("stream gap" in n for n in notes)
+
+
 # ── Notifier ────────────────────────────────────────────────
 
 

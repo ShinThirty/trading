@@ -28,6 +28,16 @@ keeps re-evaluating in-zone until the tape turns, then fires once; it re-arms
 when price leaves the zone. Tape direction comes from timesales, so a level seen
 only by trades (no timesale) waits for a tape print before it can confirm.
 
+Re-fire cooldown (``_on_cooldown``): hysteresis stops a *continuous* in-zone fire,
+but a wall that oscillates out-and-back re-arms and would re-fire on every re-entry —
+which during a regime mismatch machine-guns brackets (the 2026-06-18 740-fade bled
+−$254 over 61 trips in the open hour). So each level carries a per-level cooldown:
+after a fire it can't re-fire for ``cooldown_s`` (default 5 min, the value that turns
+that day green). It's a rate limit, not a session cap — a real trend still fires
+repeatedly, just spaced — and it's per ``Level`` so a wall's reversal/retest rows and
+distinct levels cool independently. Like the gap guard, it's measured off the stream's
+print ``ms`` and is a no-op on a ms-less feed.
+
 **Break arming** (``_armed``): a break is a *one-time* edge event, but the
 geometry gate (``_in_zone``) only asks "is price currently across the level?" —
 true for the whole extended move after the cross. So a break level fires only
@@ -123,6 +133,7 @@ class SetupDetector:
         window_s: float = 5.0,
         window_max: int = 256,
         gap_s: float = 90.0,
+        cooldown_s: float = 300.0,
         min_break_excursion: float = 0.75,
         follow_through_margin: float = 2.00,
         confirm_s: float = 150.0,
@@ -143,6 +154,7 @@ class SetupDetector:
         self._window_s = window_s
         self._window_max = window_max
         self._gap_ms = int(gap_s * 1000)  # inter-print gap that means the stream was suspended
+        self._cooldown_ms = int(cooldown_s * 1000)  # min spacing between re-fires of one level
         # verdict-mode (reversal/retest) tunables — calibrated off the 6/18+6/22 QQQ 740 tape
         self._breakout_kw = {
             "break_margin": break_margin,
@@ -160,6 +172,7 @@ class SetupDetector:
         self._active: set[Level] = set()  # levels currently fired (re-arm on leaving the zone)
         self._armed: set[Level] = set()  # break levels that have witnessed their setup side
         self._trackers: dict[_WallKey, BreakoutTracker] = {}  # one verdict machine per wall
+        self._last_fire_ms: dict[Level, int] = {}  # level -> last fire ts, for the re-fire cooldown
         self._last_ms: dict[str, int] = {}  # symbol -> last print ts, for stream-gap detection
         self._flip_side: dict[str, str] = {}  # symbol -> "above" | "below" the zero-gamma flip
 
@@ -197,9 +210,10 @@ class SetupDetector:
                     and (level.mode != "break" or key in self._armed)
                     and _lean_allows(plan.lean, confirming)
                     and tape == confirming
+                    and not self._on_cooldown(key, ms)
                 ):
                     self._active.add(key)
-                    self._fire(plan, symbol, level, price, confirming)
+                    self._fire(plan, symbol, level, price, confirming, ms)
             elif key in self._active and self._cleared(level, price, confirming):
                 self._active.discard(key)  # left the zone -> re-arm this level
 
@@ -228,8 +242,8 @@ class SetupDetector:
             if level is None:
                 continue  # no contract row for this verdict on this wall — nothing to fire
             confirming = _confirming_side(level)
-            if _lean_allows(plan.lean, confirming):
-                self._fire(plan, symbol, level, price, confirming)
+            if _lean_allows(plan.lean, confirming) and not self._on_cooldown(level, ms):
+                self._fire(plan, symbol, level, price, confirming, ms)
 
     @staticmethod
     def _breakout_walls(plan: SessionPlan) -> dict[_WallKey, dict[str, Level]]:
@@ -256,7 +270,30 @@ class SetupDetector:
             self._armed.clear()
             self._active.clear()
             self._trackers.clear()  # cross-timers spanning the gap are invalid — rebuild fresh
+            self._last_fire_ms.clear()  # post-gap fires are fresh setups — drop stale cooldowns
             self._notify(_gap_message(symbol, (ms - last) / 1000.0))
+
+    def _on_cooldown(self, level: Level, ms: int | None) -> bool:
+        """True when this level fired within ``cooldown_s`` — caps the re-fire *rate*.
+
+        A wall oscillating in and out of its zone re-arms and would re-fire on every
+        re-entry; during a regime mismatch that machine-guns brackets (the 2026-06-18
+        740-fade bled −$254 over 61 trips in the open hour — a 5-min cooldown turns the
+        day green). Keyed per ``Level`` (price+side+mode+contract), so a wall's reversal
+        and retest rows cool independently and a genuine *new* setup at a different level
+        is never blocked; it only damps the *same* setup re-firing too fast. This is a
+        rate limit, not a session cap — a long trend still fires repeatedly, just spaced
+        (a max-fires-per-session cap would instead choke the good trend days, so it's
+        deliberately not that).
+
+        Time-based off the stream's print ``ms``; a ms-less feed (sandbox / bare trades)
+        has no time base, so the cooldown degrades to a no-op there — same contract as
+        the gap guard and the verdict timers.
+        """
+        if ms is None or self._cooldown_ms <= 0:
+            return False
+        last = self._last_fire_ms.get(level)
+        return last is not None and ms - last < self._cooldown_ms
 
     def _on_setup_side(self, level: Level, price: float, confirming: str) -> bool:
         """True when price sits on the pre-break (setup) side of a *break* level —
@@ -343,7 +380,13 @@ class SetupDetector:
         return abs(price - level.price) > self._tolerance + self._rearm_margin
 
     def _fire(
-        self, plan: SessionPlan, symbol: str, level: Level, price: float, confirming: str
+        self,
+        plan: SessionPlan,
+        symbol: str,
+        level: Level,
+        price: float,
+        confirming: str,
+        ms: int | None,
     ) -> None:
         """Prompt the human; propose the bracket if there's a contract with a tradeable spread.
 
@@ -352,7 +395,13 @@ class SetupDetector:
         be stamped on the ``FireRecord``. The record is then emitted on *every*
         fire — alert-only and spread-suppressed setups included — so the telemetry
         log holds one row per confirmed setup, joinable to the bracket's fills.
+
+        Stamps the level's cooldown clock from the fire's print ``ms`` so the next
+        re-fire of this same level is rate-limited; a ms-less fire leaves the clock
+        unset (no time base), degrading the cooldown to a no-op as elsewhere.
         """
+        if ms is not None:
+            self._last_fire_ms[level] = ms
         message = self._message(symbol, level)
         bracket_id = self._prompt(plan, level, message)
         if self._record is not None:
