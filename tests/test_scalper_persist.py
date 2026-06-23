@@ -17,6 +17,7 @@ from trading_scalper.persist import (
     default_fills_path,
     default_signals_path,
     default_summary_path,
+    summarize_fills,
 )
 
 
@@ -71,6 +72,64 @@ def test_open_position_appears_in_summary(tmp_path: Path) -> None:
 
     summary = json.loads(p.summary_path.read_text())
     assert summary["positions"] == [{"symbol": "QQQ_C", "qty": 2}]
+
+
+def test_summary_recomputes_across_a_daemon_restart(tmp_path: Path) -> None:
+    """A regime remap restarts the daemon: a fresh broker appends to the same
+    date-keyed fills log. The summary must reflect *both* processes' fills — the
+    6/16 bug was the live summary dropping the morning's losing fade on restart."""
+    fills, summary = tmp_path / "f.jsonl", tmp_path / "s.json"
+
+    def persister(broker: PaperBroker) -> PaperPersister:
+        return PaperPersister(
+            broker,
+            date="2026-06-16",
+            fills_path=fills,
+            summary_path=summary,
+            clock=lambda: "2026-06-16T13:00:00+00:00",
+        )
+
+    # process 1 (morning fade): a losing round trip → −85
+    broker1 = PaperBroker()
+    p1 = persister(broker1)
+    broker1.place_bracket("QQQ_C", 1, stop_pct=0.20, target_pct=0.20, reference=4.00)
+    broker1.trade("QQQ_C", 3.15)  # stop (3.20) fills → −85 realized
+    p1.write_summary()
+    assert json.loads(summary.read_text())["realized_pnl"] == pytest.approx(-85.0)
+
+    # process 2 (afternoon, post-remap): a *fresh* broker on the same log → +100
+    broker2 = PaperBroker()
+    p2 = persister(broker2)
+    broker2.place_bracket("QQQ_P", 1, stop_pct=0.20, target_pct=0.20, reference=5.00)
+    broker2.trade("QQQ_P", 6.05)  # target (6.00) fills → +100 realized
+    p2.write_summary()
+
+    # the live broker only knows its own +100; the recomputed summary knows both
+    assert broker2.realized_pnl() == pytest.approx(100.0)
+    s = json.loads(summary.read_text())
+    assert s["realized_pnl"] == pytest.approx(15.0)  # −85 + 100, across both processes
+    assert s["n_fills"] == 4  # two round trips, not just the live process's two
+    assert s["positions"] == []  # both flat
+
+
+def test_summarize_fills_handles_a_missing_log(tmp_path: Path) -> None:
+    assert summarize_fills(tmp_path / "nope.jsonl") == {
+        "realized_pnl": 0.0,
+        "positions": [],
+        "n_fills": 0,
+    }
+
+
+def test_summarize_fills_nets_open_positions_across_symbols(tmp_path: Path) -> None:
+    broker = PaperBroker()
+    _persister(broker, tmp_path)  # subscribes the fills writer
+    broker.place_bracket("QQQ_C", 3, stop_pct=0.20, target_pct=0.20, reference=4.00)  # +3 open
+    broker.place_bracket("QQQ_P", 1, stop_pct=0.20, target_pct=0.20, reference=5.00)
+    broker.trade("QQQ_P", 6.05)  # QQQ_P round-trips flat; QQQ_C still long 3
+
+    out = summarize_fills(tmp_path / "fills.jsonl")
+    assert out["positions"] == [{"symbol": "QQQ_C", "qty": 3}]
+    assert out["n_fills"] == 3  # 2 opens + 1 close
 
 
 def test_run_flushes_a_final_summary_on_cancel(tmp_path: Path) -> None:

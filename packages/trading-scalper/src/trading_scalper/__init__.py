@@ -30,7 +30,12 @@ from trading_scalper.feed import TradierFeed, drive_paper_fills
 from trading_scalper.ledger import Ledger
 from trading_scalper.notify import Notifier
 from trading_scalper.paper import PaperBroker
-from trading_scalper.persist import PaperPersister, default_fills_path, default_summary_path
+from trading_scalper.persist import (
+    PaperPersister,
+    default_fills_path,
+    default_summary_path,
+    summarize_fills,
+)
 from trading_scalper.plan import Level, PlanStore, SessionPlan, default_plan_path, load_session_plan
 from trading_scalper.ports import BrokerExecution, MarketDataFeed
 
@@ -68,5 +73,6 @@ __all__ = [
     "drive_paper_fills",
     "load_session_plan",
     "make_executor",
+    "summarize_fills",
     "watch_setups",
 ]
