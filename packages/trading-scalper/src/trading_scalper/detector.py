@@ -42,6 +42,23 @@ timestamps (``gap_s``) means the stream was suspended/disconnected, so all armin
 + fired state is dropped: every break level must re-witness its setup side before
 it can fire again. This is the guard that makes waking the machine safe.
 
+Two further ``mode`` values render the verdict the bare ``break`` cannot — whether a
+cross *holds* or *fails* — via a per-wall :class:`~trading_scalper.breakout.BreakoutTracker`
+(see ``breakout.py`` for the state machine and the inside/outside conventions):
+
+- ``reversal`` — fires when a cross-out **snaps back inside** without committing (a *failed*
+  break); trades the snap-back, opposite the attempt.
+- ``retest`` — fires when a break **confirms** (held / pushed through) and then **pulls back
+  to the wall and resumes**; the patient continuation entry.
+
+A wall is two ``Level`` rows at one price+side (a ``reversal`` row + a ``retest`` row, each
+naming its own option); both feed one tracker and the rendered verdict fires the matching
+row. Unlike ``fade``/``break``, these are gated on **geometry + lean only, never tape** — the
+snap-back *timing* is the signal, and tape absorption was verified (n=61, 2026-06-18) not to
+separate winners from losers on this feed. Tape stays the soft annotation in the message.
+The tracker is level-*source*-agnostic (a gamma wall is just one source), and the stream-gap
+guard drops its cross-timers on a suspend exactly as it drops ``break`` arming.
+
 On every confirmed fire the detector also emits a ``FireRecord`` of **B4
 velocity/absorption telemetry** (trailing-window underlying velocity, cumulative
 confirming vs contrary tape size, top-of-book imbalance) through an optional
@@ -64,11 +81,20 @@ from typing import NamedTuple
 from trading_clients.market_stream import Quote, TimeSale, Trade
 from trading_clients.options import parse_occ
 
+from trading_scalper.breakout import BreakoutTracker, Verdict
 from trading_scalper.domain import FireRecord, OrderId, TradeProposal
 from trading_scalper.plan import Level, SessionPlan
 from trading_scalper.ports import MarketDataFeed
 
 _TAPE_PHRASE = {"buy": "tape lifting offers", "sell": "tape hitting bids", "mixed": "tape mixed"}
+_VERDICT_MODES = ("reversal", "retest")  # geometry-driven verdicts — handled by BreakoutTracker
+_MOMENTUM_MODES = ("break", "retest")  # continuation modes; the rest mean-revert back inside
+_VERB = {
+    "break": "broke",
+    "reversal": "failed-break reversal at",
+    "retest": "breakout retest at",
+}
+type _WallKey = tuple[float, str]  # (price, side) — one breakout tracker per wall
 
 
 class _Tick(NamedTuple):
@@ -97,6 +123,13 @@ class SetupDetector:
         window_s: float = 5.0,
         window_max: int = 256,
         gap_s: float = 90.0,
+        min_break_excursion: float = 0.75,
+        follow_through_margin: float = 2.00,
+        confirm_s: float = 150.0,
+        failure_window_s: float = 120.0,
+        reentry_margin: float = 0.10,
+        retest_proximity: float = 0.20,
+        retest_window_s: float = 360.0,
     ) -> None:
         self._plan_source = plan_source
         self._notify = notify
@@ -110,11 +143,23 @@ class SetupDetector:
         self._window_s = window_s
         self._window_max = window_max
         self._gap_ms = int(gap_s * 1000)  # inter-print gap that means the stream was suspended
+        # verdict-mode (reversal/retest) tunables — calibrated off the 6/18+6/22 QQQ 740 tape
+        self._breakout_kw = {
+            "break_margin": break_margin,
+            "min_break_excursion": min_break_excursion,
+            "follow_through_margin": follow_through_margin,
+            "confirm_s": confirm_s,
+            "failure_window_s": failure_window_s,
+            "reentry_margin": reentry_margin,
+            "retest_proximity": retest_proximity,
+            "retest_window_s": retest_window_s,
+        }
         self._tape_side: dict[str, str] = {}
         self._tape: dict[str, deque[_Tick]] = {}  # symbol -> trailing-window prints (B4 telemetry)
         self._quotes: dict[str, Quote] = {}  # symbol -> latest top-of-book (underlying + options)
         self._active: set[Level] = set()  # levels currently fired (re-arm on leaving the zone)
         self._armed: set[Level] = set()  # break levels that have witnessed their setup side
+        self._trackers: dict[_WallKey, BreakoutTracker] = {}  # one verdict machine per wall
         self._last_ms: dict[str, int] = {}  # symbol -> last print ts, for stream-gap detection
         self._flip_side: dict[str, str] = {}  # symbol -> "above" | "below" the zero-gamma flip
 
@@ -137,8 +182,11 @@ class SetupDetector:
             return
         self._check_gap(symbol, ms)  # a long gap -> distrust arming, force a re-witness
         self._check_flip(plan, symbol, price)
+        self._eval_breakouts(plan, symbol, price, ms)  # reversal/retest verdicts (no tape gate)
         tape = self._tape_side.get(symbol, "mixed")
         for level in plan.levels:
+            if level.mode in _VERDICT_MODES:
+                continue  # handled by the BreakoutTracker path — not tape-gated
             key = level  # the whole level: two levels at one price+side (diff mode/contract) co-arm
             confirming = _confirming_side(level)
             if self._on_setup_side(level, price, confirming):
@@ -155,19 +203,59 @@ class SetupDetector:
             elif key in self._active and self._cleared(level, price, confirming):
                 self._active.discard(key)  # left the zone -> re-arm this level
 
+    def _eval_breakouts(self, plan: SessionPlan, symbol: str, price: float, ms: int | None) -> None:
+        """Drive the verdict state machines (one per wall) and fire on a resolution.
+
+        A wall is expressed as up to two ``Level`` rows at one price+side: a ``reversal``
+        row (the failed-break snap-back contract) and a ``retest`` row (the confirmed-break
+        continuation contract). Both feed one :class:`BreakoutTracker`; whichever verdict
+        the tracker renders fires the matching row. Gated on geometry + lean only — **not
+        tape** (the snap-back timing is the signal; tape is the soft annotation in the
+        message). Trackers for walls no longer in the plan are pruned (hot-reload safe)."""
+        walls = self._breakout_walls(plan)
+        for stale in [k for k in self._trackers if k not in walls]:
+            del self._trackers[stale]
+        for wall_key, rows in walls.items():
+            tracker = self._trackers.get(wall_key)
+            if tracker is None:
+                tracker = self._trackers[wall_key] = BreakoutTracker(
+                    price=wall_key[0], side=wall_key[1], **self._breakout_kw
+                )
+            verdict = tracker.update(price, ms)
+            if verdict is None:
+                continue
+            level = rows.get("reversal" if verdict is Verdict.REVERSAL else "retest")
+            if level is None:
+                continue  # no contract row for this verdict on this wall — nothing to fire
+            confirming = _confirming_side(level)
+            if _lean_allows(plan.lean, confirming):
+                self._fire(plan, symbol, level, price, confirming)
+
+    @staticmethod
+    def _breakout_walls(plan: SessionPlan) -> dict[_WallKey, dict[str, Level]]:
+        """Group ``reversal``/``retest`` levels by their wall (price, side) → {mode: level}."""
+        walls: dict[_WallKey, dict[str, Level]] = {}
+        for level in plan.levels:
+            if level.mode in _VERDICT_MODES:
+                walls.setdefault((round(level.price, 4), level.side), {})[level.mode] = level
+        return walls
+
     def _check_gap(self, symbol: str, ms: int | None) -> None:
         """A long gap between consecutive prints = the stream froze (laptop suspend /
-        socket drop). The in-memory ``_armed`` / ``_active`` state survived the freeze
-        but no longer reflects reality, so drop it: every break level must re-witness
-        its setup side before it can fire again. Without this, a daemon that slept
-        through the actual cross wakes already-armed-and-extended and fires at the top."""
+        socket drop). The in-memory ``_armed`` / ``_active`` / tracker state survived the
+        freeze but no longer reflects reality, so drop it: every break and verdict level
+        must re-witness its setup side before it can fire again. Without this, a daemon
+        that slept through the actual cross wakes already-armed-and-extended and fires at
+        the top (and a verdict tracker's cross-timer would span the dead time)."""
         if ms is None:
             return
         last = self._last_ms.get(symbol)
         self._last_ms[symbol] = ms
-        if last is not None and ms - last > self._gap_ms and (self._armed or self._active):
+        live = self._armed or self._active or self._trackers
+        if last is not None and ms - last > self._gap_ms and live:
             self._armed.clear()
             self._active.clear()
+            self._trackers.clear()  # cross-timers spanning the gap are invalid — rebuild fresh
             self._notify(_gap_message(symbol, (ms - last) / 1000.0))
 
     def _on_setup_side(self, level: Level, price: float, confirming: str) -> bool:
@@ -317,7 +405,7 @@ class SetupDetector:
 
     def _message(self, symbol: str, level: Level) -> str:
         tape = _TAPE_PHRASE.get(self._tape_side.get(symbol, "mixed"), "tape mixed")
-        verb = "broke" if level.mode == "break" else "tagged"
+        verb = _VERB.get(level.mode, "tagged")
         return (
             f"{symbol} {verb} {level.price:g} {level.side} [{level.mode}] — "
             f"{tape}{self._book_note(symbol)}; plan stop {level.stop:g}"
@@ -353,8 +441,8 @@ def _flip_message(symbol: str, price: float, flip: float, direction: str) -> str
 def _gap_message(symbol: str, gap_s: float) -> str:
     """Operational notice on a detected stream discontinuity (suspend/disconnect)."""
     return (
-        f"⚠ {symbol} stream gap {gap_s:.0f}s (suspend/disconnect?) — re-arming: break "
-        f"levels need a fresh setup-side touch before they can fire again"
+        f"⚠ {symbol} stream gap {gap_s:.0f}s (suspend/disconnect?) — re-arming: break and "
+        f"reversal/retest levels need a fresh setup-side touch before they can fire again"
     )
 
 
@@ -391,9 +479,11 @@ def _confirming_side(level: Level) -> str:
             return "buy" if opt_type == "call" else "sell"
         except (IndexError, ValueError):
             pass  # malformed contract — fall back to side + mode
-    # alert-only (or unparseable): derive direction from side + mode
-    # (break inverts the fade mapping: a resistance breakout is a long, not a short)
-    bullish = (level.side == "support") == (level.mode != "break")
+    # alert-only (or unparseable): derive direction from side + mode.
+    # momentum modes (break, retest) go *with* the cross — a resistance breakout/retest is
+    # a long; mean-revert modes (fade, reversal) go back *inside* — a failed-break reversal
+    # at resistance is a short, mirroring fade.
+    bullish = (level.side == "support") != (level.mode in _MOMENTUM_MODES)
     return "buy" if bullish else "sell"
 
 

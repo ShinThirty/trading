@@ -39,7 +39,11 @@ class Level:
     side: str  # "support" | "resistance"
     stop: float
     contract: str | None = None  # OCC option symbol to BUY when this level tags
-    mode: str = "fade"  # "fade" (touch + reject) | "break" (cross + follow-through)
+    # "fade" (touch + reject) | "break" (cross + follow-through) |
+    # "reversal" (failed-break snap-back) | "retest" (confirmed-break pullback-and-resume).
+    # reversal/retest are a wall's two verdict rows — same price+side, different contract —
+    # driven by a BreakoutTracker (geometry, not tape); see detector.py / breakout.py.
+    mode: str = "fade"
 
 
 @dataclass(frozen=True, slots=True)

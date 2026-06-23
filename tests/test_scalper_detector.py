@@ -484,6 +484,116 @@ def test_record_sink_is_optional() -> None:
     assert len(notes) == 1  # still fires + notifies, no crash without a recorder
 
 
+# ── breakout-attempt verdicts: reversal + retest (geometry, not tape) ──
+
+_REV_PUT = "QQQ260612P00740000"  # failed-break of resistance → snap back down → short PUT
+_GO_CALL = "QQQ260612C00740000"  # confirmed break of resistance → continuation up → long CALL
+
+# small, fast-resolving verdict tunables so the geometry (not the calibrated defaults) is tested
+_VKW = dict(
+    break_margin=0.10,
+    min_break_excursion=0.10,
+    follow_through_margin=1.00,
+    confirm_s=10.0,
+    failure_window_s=60.0,
+    reentry_margin=0.10,
+    retest_proximity=0.20,
+    retest_window_s=60.0,
+)
+
+
+def _verdict_plan(lean: str = "both", *, reversal: bool = True, retest: bool = True) -> SessionPlan:
+    levels = []
+    if reversal:
+        levels.append(Level(740.0, "resistance", 740.5, contract=_REV_PUT, mode="reversal"))
+    if retest:
+        levels.append(Level(740.0, "resistance", 739.5, contract=_GO_CALL, mode="retest"))
+    return SessionPlan(
+        date="2026-06-22",
+        symbol="QQQ",
+        regime="breakout-trend",
+        lean=lean,
+        levels=levels,
+        default_stop_pct=0.20,
+        target_pct=0.20,
+        contracts=1,
+    )
+
+
+def _verdict_detector(notes: list, proposals: list, lean: str = "both") -> SetupDetector:
+    return SetupDetector(lambda: _verdict_plan(lean), notes.append, proposals.append, **_VKW)
+
+
+def test_reversal_verdict_fires_put_on_snapback_despite_buy_tape() -> None:
+    # the whole point: a failed-break reversal is geometry, NOT tape — it fires the short PUT
+    # even though the prints are at the offer (buy tape, contrary to the PUT's direction)
+    notes: list[str] = []
+    proposals: list = []
+    det = _verdict_detector(notes, proposals)
+    det.on_timesale(_bts("QQQ", 739.0, ms=0))  # inside the wall → arm
+    det.on_timesale(_bts("QQQ", 740.20, ms=1000))  # crossed above by > break_margin
+    det.on_timesale(_bts("QQQ", 739.85, ms=2000))  # snapped back inside in-window → REVERSAL
+    assert len(proposals) == 1 and proposals[0].contract == _REV_PUT
+    assert any("failed-break reversal" in n and "[reversal]" in n for n in notes)
+
+
+def test_retest_verdict_fires_call_on_confirmed_break_and_resume() -> None:
+    notes: list[str] = []
+    proposals: list = []
+    det = _verdict_detector(notes, proposals)
+    det.on_timesale(_bts("QQQ", 739.0, ms=0))  # arm
+    det.on_timesale(_bts("QQQ", 740.20, ms=1000))  # cross
+    det.on_timesale(_bts("QQQ", 740.40, ms=12_000))  # held ≥ confirm_s → CONFIRMED
+    det.on_timesale(_bts("QQQ", 740.10, ms=13_000))  # pulled back to the wall (retest)
+    det.on_timesale(_bts("QQQ", 740.25, ms=14_000))  # resumed outward → GO_WITH
+    assert any(p.contract == _GO_CALL for p in proposals)
+    assert any("breakout retest" in n and "[retest]" in n for n in notes)
+
+
+def test_reversal_short_suppressed_under_long_only_lean() -> None:
+    notes: list[str] = []
+    proposals: list = []
+    det = _verdict_detector(notes, proposals, lean="long-only")
+    det.on_timesale(_bts("QQQ", 739.0, ms=0))
+    det.on_timesale(_bts("QQQ", 740.20, ms=1000))
+    det.on_timesale(_bts("QQQ", 739.85, ms=2000))  # REVERSAL verdict, but PUT is short → blocked
+    assert proposals == [] and not any("reversal" in n for n in notes)
+
+
+def test_go_with_silent_when_no_retest_row_on_the_wall() -> None:
+    notes: list[str] = []
+    proposals: list = []
+    det = SetupDetector(lambda: _verdict_plan(retest=False), notes.append, proposals.append, **_VKW)
+    det.on_timesale(_bts("QQQ", 739.0, ms=0))
+    det.on_timesale(_bts("QQQ", 740.20, ms=1000))
+    det.on_timesale(_bts("QQQ", 740.40, ms=12_000))  # CONFIRMED
+    det.on_timesale(_bts("QQQ", 740.10, ms=13_000))  # retest
+    det.on_timesale(_bts("QQQ", 740.25, ms=14_000))  # GO_WITH verdict, but no retest row → nothing
+    assert proposals == []
+
+
+def test_stream_gap_resets_breakout_tracker_mid_attempt() -> None:
+    notes: list[str] = []
+    proposals: list = []
+    det = _verdict_detector(notes, proposals)
+    det.on_timesale(_bts("QQQ", 739.0, ms=1_000_000))  # arm
+    det.on_timesale(_bts("QQQ", 740.20, ms=1_001_000))  # cross → CROSSED (mid-attempt)
+    det.on_timesale(_bts("QQQ", 739.85, ms=1_200_000))  # 199s gap → tracker dropped before update
+    assert proposals == []  # the snap-back across the dead time does NOT fire a reversal
+    assert any("stream gap" in n for n in notes)
+
+
+def test_reversal_fire_records_telemetry_with_mode() -> None:
+    records: list = []
+    det = SetupDetector(lambda: _verdict_plan(), lambda _m: None, record=records.append, **_VKW)
+    det.on_timesale(_bts("QQQ", 739.0, ms=0))
+    det.on_timesale(_bts("QQQ", 740.20, ms=1000))
+    det.on_timesale(_bts("QQQ", 739.85, ms=2000))
+    assert len(records) == 1
+    assert records[0].mode == "reversal" and records[0].contract == _REV_PUT
+    assert records[0].confirming == "sell"  # PUT → sell-confirming, recorded for the join
+
+
 # ── Notifier ────────────────────────────────────────────────
 
 
