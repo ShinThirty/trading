@@ -642,6 +642,55 @@ def gamma_exposure_profile(
     )
 
 
+class ScalpRegimeRead(NamedTuple):
+    """The /scalp-prep regime gate: regime sign + flip from the FRONT expiration,
+    structural walls from the ≤N-DTE aggregate, and a conflict note when the two
+    disagree.
+
+    The split is deliberate. The **regime sign and the zero-gamma flip** come from
+    the front (0-1DTE) expiration — that's the positioning that actually drives
+    intraday behavior, and it's where the flip sits cleanly near spot. The **walls**
+    come from the aggregate — across the next few expirations the persistent high-OI
+    round strikes are the *structural* magnets, whereas 0DTE gamma collapses onto ATM
+    so its "walls" sit on spot and can't be pre-mapped."""
+
+    regime: str  # FRONT-expiration regime sign — the authoritative intraday label
+    zero_gamma: float | None  # FRONT-expiration flip (the bidirectional tripwire)
+    call_wall: float | None  # AGGREGATE structural call magnet
+    put_wall: float | None  # AGGREGATE structural put magnet
+    front_total_gex: float  # signed dollar gamma of the front expiration alone
+    aggregate_total_gex: float  # signed dollar gamma across the ≤N-DTE aggregate
+    conflict: str | None  # set when the aggregate sign would mislabel the regime
+
+
+def scalp_regime_read(front: GammaProfile, aggregate: GammaProfile) -> ScalpRegimeRead:
+    """Combine a front-expiration profile and a ≤N-DTE aggregate into the scalp gate.
+
+    Regime + flip are taken from ``front``; walls from ``aggregate`` (see
+    ``ScalpRegimeRead``). A *conflict* — the aggregate regime sign disagreeing with
+    the front sign — is the 6/16 failure mode: the ≤7-DTE aggregate read +GEX (fade)
+    while the front expiration had already flipped to trending, so prep blessed an
+    all-day fade map the bot then bled on. Surfacing it lets prep trust the front
+    label (or stand down) instead of silently taking the smeared aggregate sign.
+    """
+    conflict = None
+    if front.regime != aggregate.regime:
+        conflict = (
+            f"aggregate GEX reads {aggregate.regime.upper()} but the front expiration "
+            f"reads {front.regime.upper()} — the aggregate smears the intraday regime; "
+            "trust the front-exp label (the 6/16 mislabel cost)."
+        )
+    return ScalpRegimeRead(
+        regime=front.regime,
+        zero_gamma=front.zero_gamma,
+        call_wall=aggregate.call_wall,
+        put_wall=aggregate.put_wall,
+        front_total_gex=front.total_gex,
+        aggregate_total_gex=aggregate.total_gex,
+        conflict=conflict,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Strategy detection
 # ---------------------------------------------------------------------------

@@ -414,13 +414,23 @@ async def get_gamma_profile(
     For SPY/QQQ this is the regime input the /scalp prep level map keys off: in +GEX
     fade the walls back toward the flip; in -GEX trade the break, never fade.
 
+    In aggregate mode (expiration=None) the **regime sign and the zero-gamma flip are
+    taken from the front (0-1DTE) expiration** — the positioning that drives intraday
+    behavior and where the flip sits cleanly near spot — while the **walls come from
+    the ≤dte_max aggregate** (persistent high-OI round strikes are the structural
+    magnets; 0DTE gamma collapses onto ATM so its walls sit on spot and can't be
+    pre-mapped). When the aggregate sign disagrees with the front sign — the 6/16
+    mislabel, where the aggregate read +GEX/fade while the front had flipped to
+    trending — a ⚠ Regime Conflict row surfaces it so prep trusts the front label.
+    A single explicit expiration computes everything from that one chain.
+
     Caveats: the open-interest base is daily-settled (OCC), so positioning is one
     session stale; the gammas re-anchor to the current spot on each call. The
     zero-gamma level is a cumulative-crossing proxy, not a re-priced surface.
 
     symbol: underlying (e.g. QQQ, SPY).
-    expiration: a single expiration (YYYY-MM-DD). If None, aggregates the chain
-      across expirations within dte_max (default 7 — the 0-1DTE scalp window).
+    expiration: a single expiration (YYYY-MM-DD). If None, regime+flip come from the
+      front expiration and walls from the chain aggregated within dte_max (default 7).
     dte_max: max DTE to include when expiration is None.
 
     Requires [tradier] section in ~/.tradingrc.
@@ -449,36 +459,56 @@ async def get_gamma_profile(
     if not spot:
         return f"(no usable price for {symbol})"
 
-    chain: list[dict] = []
-    for chain_resp in chain_resps:
+    chains_by_exp: dict[str, list[dict]] = {}
+    for exp, chain_resp in zip(target_exps, chain_resps, strict=True):
         if chain_resp.options:
-            chain.extend(chain_resp.options)
-    if not chain:
+            chains_by_exp[exp] = chain_resp.options
+    if not chains_by_exp:
         return f"(no option chains for {symbol})"
+    aggregate_chain = [o for opts_list in chains_by_exp.values() for o in opts_list]
 
-    p = opts.gamma_exposure_profile(chain, spot)
+    conflict: str | None = None
+    if expiration is not None:
+        # single expiration: walls + regime + flip all from this one chain
+        p = opts.gamma_exposure_profile(aggregate_chain, spot)
+        regime, total_gex = p.regime, p.total_gex
+        zero_gamma, call_wall, put_wall = p.zero_gamma, p.call_wall, p.put_wall
+        coverage = target_exps[0]
+    else:
+        # scalp default: regime + flip from the FRONT expiration (the intraday-honest
+        # read — the ≤N-DTE aggregate smears the sign and the flip), structural walls
+        # from the aggregate. This is the gate, not the human reconciling two pulls.
+        front_exp = min(chains_by_exp, key=date.fromisoformat)
+        read = opts.scalp_regime_read(
+            opts.gamma_exposure_profile(chains_by_exp[front_exp], spot),
+            opts.gamma_exposure_profile(aggregate_chain, spot),
+        )
+        regime, total_gex = read.regime, read.front_total_gex
+        zero_gamma, call_wall, put_wall = read.zero_gamma, read.call_wall, read.put_wall
+        conflict = read.conflict
+        coverage = f"front {front_exp} regime/flip + {len(chains_by_exp)} exp ≤{dte_max}DTE walls"
+
     playbook = (
         "dealers net long gamma — vol-suppressing / pinning; fade the walls back to the flip"
-        if p.regime == "positive"
+        if regime == "positive"
         else "dealers net short gamma — vol-amplifying / trending; trade the break, don't fade"
     )
 
     def _lvl(v: float | None) -> str:
         return f"${fmt_number(v)}" if v is not None else "n/a"
 
-    dte_label = (
-        target_exps[0] if expiration is not None else f"{len(target_exps)} exp ≤ {dte_max} DTE"
-    )
     summary = {
         "Underlying": f"${fmt_number(spot)}",
-        "Coverage": dte_label,
-        "Regime": f"{p.regime.upper()} GEX",
-        "Total GEX": f"{p.total_gex / 1e9:+.2f} $Bn / 1% move",
-        "Call Wall": _lvl(p.call_wall),
-        "Put Wall": _lvl(p.put_wall),
-        "Zero-Gamma Flip": _lvl(p.zero_gamma),
+        "Coverage": coverage,
+        "Regime": f"{regime.upper()} GEX" + (" (front-exp)" if expiration is None else ""),
+        "Total GEX": f"{total_gex / 1e9:+.2f} $Bn / 1% move",
+        "Call Wall": _lvl(call_wall),
+        "Put Wall": _lvl(put_wall),
+        "Zero-Gamma Flip": _lvl(zero_gamma),
         "Read": playbook,
     }
+    if conflict is not None:
+        summary["⚠ Regime Conflict"] = conflict
     return f"## {symbol.upper()} Gamma Exposure\n\n{kv_table(summary)}"
 
 
