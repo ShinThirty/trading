@@ -32,6 +32,9 @@ from trading_alerts.config import AlertsConfig
 from trading_alerts.event import AlertEvent
 
 logger = logging.getLogger(__name__)
+# Lambda's root logger defaults to WARNING; bump ours so watchdog INFO lines
+# (e.g. "watchdog: emitted N ops event(s)") land in CloudWatch like the handler's.
+logger.setLevel(logging.INFO)
 
 # Includes "watchdog" so a missed self-run yesterday is reported today.
 _TRIGGERS_TO_CHECK = (
@@ -59,6 +62,19 @@ _LAMBDA_FUNCTIONS = ("trading-alerts-dispatcher", "trading-alerts-interaction")
 INVOCATION_LOOKBACK_DAYS = 10
 LAMBDA_ERROR_LOOKBACK_HOURS = 24
 PIPELINE_STALE_DAYS = 7
+
+# Date-windowed watchers fire on a day-of-month range, so their EventBridge rule
+# legitimately stays silent for longer than the default 10d between windows. Use
+# a lookback past each one's real max inter-fire gap, or a normal quiet stretch
+# gets flagged as a dead rule and re-alerts every day until the next window.
+#   cpi          fires days 10-15  → ~26d max gap
+#   pce          fires days 26-31  → ~27d max gap
+#   tsmc_revenue fires days 5-20   → ~16d max gap
+_INVOCATION_LOOKBACK_OVERRIDES = {
+    "cpi": 35,
+    "pce": 35,
+    "tsmc_revenue": 35,
+}
 
 
 def _rule_name(trigger: str) -> str:
@@ -147,8 +163,9 @@ def _check_lambda_errors(cw, today: str) -> AlertEvent | None:
 
 def _check_rule_invocations(cw, trigger: str, today: str) -> AlertEvent | None:
     rule = _rule_name(trigger)
+    lookback_days = _INVOCATION_LOOKBACK_OVERRIDES.get(trigger, INVOCATION_LOOKBACK_DAYS)
     end = datetime.now(UTC)
-    start = end - timedelta(days=INVOCATION_LOOKBACK_DAYS)
+    start = end - timedelta(days=lookback_days)
     try:
         resp = cw.get_metric_statistics(
             Namespace="AWS/Events",
@@ -170,11 +187,11 @@ def _check_rule_invocations(cw, trigger: str, today: str) -> AlertEvent | None:
     return AlertEvent(
         dedup_key=f"ops:watchdog:no_invocations:{rule}:{today}",
         level="critical",
-        title=f"[OPS] {trigger}: no invocations in last {INVOCATION_LOOKBACK_DAYS}d",
+        title=f"[OPS] {trigger}: no invocations in last {lookback_days}d",
         fields=[
             {"name": "Trigger", "value": trigger, "inline": True},
             {"name": "Rule", "value": rule, "inline": True},
-            {"name": "Window", "value": f"{INVOCATION_LOOKBACK_DAYS}d", "inline": True},
+            {"name": "Window", "value": f"{lookback_days}d", "inline": True},
         ],
         footer_text="trading-alerts watchdog — EventBridge rule may be disabled",
         ttl_days=2,
