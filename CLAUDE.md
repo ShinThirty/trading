@@ -70,7 +70,7 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │       ├── portwatch_client.py      # No auth, identifies via User-Agent (IMF PortWatch ArcGIS chokepoint data)
 │   │       ├── beige_book_client.py     # No auth, identifies via User-Agent (Fed Beige Book)
 │   │       ├── squeeze_metrics_client.py # No auth (SqueezeMetrics public DIX/GEX CSV)
-│   │       ├── naaim_client.py          # No auth (NAAIM since-inception XLSX history)
+│   │       ├── naaim_client.py          # No auth (NAAIM since-inception XLSX history); Cloudflare Bot Mgmt 403s httpx, so routes discovery+download through the shared Playwright browser context when a host is present (httpx fallback for Lambda)
 │   │       ├── reddit_client.py         # Reddit JSON API (search, subreddit, post); httpx fetch + Playwright-minted loid cookie (anonymous .json is 403-blocked); takes PlaywrightHost
 │   │       ├── playwright_host.py       # Shared Chromium process (one Browser, many isolated Contexts) used by all Playwright-backed clients
 │   │       ├── sentiment_client.py      # Playwright-based scraper (CBOE p/c, AAII); takes PlaywrightHost
@@ -290,7 +290,7 @@ signature) handles button clicks (`mute:<seconds>:<dedup_key>`) and the
 | **SqueezeMetrics** | DIX (dark-pool dollar-weighted short ratio of S&P 500 components) + GEX (dealer net gamma in $) — daily history CSV powering the public /monitor/dix chart | None (User-Agent only) |
 | **CBOE** | Equity put/call ratio (daily) | None (Playwright, realistic browser context) |
 | **AAII** | Investor sentiment survey bull/neutral/bear (weekly) | None (Playwright, realistic browser context) |
-| **NAAIM** | Active manager equity exposure index — full since-inception history with 52w z-score / percentile (latest entry replaces the prior Playwright scrape) | None (httpx + polite User-Agent; XLSX) |
+| **NAAIM** | Active manager equity exposure index — full since-inception history with 52w z-score / percentile (latest entry replaces the prior Playwright scrape) | None (XLSX). naaim.org sits behind Cloudflare Bot Management (keys on TLS fingerprint, intermittently 403s httpx), so the MCP client routes discovery + download through the shared Playwright browser context; falls back to httpx (degraded) when no host, e.g. the Lambda watcher |
 | **FactSet** | Earnings Insight weekly PDF (S&P 500 beat rates, surprise magnitudes, blended growth, forward EPS by quarter + CY, forward 12M P/E with 5y/10y context, sector revisions, beat/miss reaction asymmetry). Published Friday afternoon ET. The institutional benchmark for earnings season tone. | None (httpx + polite User-Agent; pdfplumber) |
 | **Reddit** | Subreddit search, hot/top/new listings, and individual post + comments — used for sentiment reading on specific tickers or themes via `search_reddit`, `get_subreddit_posts`, `get_reddit_post` tools | None (JSON API; anonymous `.json` is 403-blocked, so httpx rides a `loid` cookie minted once via the shared Playwright Chromium and re-minted on 403) |
 

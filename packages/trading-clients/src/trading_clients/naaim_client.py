@@ -1,4 +1,4 @@
-"""NAAIM Exposure Index history client (httpx, no auth — polite User-Agent).
+"""NAAIM Exposure Index history client.
 
 NAAIM publishes weekly active-manager equity exposure as a single
 since-inception XLSX, republished every Wednesday/Thursday under a
@@ -6,16 +6,26 @@ date-stamped filename:
 
   https://www.naaim.org/wp-content/uploads/<YYYY>/<MM>/USE_Data-since-Inception_<YYYY>-<MM>-<DD>.xlsx
 
-The filename moves each week, so we discover the current URL by scraping the
-program page (HTML, no JS rendering required — verified to return a parseable
-link with httpx alone) and then download the XLSX in a second request.
+Discovery: the program page (Bricks-theme migration, 2026-06) no longer emits a
+static link, but the weekly XLSX is indexed in the WordPress media library
+(`/wp-json/wp/v2/media`). We query that newest-first, then download the binary.
+
+Transport: as of 2026-06 naaim.org sits behind Cloudflare Bot Management, which
+403s every httpx request — it fingerprints the TLS/JA3 handshake, not the
+User-Agent, so even a real Chrome UA is blocked. When a shared `PlaywrightHost`
+is available we therefore route both the discovery JSON and the XLSX download
+through a real-browser context (`context.request`), whose browser fingerprint
+clears Cloudflare. The client tolerates a `None` host (Lambda has no Playwright)
+and falls back to httpx — degraded, since Cloudflare will block it — preserving
+the prior zero-arg construction contract.
 
 This class deliberately doesn't extend BaseClient — the two-step flow doesn't
-fit the single-Endpoint shape, and the response is binary XLSX bytes parsed
-by openpyxl in NaaimHistoryResponse.from_response.
+fit the single-Endpoint shape, and the response is binary XLSX bytes parsed by
+openpyxl in NaaimHistoryResponse.from_response.
 """
 
 import asyncio
+import json
 import re
 from datetime import date, timedelta
 from typing import Any
@@ -24,12 +34,21 @@ import httpx
 
 from trading_clients.cache import TTLCache
 from trading_clients.endpoints.naaim import NaaimHistoryResponse
+from trading_clients.playwright_host import BrowserContext, PlaywrightHost
 from trading_clients.rate_limit import RateLimiter
 
 BASE_URL = "https://www.naaim.org"
 # The WordPress media library indexes the weekly XLSX even though the program
 # page (Bricks-theme migration, 2026-06) no longer emits a static link.
 MEDIA_PATH = "/wp-json/wp/v2/media"
+
+# Real-browser fingerprint for the Playwright context. Cloudflare Bot Management
+# on naaim.org keys on the TLS fingerprint, so a genuine Chromium context clears
+# where httpx (any User-Agent) gets a 403.
+REAL_UA = (
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+)
 
 # 6h cache: NAAIM is weekly, but a long TTL avoids re-downloading the 86KB
 # XLSX during a back-to-back briefing → review session.
@@ -47,7 +66,12 @@ _XLSX_RE = re.compile(
 
 
 class NaaimClient:
-    def __init__(self) -> None:
+    _context: BrowserContext | None
+
+    def __init__(self, host: PlaywrightHost | None = None) -> None:
+        self._host = host
+        self._context = None
+        self._ctx_lock = asyncio.Lock()
         self._http = httpx.AsyncClient(
             timeout=30,
             headers={
@@ -61,6 +85,12 @@ class NaaimClient:
         self._limiter = RateLimiter(RATE_LIMITS)
 
     async def close(self) -> None:
+        if self._context is not None:
+            try:
+                await self._context.close()
+            except Exception:
+                pass
+            self._context = None
         await self._http.aclose()
 
     async def get_history(self) -> NaaimHistoryResponse:
@@ -82,18 +112,31 @@ class NaaimClient:
             self._cache.put(cache_key, parsed)
             return parsed
 
+    async def _ensure_context(self) -> BrowserContext | None:
+        """Lazily create the shared-host browser context used to clear
+        Cloudflare. Returns None when no host is configured (Lambda), in which
+        case callers fall back to httpx."""
+        if self._host is None:
+            return None
+        if self._context is not None:
+            return self._context
+        async with self._ctx_lock:
+            if self._context is None:
+                self._context = await self._host.new_context(
+                    user_agent=REAL_UA,
+                    locale="en-US",
+                    timezone_id="America/New_York",
+                )
+        return self._context
+
     async def _discover_xlsx_url(self) -> str:
         """Return the newest USE_Data XLSX URL.
 
-        The program page no longer links the file (Elementor → Bricks migration,
-        2026-06), but the weekly XLSX is still published at the predictable
-        wp-content/uploads path and indexed in the WordPress media library.
-        Primary discovery is the REST media endpoint (newest-first); if that's
-        unavailable we walk back recent Wednesdays against the stable
+        Primary discovery is the WordPress REST media endpoint (newest-first);
+        if that's unavailable we walk back recent Wednesdays against the stable
         upload-path convention.
         """
-        await self._limiter.acquire()
-        resp = await self._http.get(
+        status, body = await self._get(
             f"{BASE_URL}{MEDIA_PATH}",
             params={
                 "search": "USE_Data-since-Inception",
@@ -102,15 +145,22 @@ class NaaimClient:
                 "order": "desc",
             },
         )
-        if resp.status_code == 200:
+        if status == 200:
             try:
-                items = resp.json()
+                items = json.loads(body)
             except ValueError:
                 items = []
             for item in items if isinstance(items, list) else []:
                 if not isinstance(item, dict):
                     continue
-                match = _XLSX_RE.search(item.get("source_url", "") or "")
+                # Prefer the public source_url; fall back to the guid the media
+                # API also carries (the program-page link is gone post-Bricks).
+                candidate = item.get("source_url") or ""
+                if not candidate:
+                    guid = item.get("guid")
+                    if isinstance(guid, dict):
+                        candidate = guid.get("rendered") or ""
+                match = _XLSX_RE.search(candidate)
                 if match:
                     return match.group(0)
 
@@ -120,7 +170,7 @@ class NaaimClient:
 
         raise RuntimeError(
             "NAAIM USE_Data XLSX not found via REST media API or upload-path probe "
-            "— site layout may have changed"
+            "— site layout may have changed, or Cloudflare is blocking (no browser context)"
         )
 
     async def _discover_via_upload_path(self) -> str | None:
@@ -134,17 +184,36 @@ class NaaimClient:
                 f"{BASE_URL}/wp-content/uploads/{d:%Y}/{d:%m}/"
                 f"USE_Data-since-Inception_{d:%Y-%m-%d}.xlsx"
             )
-            await self._limiter.acquire()
-            resp = await self._http.head(url)
-            if resp.status_code == 200:
+            if await self._head_status(url) == 200:
                 return url
         return None
 
     async def _fetch_bytes(self, url: str) -> bytes:
+        status, body = await self._get(url)
+        if status >= 400:
+            raise RuntimeError(f"HTTP {status} fetching NAAIM XLSX from {url}")
+        return body
+
+    async def _get(self, url: str, params: dict[str, Any] | None = None) -> tuple[int, bytes]:
+        """GET returning (status, body bytes). Routes through the browser
+        context when available (clears Cloudflare), else httpx."""
+        ctx = await self._ensure_context()
         await self._limiter.acquire()
-        resp = await self._http.get(url)
-        resp.raise_for_status()
-        return resp.content
+        if ctx is not None:
+            resp = await ctx.request.get(url, params=params or {})
+            return resp.status, await resp.body()
+        resp = await self._http.get(url, params=params)
+        return resp.status_code, resp.content
+
+    async def _head_status(self, url: str) -> int:
+        """HEAD status code via the browser context when available, else httpx."""
+        ctx = await self._ensure_context()
+        await self._limiter.acquire()
+        if ctx is not None:
+            resp = await ctx.request.head(url)
+            return resp.status
+        resp = await self._http.head(url)
+        return resp.status_code
 
     # Provided for protocol symmetry with other clients; not used.
     async def _request(self, *_: Any, **__: Any) -> Any:

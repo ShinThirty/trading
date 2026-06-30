@@ -117,7 +117,6 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
     ctx["portwatch"] = PortwatchClient()
     ctx["beige_book"] = BeigeBookClient()
     ctx["squeeze_metrics"] = SqueezeMetricsClient()
-    ctx["naaim"] = NaaimClient()
     ctx["factset"] = FactsetClient()
     # Shared Chromium for all Playwright-backed scrapers (SentimentClient,
     # MorningstarClient). One process, many isolated contexts. If Chromium
@@ -163,6 +162,10 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
     # Reddit needs the shared Chromium only to mint a loid cookie (lazily, on
     # first use) — the .json fetches stay on httpx. Tolerates a None host.
     ctx["reddit"] = RedditClient(playwright_host)
+    # NAAIM sits behind Cloudflare Bot Management (2026-06) that 403s httpx;
+    # the browser context clears it. Tolerates a None host (falls back to
+    # httpx — degraded) so the server still starts without Chromium.
+    ctx["naaim"] = NaaimClient(playwright_host)
     db = open_db()
     init_pipeline_schema(db)
     init_roll_schema(db)
