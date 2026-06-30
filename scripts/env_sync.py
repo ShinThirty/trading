@@ -10,11 +10,16 @@ State bundled (full-snapshot tarball, re-uploaded whole on every push):
   - ~/Documents/analysis/                          (per-ticker research notes)
 
 Synced separately (incremental — only new/changed files move):
-  - ~/.trading/scalp/                              (paper-detector plans + fills/signals)
-        → s3://<bucket>/scalp/ via `aws s3 sync`. This archive is append-only
-        (write-once-per-day) and non-sensitive (index price levels + paper fills,
-        no creds), so it rides its own prefix instead of inflating — and being
-        re-uploaded whole with — the encrypted snapshot bundle on every push.
+  - ~/.trading/scalp/                              (paper-detector plans + fills/signals
+                                                    + shadow VAP/volume-rate tape)
+        → s3://<bucket>/scalp/ via `aws s3 sync` — a whole-directory sweep, so every
+        file under scalp/ rides it and new paper artifacts need no wiring here. Mostly
+        write-once-per-day (plans + fills/signals), with one exception: the shadow
+        {date}-tape.jsonl is the raw underlying tape — appended all session and
+        materially larger (MB, not KB) — so an intra-session push re-uploads the
+        growing tape whole. Still non-sensitive (index prices + paper fills, no
+        creds), so it rides its own prefix under SSE-S3 instead of inflating — and
+        being re-uploaded whole with — the encrypted snapshot bundle on every push.
 
 Transport: S3.   Encryption: age (X25519 keypair) for the bundle, SSE-S3 for scalp.
 Snapshot: sqlite3 backup API.
@@ -23,6 +28,7 @@ Usage:
   uv run scripts/env_sync.py push       Bundle local state, encrypt, upload to S3
   uv run scripts/env_sync.py pull       Download from S3, decrypt, restore
   uv run scripts/env_sync.py status     Show local vs remote sync state
+  uv run scripts/env_sync.py archive    Gzip scalp data past its retention window
   uv run scripts/env_sync.py setup-key  Create the shared age keypair (run once)
 
 One-time setup:
@@ -40,6 +46,19 @@ Bucket safety (set once, server-side):
   - Lifecycle expires noncurrent versions after 30 days (and aborts incomplete
     multipart uploads after 1 day).
   Both are pure insurance against bad pushes / accidental deletion.
+
+Scalp retention (archive, don't delete):
+  - push/pull are additive (no --delete), so the scalp archive would grow
+    unbounded — and the raw {date}-tape.jsonl is MB-scale. Past sessions never
+    change, so data past its retention window is ARCHIVED, not deleted: gzipped in
+    place (JSONL tape ~10x), then the uncompressed original is dropped locally and
+    — only after the .gz is confirmed uploaded — from S3. Nothing is lost; the
+    footprint just compresses. Windows: tape TAPE_ARCHIVE_AFTER_DAYS, the
+    lightweight record (plans/fills/signals/summary/shadow snapshots)
+    LOG_ARCHIVE_AFTER_DAYS. Runs automatically on push (local + remote); `archive`
+    runs it on demand (`--dry-run` to preview). Pull just mirrors the
+    already-archived remote, so it needs no archive step. Client-side because an S3
+    lifecycle rule can neither single out the `-tape.jsonl` suffix nor compress.
 
 Workflow:
   Before leaving the desktop:  stop MCP server, then push
@@ -77,6 +96,7 @@ Safety:
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
 import json
 import os
@@ -89,6 +109,7 @@ import tarfile
 import tempfile
 import time
 from contextlib import closing
+from datetime import date
 from pathlib import Path
 
 HOME = Path.home()
@@ -120,11 +141,15 @@ BUCKET = "trading-env-113477077840"
 S3_URI = f"s3://{BUCKET}"
 KEY_BUNDLE = "trading-env.tar.gz.age"
 
-# The scalp paper-detector archive (session plans + fills/signals) is append-only
-# and non-sensitive, so it rides its OWN S3 prefix via incremental `aws s3 sync`
-# rather than the full-snapshot bundle: a year of write-once session logs never
-# inflates (or gets re-uploaded whole with) the encrypted env bundle. SCALP_DIR
-# is carved out of the bundle's tracked set + push staging + pull restore below.
+# The scalp paper-detector archive (session plans + fills/signals + the shadow
+# VAP/volume-rate tape + snapshots) is non-sensitive, so it rides its OWN S3 prefix
+# via incremental `aws s3 sync` rather than the full-snapshot bundle: the write-once
+# session logs never inflate (or get re-uploaded whole with) the encrypted env
+# bundle. The sync is a whole-directory sweep — any new file under scalp/ rides it
+# automatically, no list to maintain. Caveat: the shadow {date}-tape.jsonl is the raw
+# underlying tape (appended all session, MB-scale), so it's the one member that
+# re-uploads whole on an intra-session push. SCALP_DIR is carved out of the bundle's
+# tracked set + push staging + pull restore below.
 SCALP_DIR = TRADING_DIR / "scalp"
 SCALP_PREFIX = "scalp/"  # s3://<bucket>/scalp/
 
@@ -403,10 +428,13 @@ def _is_dirty(local_sync_ts: int, local_sig: str | None) -> bool:
 def sync_scalp_push() -> None:
     """Incrementally upload the scalp archive to its own prefix (only new/changed files).
 
-    `aws s3 sync` compares size + mtime and transfers just what differs, so a
-    session push moves the day's few KB, not the whole accumulated archive. The
-    data is non-sensitive (index price levels + paper fills, no creds), so it
-    rides server-side encryption (SSE-S3) instead of the bundle's age key.
+    A whole-directory sweep: every file under scalp/ — plans, fills/signals, and the
+    shadow VAP/volume-rate tape + snapshots — rides it, so new paper artifacts sync
+    with no change here. `aws s3 sync` compares size + mtime and transfers just the
+    files that differ — the day's session logs, not the whole accumulated archive
+    (though the raw {date}-tape.jsonl, appended all session, re-uploads whole once it
+    has grown since the last push). Non-sensitive (index prices + paper fills, no
+    creds), so it rides server-side encryption (SSE-S3) instead of the bundle's age key.
     """
     if not SCALP_DIR.exists():
         return
@@ -445,6 +473,109 @@ def scalp_pending() -> tuple[int, int] | None:
     return _count(str(SCALP_DIR), dst), _count(dst, str(SCALP_DIR))
 
 
+# ── scalp retention / archive ───────────────────────────────────────────────
+# push/pull are both additive (no --delete), so the scalp archive would grow
+# unbounded — and the raw {date}-tape.jsonl is MB-scale. But past sessions never
+# change, so instead of deleting old data we ARCHIVE it: gzip files past their
+# retention window (JSONL tape compresses ~10x), reclaiming space while keeping
+# everything. The uncompressed original is then removed locally and — only once
+# its .gz is confirmed uploaded — from S3, so data is never lost. Enforced
+# client-side (an S3 lifecycle rule can't single out the `-tape.jsonl` suffix, nor
+# compress); runs on push (local + remote), or on demand via `archive`. Pull just
+# mirrors the already-archived remote, so it needs no archive step. Every delete is
+# recoverable via bucket versioning regardless.
+TAPE_ARCHIVE_AFTER_DAYS = 30  # raw underlying tape — the bulk; gzipped past this
+LOG_ARCHIVE_AFTER_DAYS = 365  # plans / fills / signals / summary / shadow snapshots
+
+
+def _scalp_file_date(name: str) -> date | None:
+    """Parse the leading YYYY-MM-DD every scalp filename starts with; None if absent."""
+    try:
+        return date.fromisoformat(name[:10])
+    except ValueError:
+        return None
+
+
+def _archive_after_days(name: str) -> int:
+    return TAPE_ARCHIVE_AFTER_DAYS if name.endswith("-tape.jsonl") else LOG_ARCHIVE_AFTER_DAYS
+
+
+def _scalp_archivable(name: str, today: date) -> bool:
+    """True if an *uncompressed* scalp file is past its archive window."""
+    if name.endswith(".gz"):
+        return False  # already archived
+    d = _scalp_file_date(name)
+    return d is not None and (today - d).days > _archive_after_days(name)
+
+
+def archive_scalp_local(
+    today: date, root: Path = SCALP_DIR, *, dry_run: bool = False
+) -> list[Path]:
+    """Gzip scalp files past their archive window in place, then drop the originals.
+
+    Past data is immutable, so this is pure space reclamation — everything is kept,
+    just compressed. Idempotent: a file whose .gz already exists is collapsed to the
+    archive without re-compressing. Returns the originals that were (or would be)
+    archived.
+    """
+    if not root.exists():
+        return []
+    archived: list[Path] = []
+    for p in sorted(root.rglob("*")):
+        if not p.is_file() or not _scalp_archivable(p.name, today):
+            continue
+        archived.append(p)
+        if dry_run:
+            continue
+        gz = p.with_name(p.name + ".gz")
+        if not gz.exists():
+            with open(p, "rb") as src, gzip.open(gz, "wb") as dst:
+                shutil.copyfileobj(src, dst)
+        p.unlink()
+    return archived
+
+
+def archive_scalp_remote(today: date, *, dry_run: bool = False) -> int:
+    """Drop remote uncompressed scalp objects past their window whose `.gz` archive is
+    already present remotely — so nothing is lost (the archive uploads first, via the
+    preceding `aws s3 sync`). Best-effort: a no-op on any aws error. Returns the count.
+    """
+    res = subprocess.run(
+        ["aws", "s3api", "list-objects-v2", "--bucket", BUCKET, "--prefix", SCALP_PREFIX,
+         "--query", "Contents[].Key", "--output", "text"],
+        capture_output=True,
+        text=True,
+    )
+    if res.returncode != 0 or not res.stdout.strip():
+        return 0
+    keys = set(res.stdout.split())
+    superseded = [
+        k
+        for k in keys
+        if _scalp_archivable(k.rsplit("/", 1)[-1], today) and f"{k}.gz" in keys
+    ]
+    if not dry_run:
+        for key in superseded:
+            subprocess.run(["aws", "s3", "rm", f"{S3_URI}/{key}"], capture_output=True, text=True)
+    return len(superseded)
+
+
+def push_scalp(today: date | None = None, *, dry_run: bool = False) -> None:
+    """Scalp push + archive: gzip old local data, upload, then drop superseded remote
+    originals. Shared by `push` and the standalone `archive` command."""
+    today = today or date.today()
+    archived = archive_scalp_local(today, dry_run=dry_run)
+    if archived:
+        verb = "Would archive" if dry_run else "Archived"
+        print(f"{verb} {len(archived)} local scalp file(s) past retention (gzip).")
+    if not dry_run:
+        sync_scalp_push()
+    dropped = archive_scalp_remote(today, dry_run=dry_run)
+    if dropped:
+        verb = "Would drop" if dry_run else "Dropped"
+        print(f"{verb} {dropped} superseded remote scalp object(s) (now archived).")
+
+
 def cmd_push(args: argparse.Namespace) -> None:
     require("age", "age-keygen", "aws")
     ensure_db_checkpointed()
@@ -467,7 +598,7 @@ def cmd_push(args: argparse.Namespace) -> None:
             # Remote holds identical content under a newer push (another machine
             # pushed the same state); advance the marker so status reads in-sync.
             write_marker(remote["push_ts"], remote["hostname"], live_sig)
-        sync_scalp_push()
+        push_scalp()
         return
 
     if remote and remote["push_ts"] > local_sync_ts and not args.force:
@@ -561,7 +692,7 @@ def cmd_push(args: argparse.Namespace) -> None:
         write_marker(push_ts, host, live_sig)
         print(f"Pushed. Marker updated: {ts_to_str(push_ts)} ({host})")
 
-    sync_scalp_push()
+    push_scalp()
 
 
 def cmd_pull(args: argparse.Namespace) -> None:
@@ -705,6 +836,25 @@ def cmd_status(_: argparse.Namespace) -> None:
         else:
             print("  Scalp:     in sync (separate prefix)")
 
+    if SCALP_DIR.exists():
+        files = [p for p in SCALP_DIR.rglob("*") if p.is_file()]
+        total_mb = sum(p.stat().st_size for p in files) / 1e6
+        live_tape = sum(1 for p in files if p.name.endswith("-tape.jsonl"))
+        gz_tape = sum(1 for p in files if p.name.endswith("-tape.jsonl.gz"))
+        archivable = sum(1 for p in files if _scalp_archivable(p.name, date.today()))
+        print(
+            f"  Scalp disk: {len(files)} files, {total_mb:.1f} MB "
+            f"(tape: {live_tape} live / {gz_tape} archived; {archivable} due to archive). "
+            f"Window: tape {TAPE_ARCHIVE_AFTER_DAYS}d, logs {LOG_ARCHIVE_AFTER_DAYS}d → gzip"
+        )
+
+
+def cmd_archive(args: argparse.Namespace) -> None:
+    require("aws")
+    push_scalp(dry_run=args.dry_run)
+    if args.dry_run:
+        print("(dry-run — no files were compressed or removed)")
+
 
 def cmd_setup_key(_: argparse.Namespace) -> None:
     require("age-keygen")
@@ -746,6 +896,12 @@ def main() -> None:
 
     status = sub.add_parser("status", help="Show local vs remote sync state")
     status.set_defaults(func=cmd_status)
+
+    archive = sub.add_parser(
+        "archive", help="Gzip scalp data past its retention window (local + S3), keeping all of it"
+    )
+    archive.add_argument("--dry-run", action="store_true", help="Report what would archive, no-op")
+    archive.set_defaults(func=cmd_archive)
 
     setup = sub.add_parser("setup-key", help="Create the shared age keypair (run once)")
     setup.set_defaults(func=cmd_setup_key)

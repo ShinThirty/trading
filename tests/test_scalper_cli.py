@@ -87,9 +87,12 @@ def _session(
         plan_source or (lambda: _plan()),
         notifier=notifier,
         date="2026-06-12",
+        underlyings=["QQQ"],
         fills_path=tmp_path / "fills.jsonl",
         summary_path=tmp_path / "summary.json",
         signals_path=tmp_path / "signals.jsonl",
+        tape_path=tmp_path / "tape.jsonl",
+        shadow_path=tmp_path / "shadow.jsonl",
     )
 
 
@@ -99,9 +102,10 @@ def test_build_session_wires_tape_and_quote_consumers(tmp_path: Path) -> None:
 
     # both drive_paper_fills + watch_setups register on every channel: trade and
     # timesale advance the engine + feed the detector; quote sets the broker's
-    # book (entry fills at the ask) + the detector's spread/book read.
+    # book (entry fills at the ask) + the detector's spread/book read. The shadow
+    # recorder adds a third timesale subscriber (volume telemetry, reads nothing back).
     assert len(feed._trade) == 2
-    assert len(feed._timesale) == 2
+    assert len(feed._timesale) == 3
     assert len(feed._quote) == 2
     assert isinstance(session.persister, PaperPersister)
 

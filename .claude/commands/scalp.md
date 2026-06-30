@@ -1,5 +1,5 @@
 ---
-description: Intraday SPY/QQQ options scalp workflow — pre-session prep (regime + daily bias + level map + discipline checklist) and post-session trade-grading review. Prep also writes the trading-scalper daemon's session-plan YAML (levels + per-level option contract). Built to enforce discipline, not to generate more setups.
+description: Intraday SPY/QQQ options scalp workflow — pre-session prep (regime + daily bias + level map + discipline checklist) and post-session review grading your real fills + the daemon's paper tracker + the shadow VAP/volume-rate observer. Prep also writes the trading-scalper daemon's session-plan YAML (levels + per-level option contract). Built to enforce discipline, not to generate more setups.
 arguments:
   - name: symbol
     description: Ticker — SPY or QQQ only. Defaults to QQQ if omitted.
@@ -166,7 +166,7 @@ notes: "Clean +GEX pin. Fade the walls back to the 721 zero-gamma flip; a break 
    - **`session_caps` are recorded, not enforced.** The paper daemon dropped the old discipline engine; max-trades / daily-stop live in the file for *your* record (and the Step 7 checklist) — honor them yourself.
    - **The subscribe list is fixed at launch.** The daemon subscribes to these contracts at startup; adding a *new* contract mid-session needs a restart (levels/lean still hot-reload for alerting).
    - **Graceful degrade:** a level with no `contract` is alert-only; no file at all = the daemon stays silent.
-   - **Run it:** `uv run --package trading-scalper trading-scalper --symbols $ARGUMENTS.symbol`. After the close, review `~/.trading/scalp/paper/{date}.jsonl` + `{date}-summary.json`, or `/scalp $ARGUMENTS.symbol review` against your real Webull fills.
+   - **Run it:** `uv run --package trading-scalper trading-scalper --symbols $ARGUMENTS.symbol`. The daemon also writes shadow volume telemetry (`{date}-tape.jsonl` raw underlying tape + `{date}-shadow.jsonl` POC/value-area + volume-rate snapshots) — recorded, gating nothing. After the close, `/scalp $ARGUMENTS.symbol review` grades your real Webull fills **plus** the daemon's paper record (`{date}.jsonl` + `{date}-signals.jsonl` + `{date}-summary.json`) and the shadow observer (the two new files).
 
 **No-trade day:** still write the file with `lean: no-trade` and your reference levels but **no `contract` fields** — the daemon prints the banner and stays silent (never prompts, never paper-trades).
 
@@ -210,6 +210,18 @@ The feedback loop on discipline. Run after the close (or when the user says "don
 **Step 5 — do NOT hand-compute precise net P&L.** Tallying across partials/fees is error-prone (per the no-manual-math rule) — the broker's P&L page is authoritative. Surface the **pattern**, not a certified dollar ledger. Magnitudes per contract are fine to illustrate the asymmetry lesson.
 
 **Step 6 — output:** the round-trip table (framework vs leak, win/loss), the 3 sharpest diagnostics, and 1–3 ranked fixes. If a discipline pattern persists or improves across sessions, update memory `project-qqq-scalping` so the trend is tracked.
+
+**Step 7 — grade the paper detector (the tracker), separate from your real fills.** The daemon keeps its *own* track record under `~/.trading/scalp/paper/` — it paper-trades every confirmed fire, independent of whether you clicked anything for real. Grade it; this is what builds the verdict-mode calibration evidence (`project-scalper-verdict-calibration`).
+- Read the three joinable artifacts: `{date}-summary.json` (realized P&L + `n_fills`, recomputed restart-safe from the log), `{date}-signals.jsonl` (one row per **fire** — `mode` / `side` / `level` / `confirming` / `bracket_id` + the recorded B4 telemetry), and `{date}.jsonl` (one row per **fill** — each carries `bracket_id` + `realized_delta`, the win/loss label on the close).
+- **Join fires → outcomes on `bracket_id`** (a fire's `bracket_id` = the entry-order id shared by its bracket's fills; `null` = an alert-only / spread-suppressed fire that placed no paper trade). The key is recorded — no fragile contract+timestamp reconstruction.
+- **Grade by mode.** Tally fade / break / reversal / retest fires and their paper win/loss + per-contract magnitude. The verdict modes are what to watch: GO_WITH/`retest` is well-fit, **`reversal` is still thin (n=1 positive as of 6/29)** — note *every* new reversal/retest sample and append it to `project-scalper-verdict-calibration` (the calibration log needs in-window failed-break samples).
+- **Machine-gun check.** Fires-per-level — the #3 per-level cooldown should keep this low (2 on the maximally-fragile 6/29 vs 61 on 6/18). A level with many fires = the cooldown isn't biting, or the regime gate should have sat the day out; flag it.
+- Keep this distinct from the Step 1–6 real-fills grade — they can disagree (the bot fired clean while you over-traded, or vice versa), and that disagreement is itself the lesson.
+
+**Step 8 — grade the shadow observer (VAP + volume-rate) — SHADOW, evidence-only.** The shadow recorder (`feedback_shadow_then_live`) writes `{date}-tape.jsonl` (raw underlying tape) + `{date}-shadow.jsonl` (POC / value-area + volume-rate snapshots). It **gates nothing** — this step only accumulates the evidence to settle whether the break-side VAP read predicts a runner (`project-scalper-improvements` open #1). It must NOT change how the trades above were graded.
+- **The decision artifact is a contingency table.** For each wall cross this session: was the break side a **void** or an **HVN** (`VolumeProfile.break_side_read`, or rebuilt from `{date}-tape.jsonl`), and did price then **run** or **oscillate**? Reconstruct from the plan's walls (`{date}-{symbol}.yaml`) + the raw tape — find each cross, classify the break side, label ran-vs-oscillated from the subsequent path. Add this session's row(s) to the void→ran / hvn→oscillated table in `project-scalper-improvements` open #1.
+- **Volume-rate (lower priority).** At each cross/fire, was the move on expanding or contracting volume (`ratio` >1 / <1)? Note whether expansion lined up with the paper winners — but this is the **confidence/size modulator** idea, **never a fire gate** (B4 died gating on tape; 6/29's retest won against an 8:1 sell tape).
+- **Stay shadow until it separates.** n is tiny — one session is one or two rows; don't over-conclude from a single day, and do not wire the read into the plan or the daemon. The promotion bar is the table separating across multiple conflicted-box sessions (`feedback_shadow_then_live`).
 
 ---
 

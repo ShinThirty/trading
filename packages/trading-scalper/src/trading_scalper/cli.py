@@ -43,6 +43,7 @@ from trading_scalper.persist import (
 )
 from trading_scalper.plan import PlanStore, SessionPlan, default_plan_path
 from trading_scalper.ports import MarketDataFeed
+from trading_scalper.shadow import ShadowRecorder, default_shadow_path, default_tape_path
 
 
 @dataclass(slots=True)
@@ -55,6 +56,7 @@ class ScalpSession:
     notifier: Notifier
     persister: PaperPersister
     signals: SignalLog
+    shadow: ShadowRecorder
 
 
 def make_executor(
@@ -96,9 +98,12 @@ def build_session(
     *,
     notifier: Notifier | None = None,
     date: str,
+    underlyings: list[str] | None = None,
     fills_path: Path | None = None,
     summary_path: Path | None = None,
     signals_path: Path | None = None,
+    tape_path: Path | None = None,
+    shadow_path: Path | None = None,
     interval: float = 30.0,
 ) -> ScalpSession:
     """Wire detector → proposal → paper bracket → persisted ledger onto the tape.
@@ -107,6 +112,10 @@ def build_session(
     composition is plan-driven; the CLI ``--stop-pct``/``--target-pct``/``--contracts``
     only feed the offline ``--demo-setup`` path. The detector's ``record`` sink lands
     the B4 telemetry in a per-fire ``SignalLog`` alongside the fills/summary.
+
+    A ``ShadowRecorder`` is also wired onto the tape — pure telemetry, gating nothing
+    (see ``shadow.py``). It tracks the ``underlyings`` only; the option contracts on the
+    feed feed the matching engine, not the volume profile.
     """
     notifier = notifier or Notifier()
     signals = SignalLog(signals_path or default_signals_path(date))
@@ -120,8 +129,15 @@ def build_session(
         summary_path=summary_path or default_summary_path(date),
         interval=interval,
     )
+    shadow = ShadowRecorder(
+        underlyings or [],
+        tape_path=tape_path or default_tape_path(date),
+        shadow_path=shadow_path or default_shadow_path(date),
+        interval=interval,
+    )
     drive_paper_fills(feed, broker)  # option + underlying prints fill the engine
     watch_setups(feed, detector)  # underlying tape → detector
+    shadow.attach(feed)  # underlying tape → shadow volume telemetry (reads nothing back)
     return ScalpSession(
         feed=feed,
         broker=broker,
@@ -129,6 +145,7 @@ def build_session(
         notifier=notifier,
         persister=persister,
         signals=signals,
+        shadow=shadow,
     )
 
 
@@ -211,7 +228,14 @@ async def _run(args: argparse.Namespace) -> None:
     broker = PaperBroker()
     stream = TradierStreamClient(cfg.tradier.api_token)
     feed = TradierFeed(stream)
-    session = build_session(feed, broker, plan_store.current, notifier=notifier, date=args.date)
+    session = build_session(
+        feed,
+        broker,
+        plan_store.current,
+        notifier=notifier,
+        date=args.date,
+        underlyings=args.symbols,
+    )
 
     if args.demo_setup:
         _run_demo(broker, session, notifier, args)
@@ -223,7 +247,7 @@ async def _run(args: argparse.Namespace) -> None:
     print(f"streaming: {' '.join(symbols)}")
     await feed.subscribe(symbols)
     try:
-        await asyncio.gather(feed.run(), session.persister.run())
+        await asyncio.gather(feed.run(), session.persister.run(), session.shadow.run())
     except (KeyboardInterrupt, asyncio.CancelledError):
         pass
     except httpx.HTTPStatusError as exc:
@@ -231,10 +255,13 @@ async def _run(args: argparse.Namespace) -> None:
     finally:
         await stream.close()
         session.persister.write_summary()
+        session.shadow.flush_tape()  # mirror the persister: don't lose the tail on a hard exit
+        session.shadow.write_snapshots()
         print(
             f"\nscalp session closed — {session.signals.n_fires} fires logged → "
             f"{session.signals.path}"
         )
+        print(f"shadow telemetry → {session.shadow.tape_path} + {session.shadow.shadow_path}")
 
 
 def _tradier_http_msg(exc: httpx.HTTPStatusError) -> str:
