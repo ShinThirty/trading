@@ -17,6 +17,8 @@ from trading_clients.endpoints.webull import (
 from trading_clients.portfolio import (
     PortfolioSummary,
     compact_portfolio_summary,
+    compute_cluster_concentration,
+    format_cluster_concentration,
     format_greeks_compact,
     format_greeks_detail,
     format_portfolio_summary,
@@ -250,6 +252,37 @@ async def get_portfolio_summary(
     path = await _write_temp_file(full_output, ".md", "portfolio_")
 
     return compact_portfolio_summary(portfolio, path)
+
+
+@mcp.tool()
+async def get_cluster_concentration(
+    ctx: Context,
+    tickers: str,
+    cap_pct: float = 35.0,
+    fidelity_folder: str | None = None,
+) -> str:
+    """Aggregate a correlated cluster's long exposure as a % of total book NLV,
+    measured against a target cap.
+
+    Sums long equity market value + long option market value (capital at risk)
+    for the given tickers across ALL Webull + Fidelity accounts, then reports the
+    cluster's share of total net liquidation value, the cap dollar value at
+    cap_pct, and the overage — how much to trim to get back under the cap.
+    Short options (CSPs/CCs) are excluded: they are cash-secured premium, not
+    deployed long exposure.
+
+    Use to size a correlated-cluster cap (e.g. the AI-capex / circular-financing
+    cluster) so a group of names that derate together is capped as one exposure.
+
+    tickers: comma-separated cluster members (e.g. 'META,MU,AMZN,NVDA,AVGO,CRDO').
+    cap_pct: ceiling as a percent of total book NLV (default 35.0).
+    fidelity_folder: path to the Fidelity Positions CSV folder to include Fidelity
+      accounts (e.g. '~/Downloads/fidelity'). Omit for Webull-only.
+    """
+    ticker_list = [t.strip() for t in tickers.split(",") if t.strip()]
+    summaries, _ = await _fetch_accounts(ctx, fidelity_folder)
+    cc = compute_cluster_concentration(summaries, ticker_list, cap_pct)
+    return format_cluster_concentration(cc)
 
 
 @mcp.tool()

@@ -243,9 +243,7 @@ async def parse_fidelity_csv(path: str) -> list[AccountSummary]:
         acct.positions.append(pos)
 
     for acct in accounts.values():
-        acct.market_value = sum(
-            p.get("value", 0.0) for p in acct.positions if not p.get("is_cash")
-        )
+        acct.market_value = sum(p.get("value", 0.0) for p in acct.positions if not p.get("is_cash"))
         acct.nlv = acct.cash + acct.market_value
 
     return list(accounts.values())
@@ -387,6 +385,126 @@ def format_portfolio_summary(summary: PortfolioSummary) -> str:
             sections.append(f"- {label}: {err}")
         sections.append("")
 
+    return "\n".join(sections)
+
+
+@dataclass
+class ClusterMember:
+    """One cluster ticker's long exposure across all accounts."""
+
+    ticker: str
+    equity_value: float = 0.0
+    long_option_value: float = 0.0
+
+    @property
+    def total(self) -> float:
+        return self.equity_value + self.long_option_value
+
+
+@dataclass
+class ClusterConcentration:
+    """A correlated cluster's aggregate long exposure vs a target cap."""
+
+    tickers: list[str]
+    cap_pct: float
+    total_nlv: float
+    members: list[ClusterMember]
+    unmatched: list[str]
+
+    @property
+    def cluster_value(self) -> float:
+        return sum(m.total for m in self.members)
+
+    @property
+    def cluster_pct(self) -> float:
+        return (self.cluster_value / self.total_nlv * 100.0) if self.total_nlv else 0.0
+
+    @property
+    def cap_value(self) -> float:
+        return self.total_nlv * self.cap_pct / 100.0
+
+    @property
+    def overage(self) -> float:
+        """Positive = over the cap (trim this much); negative = headroom."""
+        return self.cluster_value - self.cap_value
+
+
+def compute_cluster_concentration(
+    accounts: list[AccountSummary], tickers: list[str], cap_pct: float
+) -> ClusterConcentration:
+    """Aggregate a cluster's long exposure as a share of total book NLV.
+
+    Cluster value = long equity market value + long option market value
+    (capital at risk) summed across all accounts for the given tickers.
+    Short options (negative quantity — CSPs/CCs) are excluded: they are
+    cash-secured premium, not deployed long exposure. Cash rows are ignored.
+    """
+    wanted = [t.strip().upper() for t in tickers if t.strip()]
+    wanted_set = set(wanted)
+    equity = dict.fromkeys(wanted, 0.0)
+    long_opt = dict.fromkeys(wanted, 0.0)
+
+    for acct in accounts:
+        for p in acct.positions:
+            if p.get("is_cash"):
+                continue
+            if p.get("is_option"):
+                underlying = (p.get("underlying") or p.get("symbol") or "").upper()
+                if underlying in wanted_set and p.get("quantity", 0) > 0:
+                    long_opt[underlying] += p.get("value", 0.0)
+            else:
+                sym = (p.get("symbol") or "").upper()
+                if sym in wanted_set:
+                    equity[sym] += p.get("value", 0.0)
+
+    total_nlv = sum(a.nlv for a in accounts)
+    members: list[ClusterMember] = []
+    unmatched: list[str] = []
+    for t in wanted:
+        if equity[t] == 0.0 and long_opt[t] == 0.0:
+            unmatched.append(t)
+        else:
+            members.append(ClusterMember(t, equity[t], long_opt[t]))
+    members.sort(key=lambda m: m.total, reverse=True)
+    return ClusterConcentration(wanted, cap_pct, total_nlv, members, unmatched)
+
+
+def format_cluster_concentration(cc: ClusterConcentration) -> str:
+    """Format a cluster-concentration read as markdown."""
+    status = "OVER by" if cc.overage > 0 else "under cap by"
+    sections = [
+        "## Cluster Concentration",
+        "",
+        f"**Cap {fmt_number(cc.cap_pct, 1)}% of book** — cluster ${fmt_number(cc.cluster_value)}"
+        f" = {fmt_number(cc.cluster_pct, 1)}% of ${fmt_number(cc.total_nlv)} NLV",
+        f"Cap value ${fmt_number(cc.cap_value)} → **{status} ${fmt_number(abs(cc.overage))}**",
+        "",
+    ]
+
+    rows: list[dict[str, str]] = []
+    for m in cc.members:
+        pct = (m.total / cc.total_nlv * 100.0) if cc.total_nlv else 0.0
+        rows.append(
+            {
+                "Ticker": m.ticker,
+                "Equity": fmt_number(m.equity_value),
+                "Long Opt": fmt_number(m.long_option_value),
+                "Total": fmt_number(m.total),
+                "% Book": fmt_number(pct, 1),
+            }
+        )
+    sections.append(list_table(rows))
+
+    if cc.unmatched:
+        sections.append("")
+        sections.append(f"_No long position found for: {', '.join(cc.unmatched)}_")
+
+    sections.append("")
+    sections.append(
+        "_Cluster value = long equity market value + long option market value (capital at"
+        " risk). Short options (CSPs/CCs) are excluded — cash-secured premium, not deployed"
+        " long exposure._"
+    )
     return "\n".join(sections)
 
 
