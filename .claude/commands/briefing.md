@@ -127,6 +127,20 @@ Call `get_bear_regime_score` daily. Composite 0-10 across 9 dimensions (curve, E
 
 **Override conditions**: do not auto-derisk on a Building+ reading if (a) the score reflects single-dimension flicker without breadth/credit/curve confirmation, OR (b) an active macro overhang in memory already drives a more conservative posture. See playbook "When to override" section.
 
+## Step 1g: DRAM Spot Check (weekly, manual — while memory exposure is held)
+
+The earliest leading indicator for the memory-cycle turn: spot leads contract prices by 1–2 quarters and leads reported earnings by 2–3. Gates trigger **T2** of the MU exit ladder (`~/Documents/analysis/MU/mu_exit_ladder_2026-07-06.md`). TSMC revenue (Step 1c) is foundry/logic and will NOT catch a memory rollover — this is the memory-side sibling.
+
+**Cadence gate:** weekly, not daily. If a DRAM spot reading was noted within the past 7 days (prior briefing or biweekly review — check `decision_list` notes / recent retro), skip this section entirely. Skip permanently once no memory names remain in the book or pipeline.
+
+When due, web-pull DRAMeXchange/TrendForce spot commentary (no free API, no MCP tool):
+
+- **Spot vs contract direction** — the canonical rollover is spot *declining* while contract still rises. Both rising = cycle intact; both falling = late.
+- **Sustained means 2+ weeks**, not a single-day wobble. Cross-check NAND alongside DRAM (NAND typically cracks first — more elastic demand).
+- **Intact** → surface one line ("✅ DRAM spot intact, checked <date>") so the weekly trail is reconstructable, and move on.
+- **Rollover forming** (first down-week, or spot/contract divergence) → surface "🟡 DRAM spot softening" with the readings; re-check next briefing rather than waiting a week.
+- **Sustained rollover confirmed (2+ weeks)** → surface "🔴 DRAM spot rollover — MU exit ladder T2 fires: exit to residual tranche regardless of headline strength." Add to Step 4 Urgent and offer to record via `decision_add`.
+
 ## Step 2: Position Alerts
 
 1. Ask the user if they have fresh Fidelity CSVs to include (exported from Fidelity Positions page to ~/Downloads/fidelity). Call `get_portfolio_summary` with `fidelity_folder` if provided, otherwise Webull-only.
