@@ -42,6 +42,7 @@ _TRIGGERS_TO_CHECK = (
     "gex",
     "dix",
     "fomc",
+    "fomc_minutes",
     "gdp",
     "pce",
     "cpi",

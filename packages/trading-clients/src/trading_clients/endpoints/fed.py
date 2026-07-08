@@ -1,10 +1,10 @@
-"""Federal Reserve endpoint definitions for FOMC statements.
+"""Federal Reserve endpoint definitions for FOMC statements and minutes.
 
 Discovery flow:
   1. Fetch /monetarypolicy/fomccalendars.htm — find the latest two FOMC statement
-     URLs (pattern: monetary{YYYYMMDD}a.htm). The calendar lists meetings newest
-     first, so the first match is the latest meeting.
-  2. Fetch the statement page(s) and extract the narrative.
+     URLs (pattern: monetary{YYYYMMDD}a.htm) and minutes URLs (pattern:
+     fomcminutes{YYYYMMDD}.htm; published ~3 weeks after each meeting).
+  2. Fetch the statement/minutes page(s) and extract the narrative.
 """
 
 import re
@@ -26,8 +26,9 @@ class EmptyRequest(ParamsRequest):
 
 @dataclass
 class StatementPathRequest(PathRequest, ParamsRequest):
-    """Fetch a specific FOMC statement by its post-base path, e.g.
-    '/newsevents/pressreleases/monetary20260429a.htm'.
+    """Fetch a specific FOMC statement or minutes page by its post-base path,
+    e.g. '/newsevents/pressreleases/monetary20260429a.htm' or
+    '/monetarypolicy/fomcminutes20260617.htm'.
     """
 
     path: str
@@ -45,7 +46,10 @@ class StatementPathRequest(PathRequest, ParamsRequest):
 
 
 _STMT_LINK_RE = re.compile(r'href="(/newsevents/pressreleases/monetary\d{8}a\.htm)"')
-_STMT_DATE_RE = re.compile(r"monetary(\d{4})(\d{2})(\d{2})a\.htm")
+_MIN_LINK_RE = re.compile(r'href="(/monetarypolicy/fomcminutes\d{8}\.htm)"')
+# Meeting date embedded in either a statement path (monetary{YYYYMMDD}a.htm)
+# or a minutes path (fomcminutes{YYYYMMDD}.htm).
+_DATE_RE = re.compile(r"(?:monetary|fomcminutes)(\d{4})(\d{2})(\d{2})a?\.htm")
 
 # Year section header on /monetarypolicy/fomccalendars.htm — e.g.
 # "<a id="42828"></a>2026 FOMC Meetings". Captures the year.
@@ -99,8 +103,8 @@ _MONTHS = {
 
 
 def extract_meeting_date(path: str) -> str:
-    """Parse YYYY-MM-DD out of a statement URL path."""
-    m = _STMT_DATE_RE.search(path)
+    """Parse YYYY-MM-DD out of a statement or minutes URL path."""
+    m = _DATE_RE.search(path)
     if not m:
         return "?"
     return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
@@ -143,31 +147,42 @@ def parse_scheduled_meetings(html: str) -> list[str]:
     return sorted(set(dates))
 
 
+def _dedup_sorted_paths(html: str, link_re: re.Pattern[str]) -> list[str]:
+    """Collect unique link paths, sorted by embedded meeting date newest-first.
+
+    Fed lists meetings chronologically within each year section, so document
+    order is not date order. _DATE_RE is guaranteed to match (the link regexes
+    require 8 digits) so the sort key is always defined.
+    """
+    seen: set[str] = set()
+    paths: list[str] = []
+    for m in link_re.finditer(html):
+        p = m.group(1)
+        if p not in seen:
+            seen.add(p)
+            paths.append(p)
+    paths.sort(key=lambda p: extract_meeting_date(p), reverse=True)
+    return paths
+
+
 @dataclass
 class FomcCalendarResponse:
-    """FOMC statement URLs (past meetings only, sorted newest-first) plus
-    scheduled meeting decision dates (past + future, chronological)."""
+    """FOMC statement + minutes URLs (past meetings only, sorted newest-first)
+    plus scheduled meeting decision dates (past + future, chronological)."""
 
     statement_paths: list[str] = field(default_factory=list)
+    minutes_paths: list[str] = field(default_factory=list)
     meeting_dates: list[str] = field(default_factory=list)
 
     @classmethod
     def from_response(cls, html: str) -> "FomcCalendarResponse":
         if not html:
             return cls()
-        seen: set[str] = set()
-        paths: list[str] = []
-        for m in _STMT_LINK_RE.finditer(html):
-            p = m.group(1)
-            if p not in seen:
-                seen.add(p)
-                paths.append(p)
-        # Fed lists meetings chronologically within each year section, so document
-        # order is not date order. Sort by the YYYYMMDD embedded in each path,
-        # newest first. _STMT_DATE_RE is guaranteed to match (the link regex requires
-        # 8 digits) so the key is always defined.
-        paths.sort(key=lambda p: extract_meeting_date(p), reverse=True)
-        return cls(statement_paths=paths, meeting_dates=parse_scheduled_meetings(html))
+        return cls(
+            statement_paths=_dedup_sorted_paths(html, _STMT_LINK_RE),
+            minutes_paths=_dedup_sorted_paths(html, _MIN_LINK_RE),
+            meeting_dates=parse_scheduled_meetings(html),
+        )
 
     def latest(self) -> str | None:
         return self.statement_paths[0] if self.statement_paths else None
@@ -175,10 +190,23 @@ class FomcCalendarResponse:
     def prior(self) -> str | None:
         return self.statement_paths[1] if len(self.statement_paths) >= 2 else None
 
+    def latest_minutes(self) -> str | None:
+        return self.minutes_paths[0] if self.minutes_paths else None
+
+    def prior_minutes(self) -> str | None:
+        return self.minutes_paths[1] if len(self.minutes_paths) >= 2 else None
+
     def to_output(self) -> str:
-        if not self.statement_paths:
+        if not self.statement_paths and not self.minutes_paths:
             return "(no FOMC statements found)"
-        return f"{len(self.statement_paths)} statements; latest: {self.statement_paths[0]}"
+        parts = []
+        if self.statement_paths:
+            parts.append(
+                f"{len(self.statement_paths)} statements; latest: {self.statement_paths[0]}"
+            )
+        if self.minutes_paths:
+            parts.append(f"{len(self.minutes_paths)} minutes; latest: {self.minutes_paths[0]}")
+        return " | ".join(parts)
 
 
 class _StatementHTMLParser(HTMLParser):
@@ -207,6 +235,15 @@ class _StatementHTMLParser(HTMLParser):
             self.parts.append(data)
 
 
+def _html_to_text(html: str) -> str:
+    """Strip an HTML fragment to cleaned narrative lines (blank lines dropped)."""
+    parser = _StatementHTMLParser()
+    parser.feed(html)
+    raw = "".join(parser.parts)
+    lines = [re.sub(r"\s+", " ", line).strip() for line in raw.split("\n")]
+    return "\n".join(line for line in lines if line)
+
+
 @dataclass
 class FomcStatementResponse:
     """FOMC statement narrative trimmed between 'For release at' (marks the
@@ -221,11 +258,7 @@ class FomcStatementResponse:
     def from_response(cls, html: str) -> "FomcStatementResponse":
         if not html:
             return cls(text="")
-        parser = _StatementHTMLParser()
-        parser.feed(html)
-        raw = "".join(parser.parts)
-        lines = [re.sub(r"\s+", " ", line).strip() for line in raw.split("\n")]
-        cleaned = "\n".join(line for line in lines if line)
+        cleaned = _html_to_text(html)
         start = cleaned.find("For release at")
         if start >= 0:
             cleaned = cleaned[start:]
@@ -236,6 +269,75 @@ class FomcStatementResponse:
 
     def to_output(self) -> str:
         return self.text or "(no content)"
+
+
+# Minutes content starts at the article div (everything before is site chrome).
+_MINUTES_ARTICLE_RE = re.compile(r'<div[^>]*id="article"[^>]*>')
+# A section heading is a paragraph that opens with a lone <strong> terminated
+# by a line break or the paragraph end — the section body follows in the same
+# <p> after the <br>. Inline bold runs like
+# "<strong>Voting for this action</strong><strong>: </strong>Name, ..." don't
+# match (the strong is followed by another tag, not <br>/</p>), so vote
+# tallies stay inside the Committee Policy Actions body.
+_MINUTES_HEADING_RE = re.compile(
+    r"<p[^>]*>\s*<strong>\s*([^<]{3,120}?)\s*</strong>\s*(?:<br[^>]*>|</p>)"
+)
+
+
+@dataclass
+class FomcMinutesResponse:
+    """FOMC minutes split into their named sections in document order
+    (Developments in Financial Markets…, Staff Review of the Economic/Financial
+    Situation, Staff Economic Outlook, Participants' Views…, Committee Policy
+    Actions, Notation Vote, Attendance). The unlabeled text before the first
+    heading (meeting title + agenda) is stored under "Preamble".
+    """
+
+    sections: list[tuple[str, str]] = field(default_factory=list)
+
+    @classmethod
+    def from_response(cls, html: str) -> "FomcMinutesResponse":
+        if not html:
+            return cls()
+        m = _MINUTES_ARTICLE_RE.search(html)
+        if m:
+            html = html[m.end() :]
+        # Page footer; headings never appear after it. Cutting raw HTML mid-tree
+        # is fine — each slice gets its own tolerant HTMLParser pass.
+        cut = html.find("Last Update")
+        if cut > 0:
+            html = html[:cut]
+        heads = list(_MINUTES_HEADING_RE.finditer(html))
+        sections: list[tuple[str, str]] = []
+        preamble = _html_to_text(html[: heads[0].start()] if heads else html)
+        if preamble:
+            sections.append(("Preamble", preamble))
+        for i, h in enumerate(heads):
+            body_end = heads[i + 1].start() if i + 1 < len(heads) else len(html)
+            body = _html_to_text(html[h.end() : body_end])
+            sections.append((h.group(1).strip(), body))
+        return cls(sections=sections)
+
+    def section_names(self) -> list[str]:
+        return [name for name, _ in self.sections]
+
+    def section(self, name: str) -> tuple[str, str] | None:
+        """First section whose heading contains `name` (case-insensitive)."""
+        needle = name.lower()
+        for heading, body in self.sections:
+            if needle in heading.lower():
+                return heading, body
+        return None
+
+    def to_output(self) -> str:
+        if not self.sections:
+            return "(no content)"
+        out: list[str] = []
+        for heading, body in self.sections:
+            out.append(f"=== {heading} ===")
+            out.append(body)
+            out.append("")
+        return "\n".join(out).rstrip()
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -255,4 +357,12 @@ FOMC_STATEMENT = Endpoint(
     "/{path}",
     cache_ttl=30 * 24 * 3600,
     response_model=FomcStatementResponse,
+)
+
+# Minutes pages (released ~3 weeks after each meeting, Wed 2 PM ET) are
+# likewise immutable once published.
+FOMC_MINUTES = Endpoint(
+    "/{path}",
+    cache_ttl=30 * 24 * 3600,
+    response_model=FomcMinutesResponse,
 )

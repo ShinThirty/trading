@@ -304,6 +304,33 @@ resource "aws_lambda_permission" "fomc" {
   source_arn    = aws_cloudwatch_event_rule.fomc.arn
 }
 
+# FOMC minutes publish 3 weeks after each meeting, Wed 2:00 PM ET. Same weekly
+# Wed 19:30 UTC cadence as the statement watcher; non-release Wednesdays no-op
+# via meeting-date dedup.
+resource "aws_cloudwatch_event_rule" "fomc_minutes" {
+  name                = "trading-alerts-fomc-minutes"
+  description         = "FOMC minutes new-release watcher"
+  schedule_expression = var.fomc_minutes_schedule
+
+  tags = {
+    Service = "trading-alerts"
+  }
+}
+
+resource "aws_cloudwatch_event_target" "fomc_minutes" {
+  rule  = aws_cloudwatch_event_rule.fomc_minutes.name
+  arn   = aws_lambda_function.dispatcher.arn
+  input = jsonencode({ trigger = "fomc_minutes" })
+}
+
+resource "aws_lambda_permission" "fomc_minutes" {
+  statement_id  = "AllowEventBridgeFomcMinutes"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.dispatcher.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.fomc_minutes.arn
+}
+
 # GDP publishes 12x/year (4 quarters × 3 estimates) at 8:30 AM ET, typically
 # Thursday. Run weekly Thu 14:00 UTC; non-GDP Thursdays no-op via slug dedup.
 resource "aws_cloudwatch_event_rule" "gdp" {

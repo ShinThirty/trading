@@ -2480,3 +2480,131 @@ async def get_fomc_decision_texture(ctx: Context) -> str:
         out.append(prior_stmt.text)
 
     return "\n".join(out)
+
+
+async def _fed_minutes(
+    fed_client,
+) -> tuple[
+    "fed.FomcCalendarResponse | None",
+    "fed.FomcMinutesResponse | None",
+    "fed.FomcMinutesResponse | None",
+    list[str],
+]:
+    """Two-step Fed fetch: discover latest + prior FOMC minutes URLs from the
+    calendar, then fetch both minutes pages in parallel.
+
+    Returns (calendar_resp, latest_minutes, prior_minutes, warnings). Any
+    failed step contributes a warning so the caller can surface it.
+    """
+    warnings: list[str] = []
+    try:
+        cal = await fed_client.get(fed.FOMC_CALENDAR, fed.EmptyRequest())
+    except Exception as e:
+        warnings.append(_exc_summary("Fed FOMC calendar", e))
+        return None, None, None, warnings
+    latest_path = cal.latest_minutes()
+    prior_path = cal.prior_minutes()
+    if not latest_path:
+        warnings.append("Fed FOMC calendar: no minutes links found")
+        return cal, None, None, warnings
+    fetches = [fed_client.get(fed.FOMC_MINUTES, fed.StatementPathRequest(latest_path))]
+    if prior_path:
+        fetches.append(fed_client.get(fed.FOMC_MINUTES, fed.StatementPathRequest(prior_path)))
+    results = await asyncio.gather(*fetches, return_exceptions=True)
+    latest: fed.FomcMinutesResponse | None = None
+    if isinstance(results[0], BaseException):
+        warnings.append(
+            _exc_summary(f"Fed FOMC minutes {fed.extract_meeting_date(latest_path)}", results[0])
+        )
+    else:
+        latest = results[0]
+    prior: fed.FomcMinutesResponse | None = None
+    if len(results) > 1:
+        if isinstance(results[1], BaseException):
+            warnings.append(
+                _exc_summary(
+                    f"Fed FOMC prior minutes {fed.extract_meeting_date(prior_path)}"
+                    if prior_path
+                    else "Fed FOMC prior minutes",
+                    results[1],
+                )
+            )
+        else:
+            prior = results[1]
+    return cal, latest, prior, warnings
+
+
+@mcp.tool()
+async def get_fomc_minutes_texture(ctx: Context, section: str = "") -> str:
+    """Latest FOMC minutes split into named sections, plus the prior meeting's
+    Participants' Views for language comparison.
+
+    Minutes are released ~3 weeks after each FOMC meeting (Wednesday 2 PM ET)
+    and carry the deliberation texture the statement omits: staff economic
+    outlook, balance-sheet discussion, and the participants' "a few / several /
+    many / most" language that moves the rates curve on release day.
+
+    section: optional case-insensitive substring of a section heading (e.g.
+      'participants', 'staff economic outlook', 'policy actions'). When given,
+      returns only that section — from the latest AND prior minutes, so the
+      language delta is inspectable in one call. When empty, returns the latest
+      minutes in full plus the prior meeting's Participants' Views section.
+
+    Does not interpret — surfaces the text so judgment (especially the
+    participant-count language shift) happens in conversation.
+
+    No credentials required (Fed scrape).
+    """
+    fed_client = _fed(ctx)
+    cal_resp, latest_min, prior_min, warnings = await _fed_minutes(fed_client)
+
+    out: list[str] = []
+    out.extend(_warnings_section(warnings))
+
+    latest_path = cal_resp.latest_minutes() if cal_resp else None
+    prior_path = cal_resp.prior_minutes() if cal_resp else None
+    latest_date = fed.extract_meeting_date(latest_path) if latest_path else "?"
+    prior_date = fed.extract_meeting_date(prior_path) if prior_path else "?"
+
+    out.append("=== Headline ===")
+    if latest_path:
+        out.append(f"Latest minutes: {latest_date} meeting")
+    if prior_path:
+        out.append(f"Prior minutes: {prior_date} meeting")
+    if latest_min and latest_min.sections:
+        out.append("Sections: " + ", ".join(latest_min.section_names()))
+
+    if not latest_min or not latest_min.sections:
+        out.append("")
+        out.append("(latest minutes unavailable)")
+        return "\n".join(out)
+
+    if section:
+        hit = latest_min.section(section)
+        out.append("")
+        if hit:
+            out.append(f"=== {hit[0]} ({latest_date}) ===")
+            out.append(hit[1])
+        else:
+            out.append(
+                f"(no section matching {section!r} in latest minutes; "
+                f"available: {', '.join(latest_min.section_names())})"
+            )
+        if prior_min:
+            prior_hit = prior_min.section(section)
+            if prior_hit:
+                out.append("")
+                out.append(f"=== {prior_hit[0]} ({prior_date}, for comparison) ===")
+                out.append(prior_hit[1])
+        return "\n".join(out)
+
+    out.append("")
+    out.append(f"=== FOMC Minutes ({latest_date}) ===")
+    out.append(latest_min.to_output())
+    if prior_min:
+        prior_pv = prior_min.section("Participants' Views")
+        if prior_pv:
+            out.append("")
+            out.append(f"=== {prior_pv[0]} ({prior_date}, for comparison) ===")
+            out.append(prior_pv[1])
+    return "\n".join(out)

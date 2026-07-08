@@ -58,6 +58,12 @@ variable "fomc_schedule" {
   default     = "cron(30 19 ? * WED *)"
 }
 
+variable "fomc_minutes_schedule" {
+  description = "EventBridge cron for FOMC minutes watcher (default: Wed 19:30 UTC = 3:30 PM ET in DST, ~90 min after the typical 2:00 PM ET minutes release 3 weeks post-meeting; non-release Wednesdays no-op)"
+  type        = string
+  default     = "cron(30 19 ? * WED *)"
+}
+
 variable "gdp_schedule" {
   description = "EventBridge cron for GDP watcher (default: Thu 14:00 UTC = 10 AM ET in DST, ~90 min after the typical Thursday 8:30 ET BEA release; non-GDP Thursdays no-op)"
   type        = string
