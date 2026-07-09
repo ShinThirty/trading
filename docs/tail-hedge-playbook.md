@@ -130,7 +130,7 @@ Tail events take time to develop. A flash crash (1987-style) is the exception; m
 | 120-180 | Acceptable for quarterly roll programs; vega larger |
 | >180 | Vega heavy, less convexity per dollar; use only if going LEAPS |
 
-**Default: 90-120 DTE, roll at ~30 DTE remaining.**
+**Default: 90-120 DTE, roll in the ~45→30 DTE window (see discipline rules) — 30 DTE is the hard backstop.**
 
 This captures the bulk of the time value over the life of the put while leaving enough runway in the new contract that you're never naked when an event breaks.
 
@@ -158,7 +158,7 @@ These are what separate a tail program from a tactical trade. Without these, the
 
 | Rule | Why |
 |---|---|
-| **Roll at 30 DTE remaining** | Captures most of time value before theta acceleration. Don't wait until expiry. |
+| **Roll in the ~45→30 DTE window; 30 DTE is a hard backstop, not the target** | Open a roll window at ~45 DTE and take the *first green / low-VIX day* inside it — you're a net buyer of the new put, so buying when IV is cheap (green days shed vega, consistent with the "skip IV Rank >50%" rule) beats buying into a red-day vol bid. But green is a *preference*, never a *requirement*: at 30 DTE, roll regardless of the day's color. Never let "wait for green" trade away coverage continuity — red days cluster, and a tail that lapses waiting for a discount lapses exactly when you need it. The real target is cheap vol (VIX low in its recent range / IV Rank low); "green day" is just the proxy. |
 | **Don't close on rallies** | "Nothing is wrong" doesn't mean "no risk." That's the entire premise. *Closing* (going to zero protection) is not the same as *re-striking up*: a rally that drifts the put past ~30% OTM warrants a maintenance roll-up (Trigger 1, rally side) — close-and-immediate-redeploy, never absent protection. |
 | **Don't close on losses** | Premium decay is the *normal* outcome. Losing the entire premium most of the time is how the program is supposed to work. |
 | **Only close on a rebalancing trigger** | Three valid triggers: maintenance roll (delta drift to -0.20 to -0.40), major harvest (5x+ via tranches), or routine 30-DTE roll. All three are close-and-immediate-redeploy. See Rebalancing the Program. |
@@ -206,7 +206,7 @@ The two sides are not economically symmetric: the drop side **harvests** an appr
 
 **Trigger 2: Major payoff harvest** — VIX >50, SPY down 20%+, puts deep ITM. Mechanical tranches: +400% close 50%, +900% close another 25%, +1900%+ close remaining. Don't top-tick.
 
-**Trigger 3: Routine 30-DTE roll** — calendar-driven, no special conditions.
+**Trigger 3: Routine calendar roll** — fires as a *window*, ~45→30 DTE, not a single date. Prefer the first green / low-VIX day in the window (buy the replacement put when vega is cheap); if none appears, roll at 30 DTE regardless of color. The 30-DTE mark is a hard backstop — coverage continuity always beats a cheaper entry.
 
 ### Universal workflow (any trigger)
 

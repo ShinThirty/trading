@@ -2,144 +2,131 @@
 description: Evaluate the structural tail-risk hedge program (Universa-style)
 ---
 
-Manage the structural tail-risk hedge program per [tail-hedge-playbook.md](../../docs/tail-hedge-playbook.md). This skill evaluates whether one of the playbook's three triggers has fired and surfaces the resulting action. **It does not open, close, or resize the hedge based on cleared signals.**
+Manage the structural tail-risk hedge program per [tail-hedge-playbook.md](../../docs/tail-hedge-playbook.md). Evaluate whether one of the playbook's three triggers has fired and surface the action. **Never open, close, or resize on cleared signals** — the playbook holds the rationale; this skill is the operational loop.
 
-The structural program is **deep OTM (20-25%) SPY puts at 90-120 DTE, rolled on discipline, never closed because nothing is wrong**. If you're considering correction-zone protection (5-15% OTM) instead, don't — see playbook Mistake 2. Either trim positions, hold cash, or use single-name puts at the position level.
+The program: **deep OTM (20-25%) SPY puts, 90-120 DTE, rolled on discipline, never closed because nothing is wrong.** Correction-zone protection (5-15% OTM) is off-limits (playbook Mistake 2) — for that, trim, hold cash, or use single-name puts.
 
-## Step 1: Inventory the structural hedge
+## Step 1: Inventory the hedge
 
-Call in parallel:
-- `get_account_positions` for cash account `5GJ21MGS53M5FU0T8TQN6PEGQA`
-- `decision_list` filtered by `source=hedge` for entry context
+In parallel:
+- `get_account_positions` for the margin account `7PGI7F1AV89E2FBFTK4HDK1JIB` (where the program lives)
+- `decision_list` source `hedge` for entry/anchor context
 - `get_portfolio_summary` for live put P&L %
 
-For each open SPY/QQQ put:
+Classify each open SPY/QQQ put by strike depth from spot:
 
-| Strike depth from spot | Classification | Action |
+| Depth | Classification | Action |
 |---|---|---|
-| 20-30% OTM | Structural sweet spot | Evaluate per Step 3 |
-| 15-20% OTM | Edge of tail | Evaluate per Step 3; consider rolling deeper at next maintenance window |
-| <15% OTM | **Outside structural definition (shallow)** | Flag as legacy correction-zone position; recommend rolling to 25% OTM at next maintenance window |
-| >30% OTM | **Drifted out (rally)** | Rally pushed the strike past the sweet spot into black-swan-only territory; if DTE > 45-50, roll up to 25% OTM (Trigger 1, rally side) |
+| 20-30% OTM | Sweet spot | Evaluate per Step 3 |
+| 15-20% OTM | Edge of tail | Step 3; consider deeper at next roll |
+| <15% OTM | Shallow (legacy correction-zone) | Roll to 25% OTM at next window |
+| >30% OTM | Drifted out (rally) | If DTE > 45-50, roll up to 25% OTM (Trigger 1 rally side) |
 
-If no structural hedge exists, jump to Step 5 (Recommendation) — the question is whether to commit to running the program, which is governed by playbook's [When to deploy](../../docs/tail-hedge-playbook.md#when-to-deploy), not by signals.
+No hedge on the books → skip to Step 5 (the commit/skip question, governed by [When to deploy](../../docs/tail-hedge-playbook.md#when-to-deploy), not signals).
 
 ## Step 2: Pull trigger inputs
 
-Call in parallel:
-- `get_quote SPY,VIX,VIX3M`
-- `get_tradier_history VIX` (60+ days, to read recent spike high)
-- `get_tradier_history SPY` (60+ days, to read drawdown from recent high)
-- `get_quote` on each put contract with `greeks=True` — read current delta
-- `get_market_regime` — verdict + dimensional labels (incl Sentiment/Positioning/Policy extremes) for informational context only
+In parallel: `get_quote SPY,VIX,VIX3M` · `get_tradier_history VIX` and `SPY` (60+d) · `get_quote` each put with `greeks=True` · `get_market_regime` (**informational only** — never drives hedge actions).
 
 Compute:
 
 | Input | Source | Used by |
 |---|---|---|
-| Put delta | `get_quote greeks=True` | Trigger 1 (drop side) |
-| Strike depth (% OTM) | (spot − strike) / spot | Trigger 1 (rally side) |
-| Rally from strike anchor | current SPY vs entry/last-roll SPY (`decision_list`) | Trigger 1 (rally side) |
-| VIX retracement from spike high | VIX history | Trigger 1 |
-| Put P&L % | `get_portfolio_summary` | Trigger 1 + 2 |
-| SPY drawdown from recent high | SPY history | Trigger 2 context |
-| Current VIX level | `get_quote VIX` | Trigger 2 context |
-| DTE remaining | put expiry | Trigger 3 |
+| Put delta | `get_quote greeks=True` | T1 drop |
+| Strike depth (% OTM) | (spot − strike) / spot | T1 rally |
+| Rally from strike anchor | current SPY vs entry/last-roll SPY (`decision_list`) | T1 rally |
+| VIX retracement from spike high | VIX history | T1 |
+| Put P&L % | `get_portfolio_summary` | T1 + T2 |
+| SPY drawdown from recent high | SPY history | T2 |
+| DTE remaining | put expiry | T3 (window 45→30) |
+| Today's tape color + VIX vs 60d range | `get_quote SPY` day change % + VIX history | T3 (green / low-vol roll timing) |
 
-Regime/signal context from `get_market_regime` is **informational only** at this step. It does NOT drive hedge actions. It feeds downstream decisions (position sizing, pipeline timing, accumulation cadence) — not hedge open/close.
+## Step 3: Evaluate the triggers
 
-## Step 3: Evaluate the three triggers
-
-Apply in priority order. First match wins. If none fire, **hold the hedge** — that's the answer.
+Priority order, first match wins. None fire → **hold**.
 
 ### Trigger 1: Maintenance roll (bidirectional drift)
 
-The put has drifted out of the 20-30% OTM sweet spot. Restore the 25% OTM profile from current SPY. Check **both** directions.
+Put drifted out of the 20-30% sweet spot; restore the 25% profile from current SPY. Check both directions.
 
-**Drop side (roll down)** — fires when **both**:
-- Put delta in **-0.20 to -0.40** range (was -0.05 at entry; signals ~10-15% SPY drop has moved the put out of tail zone), AND
-- One of: VIX retraced ≥50% from recent spike high / known catalyst resolved / put P&L 100-300% and stalling
+**Drop side (roll down)** — both of:
+- Put delta **-0.20 to -0.40** (was ~-0.05 at entry), AND
+- one of: VIX retraced ≥50% from spike high / catalyst resolved / P&L 100-300% and stalling.
+- Skip if: delta tighter than -0.15, VIX still climbing or >30, SPY making new lows daily (T2 may be coming), or P&L only 50-100%.
 
-Do NOT roll down if: delta still tighter than -0.15 (move hasn't materialized), VIX still climbing or above 30 (move not done), SPY making new lows daily (Trigger 2 may be coming), or P&L only 50-100% (premature).
+**Rally side (roll up)** — all three:
+- Strike depth **>~30% OTM** (primary trigger — % OTM, not delta), AND
+- **DTE > 45-50**, AND
+- SPY **≥~10%** above the strike anchor.
+- Skip if: routine roll is near, rally <10%, or IV Rank >50%. Rally side *costs* premium (drop side harvests) → higher bar; it's an exception handler for fast melt-ups, not routine.
 
-**Rally side (roll up)** — fires when **all three**:
-- Strike depth **> ~30% OTM** (rally pushed the put out of the sweet spot into black-swan-only territory — a -25% crash no longer reaches the strike). **% OTM is the primary trigger, not delta** — delta also decays with time, so it conflates the rally with theta.
-- **DTE > 45-50** (the routine 30-DTE roll won't re-anchor it soon anyway)
-- SPY **≥ ~10%** above the strike's anchor (entry/last-roll SPY)
+### Trigger 2: Harvest tranches (real crash)
 
-Do NOT roll up if: routine 30-DTE roll is near (just wait for it), rally <10% (still in-band), or SPY IV Rank >50% (don't overpay to re-anchor — defer to the routine roll). The rally side **costs** premium (vs the drop side, which harvests), so the bar is higher — it's an exception handler for fast melt-ups, not a routine action.
+Large AND fast — VIX >50, SPY down 20%+, puts deep ITM. Mechanical, don't top-tick. Read live P&L % from `get_portfolio_summary`.
 
-### Trigger 2: Harvest tranches (real crash in progress)
-
-Fires when the move is large AND fast — typically VIX above 50, SPY down 20%+ from recent high, puts deep ITM. Execute mechanically; do NOT try to top-tick. Read live P&L % from `get_portfolio_summary`.
-
-| P&L threshold | Action |
+| P&L | Action |
 |---|---|
-| **+400% (5x)** | Close 50% of contracts |
-| **+900% (10x)** | Close another 25% of original |
-| **+1900% (20x)+** | Close remaining (let small residue ride only if crash is grinding lower with fresh leg setups) |
+| +400% (5x) | Close 50% |
+| +900% (10x) | Close another 25% of original |
+| +1900% (20x)+ | Close remainder (residue rides only if grinding lower with fresh legs) |
 
-### Trigger 3: Routine 30-DTE roll (calendar)
+### Trigger 3: Routine calendar roll (window, not a date)
 
-Fires when DTE ≤ 30 regardless of any other condition. Sell expiring + buy fresh at the new 25% OTM strike from current SPY.
+Window opens ~45 DTE, hard backstop at 30 DTE:
+
+- **DTE > 45** → not open; hold (unless T1/T2).
+- **45 ≥ DTE > 30** → roll on the **first green / low-VIX day** (SPY green AND VIX in the lower half of its 60d range = cheaper replacement put). Else **armed-and-waiting HOLD** — surface "window open, waiting for green; backstop <date at 30 DTE>."
+- **DTE ≤ 30** → **hard roll regardless of color.** Continuity beats a cheaper entry.
+
+Green is a preference inside the window, never a reason to breach the 30-DTE floor.
 
 ### Universal close+redeploy workflow (any trigger)
 
-Sell the tranche (full for T1/T3, partial for T2) → `calculate_hedge` with current SPY + `crisis_multiplier=1.25` → buy new contracts at 25% OTM from *current* SPY → record `decision_close` (old) + `decision_add` action `WRITE_NEW` source `hedge` (new).
-
-**No trigger fired → hold.** Cleared signals, premium decay, drawdown anxiety — none are valid close reasons. Decay is the design (3-7 consecutive losing years expected).
+Sell the tranche (full for T1/T3, partial for T2) → `calculate_hedge` (current SPY, `crisis_multiplier=1.25`, `fidelity_folder`) → buy new at 25% OTM from *current* SPY → `decision_close` (old) + `decision_add` `WRITE_NEW` source `hedge` (new).
 
 ## Step 4: Cost tracking
 
-Run `get_order_history` for the cash account, filter for SPY/QQQ put trades.
+`get_order_history` for the margin account `7PGI7F1AV89E2FBFTK4HDK1JIB`, filter SPY/QQQ puts.
 
-| Metric | Target | Action if breached |
+| Metric | Target | If breached |
 |---|---|---|
-| Annual drag % | 0.5-1.5% | Above 2%: check strike depth — likely correction-zone in disguise, OR entering at high IV (skip strikes with IV Rank >50% per playbook execution checklist) |
-| Hedges closed YTD | tracking only | — |
-| Total hedge P&L YTD | tracking only | Negative is the modal outcome — see playbook performance expectations |
+| Annual drag % | 0.5-1.5% | Above 2%: strike too shallow (correction-zone in disguise) or entering at IV Rank >50% |
+| Hedges closed / P&L YTD | tracking only | Negative P&L is the modal outcome |
 
-**Do NOT** apply "3+ rolls without payoff = reduce exposure" logic. The playbook explicitly expects 3-7 consecutive losing years. That's the program working as designed, not a failure mode.
+**Don't** apply "3+ rolls without payoff = reduce." The playbook expects 3-7 consecutive losing years — that's the design.
 
 ## Step 5: Recommendation
 
-### If a structural hedge exists
+### If a hedge exists
 
-**Action: [HOLD / MAINTENANCE ROLL DOWN / MAINTENANCE ROLL UP / HARVEST TRANCHE / 30-DTE ROLL]**
+**Action: [HOLD / ROLL WINDOW OPEN — WAITING FOR GREEN / MAINTENANCE ROLL DOWN / MAINTENANCE ROLL UP / HARVEST TRANCHE / CALENDAR ROLL]**
 
 | Field | Value |
 |---|---|
-| Position | (N contracts at K strike, exp date) |
-| Strike depth | X% OTM (sweet spot / edge of tail / legacy-shallow / drifted-out) |
-| Current put delta | -X.XX |
-| Rally from strike anchor | +X.X% |
-| DTE remaining | X |
+| Position | N contracts, K strike, exp |
+| Strike depth | X% OTM (sweet spot / edge / shallow / drifted-out) |
+| Put delta | -X.XX |
+| Rally from anchor | +X.X% |
+| DTE | X |
 | Put P&L % | X% |
-| VIX current vs recent high | X.X / Y.Y (Z% retracement) |
-| SPY drawdown from recent high | -X.X% |
-| Trigger fired | None / Trigger 1 (down) / Trigger 1 (up) / Trigger 2 [percent] / Trigger 3 |
-| Annual drag YTD | X% (vs 0.5-1.5% target) |
+| VIX vs recent high | X.X / Y.Y (Z% retrace) |
+| SPY drawdown | -X.X% |
+| Trigger | None / T1 down / T1 up / T2 [%] / T3 (window — waiting) / T3 (backstop) |
+| Annual drag YTD | X% (vs 0.5-1.5%) |
 
-**Rationale:** One sentence — anchored on trigger criteria, NOT on signals or feel.
+**Rationale:** one sentence, anchored on trigger criteria — not signals or feel.
 
-If action is anything other than HOLD: run through `preview_order` first, then place. Record via `decision_close` + `decision_add` (source `hedge`).
+Non-HOLD → `preview_order` first, then place; record `decision_close` + `decision_add` (source `hedge`).
 
-### If no structural hedge exists
+### If no hedge exists
 
-This is a one-time program-commitment question, not a signal-driven entry. Surface the [When to deploy](../../docs/tail-hedge-playbook.md#when-to-deploy) inputs:
+A one-time commitment question, not a signal entry. Surface [When to deploy](../../docs/tail-hedge-playbook.md#when-to-deploy) inputs: net delta (`get_portfolio_greeks`), equity % (`get_portfolio_summary`), trailing beta (`calculate_hedge`), cash buffer. Defer to the playbook. If committing: size via [Sizing](../../docs/tail-hedge-playbook.md#sizing), follow the [Execution checklist](../../docs/tail-hedge-playbook.md#execution-checklist), record `decision_add` (source `hedge`).
 
-- Net delta from `get_portfolio_greeks`
-- Equity exposure % from `get_portfolio_summary`
-- Trailing beta from `calculate_hedge`
-- Cash buffer
+## This skill does NOT
 
-Then defer to the playbook for the commit/skip decision. If committing: run `calculate_hedge` with the parameters from the [Sizing](../../docs/tail-hedge-playbook.md#sizing) section, follow the [Execution checklist](../../docs/tail-hedge-playbook.md#execution-checklist), and record via `decision_add` (source `hedge`).
-
-## What this skill does NOT do
-
-- Open hedges based on signals (regime, vol, divergences) — those drive sizing/pipeline, not hedge actions
-- Recommend correction-zone (5-15% OTM) puts at the portfolio level — use trimming or cash
+- Open/close on signals (regime, vol, divergences) — those drive sizing/pipeline
+- Recommend correction-zone (5-15% OTM) puts — trim or cash instead
 - Close on cleared signals or premium decay — only the three triggers
-- Time entry on IV (the only IV note: skip individual strikes at IV Rank >50%)
+- Time entry on IV, beyond skipping strikes at IV Rank >50%
 
-For single-stock catalyst hedges, use long puts per [strategy-catalog.md](../../docs/strategy-catalog.md) — not this skill.
+Single-stock catalyst hedges → long puts per [strategy-catalog.md](../../docs/strategy-catalog.md), not this skill.
