@@ -21,7 +21,7 @@ Five guardrails apply to every mode:
 2. **Data limits — be honest about them.** `get_technical_indicators` is **daily-only** (no intraday bars from any tool). **Daily signals draw the map and set the lean — they never pull the trigger.** Levels (SMA20/50, Bollinger bands, prior H/L/C), the range envelope (ATR), and the day-type prior (ADX/±DI) are the *right* use; the momentum/participation oscillators (RSI, MACD, **OBV**) describe a **multi-week state** and must never be read as same-session timing or participation. The real scalper's edge — Level 2 / order flow / tape speed — is **not in this toolset**; it's on the Webull screen. This skill is **prep + review + lagging context**, NOT the live execution surface. Never pretend to out-speed the user's chart.
 3. **Never green-light a click.** Produce the map, the levels, and the rules. The user pulls the trigger. Do not encourage more trading; if anything, bias toward "wait."
 4. **SPY/QQQ only.** These have the penny-wide spreads + daily expirations that make option scalping viable. If `$ARGUMENTS.symbol` is anything else, refuse: *"Scalp skill is SPY/QQQ-only — single-name option spreads + thinner expiries break the scalp math. Use /ta for single-name intraday levels."*
-5. **Account = Webull "Individual Cash."** Scalping lives there (per memory). Review mode resolves it via `get_app_subscriptions` and defaults to the `Individual Cash` account — never hardcode the ID.
+5. **Account = Webull "Individual Margin."** Scalping lives there (per memory). Review mode resolves it via `get_app_subscriptions` and defaults to the `Individual Margin` account — never hardcode the ID.
 
 Parse `$ARGUMENTS.mode`: empty → `prep` (default). Valid: `prep`, `review`, `check`.
 
@@ -188,7 +188,7 @@ notes: "Clean +GEX pin. Fade the walls back to the 721 zero-gamma flip; a break 
 
 The feedback loop on discipline. Run after the close (or when the user says "done").
 
-**Step 1 — resolve account + pull fills.** Call `get_app_subscriptions`, take the `Individual Cash` account ID. Call `get_order_history` for the session.
+**Step 1 — resolve account + pull fills.** Call `get_app_subscriptions`, take the `Individual Margin` account ID. Call `get_order_history` for the session.
 - **Gotchas (learned the hard way):** `start_date` AND `end_date` are both required and **must differ** — use `[session_date, session_date + 1]`. And Webull **rate-limits parallel calls** — if querying more than one account/range, call **sequentially**, not in one batch.
 
 **Step 2 — reconstruct round-trips.** Filter to the day's scalp underlying (SPY/QQQ) options; set aside prior-day and unrelated fills (note them, don't grade them). Pair BUY/SELL into round-trips, handling partial fills and multi-contract averaging carefully. For each round-trip capture: entry/exit price, contracts, direction.
