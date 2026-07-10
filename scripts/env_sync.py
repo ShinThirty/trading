@@ -87,6 +87,12 @@ Safety:
   - Local dirty detection: the marker stores a manifest signature (sha256 of
     text-file contents + size/mtime of the checkpointed DB file). The signature,
     not raw mtime, drives the "you have local changes" warning on pull.
+  - Content-based in-sync: push, pull, and status all decide "in sync with
+    remote" by comparing the live manifest signature against the content-hash
+    stored on the bundle — the actual files, never the local marker. The marker
+    is sync history only: it breaks the tie on direction (pull vs push) once
+    content differs, and is fast-forwarded whenever content already matches.
+    Legacy bundles without a content-hash fall back to marker comparison.
   - sqlite snapshot uses Python's built-in online backup API for a consistent
     capture of the (now checkpointed) DB.
   - pull deletes leftover trading.db-wal / trading.db-shm before extracting so
@@ -414,14 +420,14 @@ def ensure_db_checkpointed() -> None:
         )
 
 
-def _is_dirty(local_sync_ts: int, local_sig: str | None) -> bool:
+def _is_dirty(local_sync_ts: int, local_sig: str | None, live_sig: str) -> bool:
     """True if local state differs from the last-sync baseline.
 
     Prefers signature comparison; falls back to mtime when the marker predates
     the signature field (first run after upgrade).
     """
     if local_sig is not None:
-        return live_signature() != local_sig
+        return live_sig != local_sig
     return latest_local_mtime() > local_sync_ts
 
 
@@ -541,8 +547,19 @@ def archive_scalp_remote(today: date, *, dry_run: bool = False) -> int:
     preceding `aws s3 sync`). Best-effort: a no-op on any aws error. Returns the count.
     """
     res = subprocess.run(
-        ["aws", "s3api", "list-objects-v2", "--bucket", BUCKET, "--prefix", SCALP_PREFIX,
-         "--query", "Contents[].Key", "--output", "text"],
+        [
+            "aws",
+            "s3api",
+            "list-objects-v2",
+            "--bucket",
+            BUCKET,
+            "--prefix",
+            SCALP_PREFIX,
+            "--query",
+            "Contents[].Key",
+            "--output",
+            "text",
+        ],
         capture_output=True,
         text=True,
     )
@@ -550,9 +567,7 @@ def archive_scalp_remote(today: date, *, dry_run: bool = False) -> int:
         return 0
     keys = set(res.stdout.split())
     superseded = [
-        k
-        for k in keys
-        if _scalp_archivable(k.rsplit("/", 1)[-1], today) and f"{k}.gz" in keys
+        k for k in keys if _scalp_archivable(k.rsplit("/", 1)[-1], today) and f"{k}.gz" in keys
     ]
     if not dry_run:
         for key in superseded:
@@ -581,7 +596,7 @@ def cmd_push(args: argparse.Namespace) -> None:
     ensure_db_checkpointed()
 
     remote = fetch_remote_meta()
-    local_sync_ts, _, _ = read_marker()
+    local_sync_ts, _, local_sig = read_marker()
     live_sig = live_signature()
 
     # Nothing to bundle if the remote object already holds this exact content —
@@ -594,9 +609,9 @@ def cmd_push(args: argparse.Namespace) -> None:
             f"(unchanged since {ts_to_str(remote['push_ts'])} from {remote['hostname']}). "
             "Skipping bundle upload."
         )
-        if remote["push_ts"] != local_sync_ts:
-            # Remote holds identical content under a newer push (another machine
-            # pushed the same state); advance the marker so status reads in-sync.
+        if remote["push_ts"] != local_sync_ts or local_sig != live_sig:
+            # Another machine pushed the same state, or the marker is stale;
+            # fast-forward the marker to the matching baseline.
             write_marker(remote["push_ts"], remote["hostname"], live_sig)
         push_scalp()
         return
@@ -712,17 +727,31 @@ def cmd_pull(args: argparse.Namespace) -> None:
     sync_scalp_pull()
 
     local_sync_ts, _, local_sig = read_marker()
+    live_sig = live_signature()
 
-    if _is_dirty(local_sync_ts, local_sig) and not args.force:
+    # "Already in sync" is decided by comparing the ACTUAL files (live manifest
+    # signature vs the bundle's content-hash), never the local marker — a stale
+    # marker must not force a needless restore, and a matching marker must not
+    # mask local edits the pull is meant to overwrite. Legacy bundles without a
+    # content-hash fall back to the marker timestamp.
+    remote_hash = remote.get("content_hash")
+    in_sync = remote_hash == live_sig if remote_hash else remote["push_ts"] == local_sync_ts
+    if in_sync and not args.force:
+        if remote["push_ts"] != local_sync_ts or local_sig != live_sig:
+            # Content already matches; just fast-forward the stale marker.
+            write_marker(remote["push_ts"], remote["hostname"], live_sig)
+        print(
+            f"Already in sync — local files match the bundle pushed by "
+            f"{remote['hostname']} @ {ts_to_str(remote['push_ts'])}."
+        )
+        return
+
+    if _is_dirty(local_sync_ts, local_sig, live_sig) and not args.force:
         print("WARNING: Local state has changes since your last sync.")
         print(f"  Last sync: {ts_to_str(local_sync_ts)}")
         print("Pulling will OVERWRITE these local changes.")
         if not confirm("Continue?"):
             sys.exit(1)
-
-    if remote["push_ts"] == local_sync_ts and not args.force:
-        print(f"Already in sync with remote (push_ts={remote['push_ts']}).")
-        return
 
     with tempfile.TemporaryDirectory() as tmp_str:
         tmp = Path(tmp_str)
@@ -796,7 +825,8 @@ def cmd_status(_: argparse.Namespace) -> None:
 
     remote = fetch_remote_meta()
     local_sync_ts, local_sync_host, local_sig = read_marker()
-    dirty = _is_dirty(local_sync_ts, local_sig)
+    live_sig = live_signature()
+    dirty = _is_dirty(local_sync_ts, local_sig, live_sig)
 
     print(f"Local ({socket.gethostname()}):")
     print(f"  Last sync:    {ts_to_str(local_sync_ts)} (from {local_sync_host})")
@@ -818,11 +848,32 @@ def cmd_status(_: argparse.Namespace) -> None:
         print("  No bundle uploaded yet")
         return
     print(f"  Last push: {ts_to_str(remote['push_ts'])} from {remote['hostname']}")
-    if remote["push_ts"] == local_sync_ts:
+    # In-sync is a property of the ACTUAL files: live manifest signature vs the
+    # bundle's content-hash. The marker is only sync history — once content
+    # differs it breaks the tie on direction. A legacy bundle without a
+    # content-hash falls back to marker comparison entirely.
+    remote_hash = remote.get("content_hash")
+    if remote_hash:
+        if remote_hash == live_sig:
+            stale = (
+                ""
+                if remote["push_ts"] == local_sync_ts
+                else " (marker stale — next push/pull fast-forwards it)"
+            )
+            print(f"  Status: in sync — local files match the remote bundle{stale}")
+        elif dirty and remote["push_ts"] > local_sync_ts:
+            print("  Status: diverged — remote updated AND you have local changes; pull, then push")
+        elif dirty:
+            print("  Status: you have local changes — push to share")
+        elif remote["push_ts"] > local_sync_ts:
+            print("  Status: remote ahead — pull to update")
+        else:
+            print("  Status: files differ from remote but no local changes recorded (unusual)")
+    elif remote["push_ts"] == local_sync_ts:
         if dirty:
             print("  Status: marker in sync, but you have local changes — push to share")
         else:
-            print("  Status: in sync")
+            print("  Status: in sync (by marker — legacy bundle has no content-hash)")
     elif remote["push_ts"] > local_sync_ts:
         print("  Status: remote ahead — pull to update")
     else:
