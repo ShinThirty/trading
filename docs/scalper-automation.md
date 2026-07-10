@@ -252,6 +252,48 @@ trading-clients (httpx[http2]; + websockets via [streaming] extra)
   └── trading-scalper    (+ pyyaml)
 ```
 
+## Versioning & the go-live scorecard
+
+Going live is **earned per verdict mode**, on the numbers — not on a feeling that
+"the bot looks ready." Two pieces make that objective.
+
+**Version cohorts (`version.py`).** The detector carries a `major.minor.patch`
+version. A **minor** bump means the change alters what/when/how it trades (arming
+rules, verdict logic, calibration constants, gates, bracket placement); a **patch**
+bump is observer-only (telemetry, logging, persistence). `SignalLog` stamps the
+version on every fire row, so each session's logs self-describe which bot produced
+them. The **cohort** is `major.minor`: grading pools only trades from the same
+behavior cohort, because a change to the trading logic makes earlier trades evidence
+about a bot that no longer exists. Bump in the same commit as the behavior change so
+the stamp can't drift from the code. Sessions that predate versioning (before
+`0.3.1`, shipped 2026-07-10) are mapped to a cohort by date in `scorecard._RETRO_COHORTS`.
+
+**The scorecard (`scorecard.py`, `trading-scalper-scorecard`).** Reconstructs closed
+trades by joining the fills log to `{date}-signals.jsonl` on `bracket_id` (a closed
+trade = a bracket with a SELL exit; P&L = the exit's `realized_delta`), buckets them
+by `(cohort, mode)`, and reports n, sessions, win rate, expectancy, expectancy's
+one-sided 95% lower bound, profit factor, max drawdown, and **session concentration**
+(the best single session's share of gross wins — the guard against a "one good day
+carries the mode" edge). A pooled all-history line shows as a floor ("has this ever
+worked"), never as the promotion basis. `--chart` writes a per-mode cumulative-P&L
+curve with dashed cohort-boundary markers (a slope kink at a ship is the improvement
+verdict — readable where a daily win-rate bar is just noise).
+
+**The go-live gate** is evaluated on the **current cohort only**: `n ≥ 50` across
+`≥ 10` sessions, profit factor `≥ 1.5`, expectancy lower bound `> 0`, concentration
+`< 40%`. When a mode passes, the promotion is a git tag on that commit
+(`scalper-vX.Y.Z`); the future live runner deploys from the tag while paper keeps
+running the workspace head, and the version stamp keeps the two track records
+attributable. Nothing has passed yet (as of `0.3`, `break`'s edge is one 0.2-cohort
+session, `fade` is net-negative, `retest`/`reversal` are single-digit n).
+
+**Caching.** Past sessions are immutable, so the scorecard caches each pre-*today*
+session's extracted trades in `~/.trading/scalp/paper/scorecard-cache.json` (keyed by
+date; today's still-appending session is always re-parsed). The cache stores the raw
+version stamp, not the resolved cohort — so re-tuning the retro map or the gate never
+invalidates it. It rides the scalp prefix in `env_sync` for free (whole-directory
+sweep) and its dateless name keeps the retention archiver from ever gzipping it.
+
 ## Roadmap (deferred)
 
 - **Tastytrade greeks feed** — add a DXLink streaming client for live
@@ -259,15 +301,11 @@ trading-clients (httpx[http2]; + websockets via [streaming] extra)
   Tradier). Slots in as a new neutral value type alongside `Quote`/`Trade`/`TimeSale`.
 - **Phone-push notifier** — reuse the `trading-alerts` Discord bot to land prompts
   on your phone. v1 is desk-only console + bell.
-- **Round-trip report** — reconstruct paired entries/exits from the fills JSONL
-  into a per-trade P&L table for review, joined to the `{date}-signals.jsonl`
-  telemetry so each trade's realized win/loss sits next to its fire-time
-  velocity/absorption — the dataset that decides whether any B4 metric earns a gate.
-- **Autonomous entry (live)** — only after a long paper track record proves the
-  detector. This re-introduces a live broker that *opens* (a different shape from
+- **Autonomous entry (live)** — only after a verdict mode passes the go-live gate
+  above. This re-introduces a live broker that *opens* (a different shape from
   the old exit-only one) and a real risk-budget; the Webull gRPC order-push then
-  becomes useful (the daemon sees its own fills). Out of scope until the paper
-  numbers earn it. See memory `project-scalper-pivot` / `project-scalper-grpc-events`.
+  becomes useful (the daemon sees its own fills). Out of scope until the scorecard
+  earns it. See memory `project-scalper-pivot` / `project-scalper-grpc-events`.
 
 ---
 

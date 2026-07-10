@@ -1,7 +1,7 @@
 [project]
 name = "trading-scalper"
-version = "0.1.0"
-description = "Local assist-only daemon for intraday SPY/QQQ options scalp discipline"
+version = "0.3.1"
+description = "Local paper entry-detector for intraday SPY/QQQ options scalps"
 requires-python = ">=3.13"
 dependencies = [
     "trading-clients[streaming]",
@@ -10,6 +10,14 @@ dependencies = [
 
 [project.scripts]
 trading-scalper = "trading_scalper.cli:main"
+trading-scalper-scorecard = "trading_scalper.scorecard:main"
+
+[dependency-groups]
+# matplotlib powers the scorecard's optional --chart export only; the daemon and
+# the text scorecard have no plotting dependency, so it stays out of the runtime
+# deps (and the wheel). Installed by a plain `uv sync`; a lazy import in
+# scorecard.py prints an install hint if it's ever missing.
+dev = ["matplotlib>=3.8"]
 
 [build-system]
 requires = ["hatchling"]

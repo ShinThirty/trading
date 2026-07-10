@@ -41,6 +41,7 @@ from pathlib import Path
 
 from trading_scalper.domain import FireRecord, OrderEvent, OrderStatus, Side
 from trading_scalper.ports import BrokerExecution
+from trading_scalper.version import __version__
 
 _PAPER_ROOT = Path.home() / ".trading" / "scalp" / "paper"
 
@@ -102,9 +103,12 @@ class SignalLog:
     """Append one JSONL row per detector fire — the B4 velocity/absorption telemetry.
 
     The detector calls ``record`` on every confirmed fire; this stamps a wall-clock
-    ``ts`` and writes the row. Recorded, never gated — the row carries the metrics
-    next to the setup identity so the paper run can later mine which of them separate
-    winners from losers without any of them yet vetoing a setup.
+    ``ts`` and the detector ``version`` and writes the row. Recorded, never gated —
+    the row carries the metrics next to the setup identity so the paper run can later
+    mine which of them separate winners from losers without any of them yet vetoing a
+    setup. The ``version`` stamp is the scorecard's cohort key: it lets each session's
+    logs self-describe which bot produced them, so grading pools only trades from the
+    same behavior cohort (see ``version.py`` and ``scorecard.py``).
     """
 
     def __init__(self, path: Path, *, clock: Callable[[], str] = _now) -> None:
@@ -117,6 +121,7 @@ class SignalLog:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         row = {
             "ts": self._clock(),
+            "version": __version__,  # cohort key for the scorecard (version.py)
             "symbol": rec.symbol,
             "level": rec.level,
             "side": rec.side,

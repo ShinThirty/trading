@@ -19,6 +19,7 @@ from trading_scalper.persist import (
     default_summary_path,
     summarize_fills,
 )
+from trading_scalper.version import __version__
 
 
 def _persister(broker: PaperBroker, tmp_path: Path) -> PaperPersister:
@@ -190,3 +191,4 @@ def test_signal_log_appends_a_row_per_fire(tmp_path: Path) -> None:
     assert rows[0]["cum_confirming_size"] == 25 and rows[0]["book_imbalance"] == 600
     assert rows[0]["bracket_id"] == "paper-1"  # join key to the bracket's fills
     assert rows[1]["velocity"] is None and rows[1]["contract"] is None  # alert-only, no time base
+    assert rows[0]["version"] == __version__  # cohort key for the scorecard
