@@ -7,6 +7,7 @@ cross-account portfolio summary.
 import asyncio
 import csv
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -79,6 +80,32 @@ _FIDELITY_REQUIRED_COLUMNS = {
     "Today's Gain/Loss Dollar",
 }
 
+# Fidelity has shipped this export with both Title Case ("Current Value") and
+# Sentence case ("Current value") headers; match case-insensitively and
+# canonicalize back to the Title Case the parser reads by, so a header-case
+# flip doesn't silently drop the entire file.
+_FIDELITY_CANONICAL_COLUMNS = {
+    "account number": "Account Number",
+    "account name": "Account Name",
+    "symbol": "Symbol",
+    "description": "Description",
+    "quantity": "Quantity",
+    "last price": "Last Price",
+    "current value": "Current Value",
+    "average cost basis": "Average Cost Basis",
+    "total gain/loss dollar": "Total Gain/Loss Dollar",
+    "total gain/loss percent": "Total Gain/Loss Percent",
+    "today's gain/loss dollar": "Today's Gain/Loss Dollar",
+}
+
+
+def _canonicalize_fidelity_columns(fieldnames: Sequence[str] | None) -> list[str]:
+    """Map each header to its canonical Title Case name, case-insensitively."""
+    return [
+        _FIDELITY_CANONICAL_COLUMNS.get((name or "").strip().lower(), name)
+        for name in (fieldnames or [])
+    ]
+
 
 class FidelityFormatError(ValueError):
     """Raised when a Fidelity CSV doesn't match the expected format."""
@@ -113,6 +140,7 @@ async def parse_fidelity_csv(path: str) -> list[AccountSummary]:
         )
 
     reader = csv.DictReader(text[header_idx:])
+    reader.fieldnames = _canonicalize_fidelity_columns(reader.fieldnames)
     columns = set(reader.fieldnames or [])
     missing = _FIDELITY_REQUIRED_COLUMNS - columns
     if missing:
