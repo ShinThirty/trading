@@ -86,12 +86,12 @@ def test_short_option_is_negative_value_at_100x_and_excluded_from_long():
         _options(_option("SMCI  260710P00027500", "SMCI", -1, 0.01, 27.5, "2026-07-10")),
     )
     opt = acct.positions[0]
-    assert opt["is_option"] is True
-    assert opt["underlying"] == "SMCI"
-    assert opt["option_type"] == "put"
-    assert opt["strike"] == 27.5
-    assert opt["quantity"] == -1
-    assert round(opt["value"], 2) == -1.00  # -1 × 0.01 × 100
+    assert opt.is_option is True
+    assert opt.underlying == "SMCI"
+    assert opt.option_type == "put"
+    assert opt.strike == 27.5
+    assert opt.quantity == -1
+    assert round(opt.value, 2) == -1.00  # -1 × 0.01 × 100
     # short option is a liability → not counted in long market value
     assert acct.market_value == round(-1.00, 2)
 
@@ -102,8 +102,8 @@ def test_call_option_type_parsed_from_ticker():
         _positions(),
         _options(_option("AAPL  260117C00250000", "AAPL", 2, 5.0, 250.0, "2026-01-17")),
     )
-    assert acct.positions[0]["option_type"] == "call"
-    assert round(acct.positions[0]["value"], 2) == 1_000.00  # 2 × 5.0 × 100
+    assert acct.positions[0].option_type == "call"
+    assert round(acct.positions[0].value, 2) == 1_000.00  # 2 × 5.0 × 100
 
 
 def test_option_cost_basis_treats_avg_purchase_price_as_per_contract():
@@ -125,10 +125,10 @@ def test_option_cost_basis_treats_avg_purchase_price_as_per_contract():
         "average_purchase_price": 1942.62,  # per contract (= $19.4262/share)
     }
     opt = ep.AccountOptionsResponse.from_response([raw]).to_normalized()[0]
-    assert round(opt["cost"], 4) == 19.4262  # per-share cost, not 1942.62
-    assert round(opt["value"], 2) == -591.00  # -3 × 1.97 × 100
+    assert round(opt.cost, 4) == 19.4262  # per-share cost, not 1942.62
+    assert round(opt.value, 2) == -591.00  # -3 × 1.97 × 100
     # cost_basis = 1942.62 × -3 = -5827.86 → pnl = -591 − (−5827.86) = +5236.86
-    assert round(opt["pnl"], 2) == 5236.86  # sane ~90% capture, not +582,195
+    assert round(opt.pnl, 2) == 5236.86  # sane ~90% capture, not +582,195
 
 
 def test_zero_balance_account_has_no_positions():

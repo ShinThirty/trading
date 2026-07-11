@@ -6,6 +6,7 @@ from typing import Any
 
 from trading_clients.endpoint import CONTRACT_MULTIPLIER, Endpoint, ParamsRequest, PathRequest
 from trading_clients.options import parse_occ
+from trading_clients.portfolio import NormalizedPosition
 from trading_clients.table_helpers import (
     fmt_large,
     fmt_number,
@@ -542,12 +543,12 @@ class AccountPositionsResponse:
     def from_response(cls, data: list[dict]) -> "AccountPositionsResponse":
         return cls(positions=data or [])
 
-    def to_normalized(self) -> list[dict]:
+    def to_normalized(self) -> list[NormalizedPosition]:
         """Normalize for aggregation. Tradier positions carry no price, so
         last/value/pnl are left at 0.0 — the fetch layer fills them from a
         batched quote. `cost` is per-unit; `cost_basis` keeps the signed total
         for sign-correct P&L (Tradier reports cost_basis positive for shorts)."""
-        result: list[dict] = []
+        result: list[NormalizedPosition] = []
         for p in self.positions:
             symbol = p.get("symbol", "")
             qty = to_float_zero(p.get("quantity"))
@@ -555,25 +556,25 @@ class AccountPositionsResponse:
             is_opt = bool(_OCC_RE.match(symbol))
             mult = CONTRACT_MULTIPLIER if is_opt else 1
             denom = (abs(qty) * mult) or 1
-            pos: dict[str, Any] = {
-                "symbol": symbol,
-                "quantity": qty,
-                "last": 0.0,
-                "cost": cost_basis / denom,
-                "cost_basis": cost_basis,
-                "value": 0.0,
-                "pnl": 0.0,
-                "pnl_pct": 0.0,
-                "is_option": is_opt,
-                "is_cash": False,
-            }
+            pos = NormalizedPosition(
+                symbol=symbol,
+                quantity=qty,
+                last=0.0,
+                cost=cost_basis / denom,
+                cost_basis=cost_basis,
+                value=0.0,
+                pnl=0.0,
+                pnl_pct=0.0,
+                is_option=is_opt,
+                is_cash=False,
+            )
             if is_opt:
                 underlying, exp, option_type, strike = parse_occ(symbol)
-                pos["underlying"] = underlying
-                pos["option_type"] = option_type
-                pos["strike"] = strike
-                pos["expiration"] = exp
-                pos["strategy"] = ""
+                pos.underlying = underlying
+                pos.option_type = option_type
+                pos.strike = strike
+                pos.expiration = exp
+                pos.strategy = ""
             result.append(pos)
         return result
 

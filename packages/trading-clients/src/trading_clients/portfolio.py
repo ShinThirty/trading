@@ -14,6 +14,40 @@ CASH_EQUIVALENTS = {"FDRXX", "SGOV"}
 
 
 @dataclass
+class NormalizedPosition:
+    """One position in the provider-neutral shape the aggregation consumes.
+
+    Every broker's ``to_normalized()`` emits these, so downstream code (summary
+    tables, cluster concentration, CSP collateral, greeks) never branches on the
+    provider. Equity and cash rows leave the option-only fields at their defaults
+    (``is_option`` stays False).
+
+    Mutable by design: the Tradier fetch layer fills ``last``/``value``/``pnl``
+    from a batched quote after construction, because Tradier positions arrive
+    without a price.
+    """
+
+    symbol: str
+    quantity: float
+    last: float = 0.0
+    cost: float = 0.0  # per-share average cost
+    value: float = 0.0
+    pnl: float = 0.0
+    pnl_pct: float = 0.0
+    is_option: bool = False
+    is_cash: bool = False
+    # Option-only — unset for equity/cash rows.
+    underlying: str = ""
+    option_type: str = ""  # "call" | "put" | ""
+    strike: float = 0.0
+    expiration: str | None = None
+    strategy: str = ""
+    # Tradier-only: signed total cost basis (positive even for shorts) so the
+    # fetch layer can compute sign-correct P&L; other providers leave it 0.0.
+    cost_basis: float = 0.0
+
+
+@dataclass
 class AccountSummary:
     account_id: str
     label: str
@@ -24,7 +58,7 @@ class AccountSummary:
     market_value: float = 0.0
     day_pnl: float = 0.0
     unrealized_pnl: float = 0.0
-    positions: list[dict] = field(default_factory=list)
+    positions: list[NormalizedPosition] = field(default_factory=list)
 
 
 @dataclass
@@ -38,12 +72,9 @@ def compact_portfolio_summary(summary: PortfolioSummary, file_path: str) -> str:
     total_nlv = sum(a.nlv for a in summary.accounts)
     total_day = sum(a.day_pnl for a in summary.accounts)
     n_accounts = len(summary.accounts)
-    n_options = sum(1 for a in summary.accounts for p in a.positions if p.get("is_option"))
+    n_options = sum(1 for a in summary.accounts for p in a.positions if p.is_option)
     n_equity = sum(
-        1
-        for a in summary.accounts
-        for p in a.positions
-        if not p.get("is_option") and not p.get("is_cash")
+        1 for a in summary.accounts for p in a.positions if not p.is_option and not p.is_cash
     )
     sign = "+" if total_day >= 0 else ""
     lines = [
@@ -107,19 +138,19 @@ def format_portfolio_summary(summary: PortfolioSummary) -> str:
     option_rows: list[dict[str, str]] = []
     for a in summary.accounts:
         for p in a.positions:
-            if not p.get("is_option"):
+            if not p.is_option:
                 continue
             row: dict[str, str] = {
                 "Account": a.label,
-                "Symbol": p.get("underlying", p["symbol"]),
-                "Type": (p.get("option_type") or "")[0:1].upper(),
-                "Strike": fmt_number(p.get("strike")),
-                "Exp": p.get("expiration", ""),
-                "Qty": fmt_number(p.get("quantity"), 0),
-                "Cost": fmt_number(p.get("cost")),
-                "Last": fmt_number(p.get("last")),
-                "P&L": fmt_number(p.get("pnl")),
-                "P&L %": fmt_number(p.get("pnl_pct")),
+                "Symbol": p.underlying or p.symbol,
+                "Type": p.option_type[0:1].upper(),
+                "Strike": fmt_number(p.strike),
+                "Exp": p.expiration or "",
+                "Qty": fmt_number(p.quantity, 0),
+                "Cost": fmt_number(p.cost),
+                "Last": fmt_number(p.last),
+                "P&L": fmt_number(p.pnl),
+                "P&L %": fmt_number(p.pnl_pct),
             }
             option_rows.append(row)
 
@@ -132,18 +163,18 @@ def format_portfolio_summary(summary: PortfolioSummary) -> str:
     equity_rows: list[dict[str, str]] = []
     for a in summary.accounts:
         for p in a.positions:
-            if p.get("is_option") or p.get("is_cash"):
+            if p.is_option or p.is_cash:
                 continue
             equity_rows.append(
                 {
                     "Account": a.label,
-                    "Symbol": p["symbol"],
-                    "Qty": fmt_number(p.get("quantity"), 0),
-                    "Cost": fmt_number(p.get("cost")),
-                    "Last": fmt_number(p.get("last")),
-                    "Mkt Val": fmt_number(p.get("value")),
-                    "P&L": fmt_number(p.get("pnl")),
-                    "P&L %": fmt_number(p.get("pnl_pct")),
+                    "Symbol": p.symbol,
+                    "Qty": fmt_number(p.quantity, 0),
+                    "Cost": fmt_number(p.cost),
+                    "Last": fmt_number(p.last),
+                    "Mkt Val": fmt_number(p.value),
+                    "P&L": fmt_number(p.pnl),
+                    "P&L %": fmt_number(p.pnl_pct),
                 }
             )
 
@@ -220,16 +251,16 @@ def compute_cluster_concentration(
 
     for acct in accounts:
         for p in acct.positions:
-            if p.get("is_cash"):
+            if p.is_cash:
                 continue
-            if p.get("is_option"):
-                underlying = (p.get("underlying") or p.get("symbol") or "").upper()
-                if underlying in wanted_set and p.get("quantity", 0) > 0:
-                    long_opt[underlying] += p.get("value", 0.0)
+            if p.is_option:
+                underlying = (p.underlying or p.symbol).upper()
+                if underlying in wanted_set and p.quantity > 0:
+                    long_opt[underlying] += p.value
             else:
-                sym = (p.get("symbol") or "").upper()
+                sym = p.symbol.upper()
                 if sym in wanted_set:
-                    equity[sym] += p.get("value", 0.0)
+                    equity[sym] += p.value
 
     total_nlv = sum(a.nlv for a in accounts)
     members: list[ClusterMember] = []

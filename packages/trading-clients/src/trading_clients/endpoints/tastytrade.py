@@ -5,6 +5,7 @@ from typing import Any
 
 from trading_clients.endpoint import BodyRequest, Endpoint, ParamsRequest, PathRequest
 from trading_clients.options import parse_occ
+from trading_clients.portfolio import NormalizedPosition
 from trading_clients.table_helpers import fmt_number, kv_table, list_table, to_float_zero
 
 # ═══════════════════════════════════════════════════════════════
@@ -422,7 +423,7 @@ class AccountBalancesResponse:
         return kv_table({k: v for k, v in fields.items() if v not in (None, "")})
 
 
-def _tt_position_norm(p: dict) -> dict:
+def _tt_position_norm(p: dict) -> NormalizedPosition:
     """Normalize one TastyTrade CurrentPosition into the shared aggregation shape.
 
     average-open-price / mark-price are per-unit; multiplier is 100 for options,
@@ -442,24 +443,24 @@ def _tt_position_norm(p: dict) -> dict:
     value = price * signed_qty * mult
     pnl = (price - cost) * signed_qty * mult
     denom = abs(cost) * abs(signed_qty) * mult
-    pos: dict[str, Any] = {
-        "symbol": symbol,
-        "quantity": signed_qty,
-        "last": price,
-        "cost": cost,
-        "value": value,
-        "pnl": pnl,
-        "pnl_pct": (pnl / denom * 100) if denom else 0.0,
-        "is_option": is_option,
-        "is_cash": False,
-    }
+    pos = NormalizedPosition(
+        symbol=symbol,
+        quantity=signed_qty,
+        last=price,
+        cost=cost,
+        value=value,
+        pnl=pnl,
+        pnl_pct=(pnl / denom * 100) if denom else 0.0,
+        is_option=is_option,
+        is_cash=False,
+    )
     if is_option:
         _, exp, option_type, strike = parse_occ(symbol)
-        pos["underlying"] = p.get("underlying-symbol", "") or symbol
-        pos["option_type"] = option_type
-        pos["strike"] = strike
-        pos["expiration"] = exp
-        pos["strategy"] = ""
+        pos.underlying = p.get("underlying-symbol", "") or symbol
+        pos.option_type = option_type
+        pos.strike = strike
+        pos.expiration = exp
+        pos.strategy = ""
     return pos
 
 
@@ -471,7 +472,7 @@ class AccountPositionsResponse:
     def from_response(cls, data: list[dict]) -> "AccountPositionsResponse":
         return cls(positions=data or [])
 
-    def to_normalized(self) -> list[dict]:
+    def to_normalized(self) -> list[NormalizedPosition]:
         return [_tt_position_norm(p) for p in self.positions if to_float_zero(p.get("quantity"))]
 
     def to_output(self) -> str:
@@ -481,19 +482,19 @@ class AccountPositionsResponse:
         for p in self.positions:
             n = _tt_position_norm(p)
             row: dict[str, str] = {
-                "Symbol": n.get("underlying", n["symbol"]) if n["is_option"] else n["symbol"],
-                "Qty": fmt_number(n["quantity"], 0),
-                "Cost": fmt_number(n["cost"]),
-                "Mark": fmt_number(n["last"]),
-                "Mkt Val": fmt_number(n["value"]),
-                "P&L": fmt_number(n["pnl"]),
-                "P&L %": fmt_number(n["pnl_pct"]),
+                "Symbol": (n.underlying or n.symbol) if n.is_option else n.symbol,
+                "Qty": fmt_number(n.quantity, 0),
+                "Cost": fmt_number(n.cost),
+                "Mark": fmt_number(n.last),
+                "Mkt Val": fmt_number(n.value),
+                "P&L": fmt_number(n.pnl),
+                "P&L %": fmt_number(n.pnl_pct),
             }
-            if n["is_option"]:
+            if n.is_option:
                 row |= {
-                    "Option": n["option_type"],
-                    "Strike": fmt_number(n["strike"]),
-                    "Exp": n["expiration"],
+                    "Option": n.option_type,
+                    "Strike": fmt_number(n.strike),
+                    "Exp": n.expiration or "",
                 }
             rows.append(row)
         return list_table(rows)

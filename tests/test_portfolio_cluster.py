@@ -6,7 +6,11 @@ at risk) for the named tickers across all accounts, excludes short options
 a cap expressed as a percent of total book NLV.
 """
 
-from trading_clients.portfolio import AccountSummary, compute_cluster_concentration
+from trading_clients.portfolio import (
+    AccountSummary,
+    NormalizedPosition,
+    compute_cluster_concentration,
+)
 
 
 def _book() -> list[AccountSummary]:
@@ -18,29 +22,27 @@ def _book() -> list[AccountSummary]:
         account_type="CASH",
         nlv=800_000.0,
         positions=[
-            {"symbol": "META", "value": 200_000.0, "is_option": False, "is_cash": False},
-            {"symbol": "MU", "value": 220_000.0, "is_option": False, "is_cash": False},
+            NormalizedPosition(symbol="META", quantity=300, value=200_000.0),
+            NormalizedPosition(symbol="MU", quantity=250, value=220_000.0),
             # non-cluster name — must be ignored
-            {"symbol": "NFLX", "value": 44_000.0, "is_option": False, "is_cash": False},
+            NormalizedPosition(symbol="NFLX", quantity=500, value=44_000.0),
             # long call on a cluster name — counted at premium (capital at risk)
-            {
-                "symbol": "NVDA260115C00150000",
-                "underlying": "NVDA",
-                "value": 11_000.0,
-                "quantity": 2,
-                "is_option": True,
-                "is_cash": False,
-            },
+            NormalizedPosition(
+                symbol="NVDA260115C00150000",
+                underlying="NVDA",
+                value=11_000.0,
+                quantity=2,
+                is_option=True,
+            ),
             # short put on a cluster name — must be EXCLUDED (negative qty)
-            {
-                "symbol": "MU260717P00900000",
-                "underlying": "MU",
-                "value": -6_800.0,
-                "quantity": -2,
-                "is_option": True,
-                "is_cash": False,
-            },
-            {"symbol": "FDRXX", "value": 100_000.0, "is_option": False, "is_cash": True},
+            NormalizedPosition(
+                symbol="MU260717P00900000",
+                underlying="MU",
+                value=-6_800.0,
+                quantity=-2,
+                is_option=True,
+            ),
+            NormalizedPosition(symbol="FDRXX", quantity=100_000, value=100_000.0, is_cash=True),
         ],
     )
     b = AccountSummary(
@@ -51,7 +53,7 @@ def _book() -> list[AccountSummary]:
         nlv=200_000.0,
         positions=[
             # same cluster ticker in a second account — must aggregate
-            {"symbol": "META", "value": 20_000.0, "is_option": False, "is_cash": False},
+            NormalizedPosition(symbol="META", quantity=30, value=20_000.0),
         ],
     )
     return [a, b]

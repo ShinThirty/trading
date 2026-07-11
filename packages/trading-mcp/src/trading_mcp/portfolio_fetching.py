@@ -23,7 +23,7 @@ from trading_clients.endpoints.webull import (
     AccountRequest,
     EmptyRequest,
 )
-from trading_clients.portfolio import AccountSummary
+from trading_clients.portfolio import AccountSummary, NormalizedPosition
 from trading_clients.snaptrade_portfolio import fetch_snaptrade_accounts, fetch_snaptrade_nlv
 from trading_clients.table_helpers import to_float_zero
 
@@ -71,7 +71,7 @@ async def _fetch_webull_accounts(ctx: Context) -> ProviderResult:
             positions = []
             errors[f"{label} (positions)"] = str(e)
 
-        cash_equiv_value = sum(p["value"] for p in positions if p.get("is_cash"))
+        cash_equiv_value = sum(p.value for p in positions if p.is_cash)
         cash += cash_equiv_value
         mv -= cash_equiv_value
 
@@ -94,7 +94,7 @@ async def _fetch_webull_accounts(ctx: Context) -> ProviderResult:
 
 
 async def _enrich_tradier_positions(
-    client, positions: list[dict], errors: dict[str, str], label: str
+    client, positions: list[NormalizedPosition], errors: dict[str, str], label: str
 ) -> float:
     """Tradier positions carry no price — fill last/value/pnl from one batched
     quote and return the account's day P&L (Σ quote change × signed qty × mult).
@@ -104,7 +104,7 @@ async def _enrich_tradier_positions(
     """
     if not positions:
         return 0.0
-    symbols = sorted({p["symbol"] for p in positions if p.get("symbol")})
+    symbols = sorted({p.symbol for p in positions if p.symbol})
     if not symbols:
         return 0.0
     try:
@@ -118,18 +118,17 @@ async def _enrich_tradier_positions(
 
     day_pnl = 0.0
     for p in positions:
-        sym = p["symbol"]
-        qty = p["quantity"]
-        mult = CONTRACT_MULTIPLIER if p.get("is_option") else 1
-        last = last_by.get(sym, 0.0)
-        cost_basis = p.get("cost_basis", 0.0)
+        qty = p.quantity
+        mult = CONTRACT_MULTIPLIER if p.is_option else 1
+        last = last_by.get(p.symbol, 0.0)
+        cost_basis = p.cost_basis
         sign = 1.0 if qty >= 0 else -1.0
         pnl = sign * (last * abs(qty) * mult - cost_basis)
-        p["last"] = last
-        p["value"] = last * qty * mult
-        p["pnl"] = pnl
-        p["pnl_pct"] = (pnl / abs(cost_basis) * 100) if cost_basis else 0.0
-        day_pnl += change_by.get(sym, 0.0) * qty * mult
+        p.last = last
+        p.value = last * qty * mult
+        p.pnl = pnl
+        p.pnl_pct = (pnl / abs(cost_basis) * 100) if cost_basis else 0.0
+        day_pnl += change_by.get(p.symbol, 0.0) * qty * mult
     return day_pnl
 
 
@@ -273,7 +272,7 @@ async def _fetch_accounts(
 
 async def _fetch_all_positions(
     ctx: Context,
-) -> tuple[list[dict], list[str]]:
+) -> tuple[list[NormalizedPosition], list[str]]:
     """Flatten every normalized position across all brokers (for greeks/hedge).
 
     Reuses _fetch_accounts so Tradier positions arrive already quote-enriched.
@@ -283,15 +282,14 @@ async def _fetch_all_positions(
     return all_positions, [f"{k}: {v}" for k, v in errors.items()]
 
 
-def _compute_csp_collateral(positions: list[dict]) -> float:
+def _compute_csp_collateral(positions: list[NormalizedPosition]) -> float:
     total = 0.0
     for p in positions:
-        if not p.get("is_option") or p.get("option_type") != "put":
+        if not p.is_option or p.option_type != "put":
             continue
-        qty = p.get("quantity", 0)
-        if qty >= 0:
+        if p.quantity >= 0:
             continue
-        total += p.get("strike", 0) * CONTRACT_MULTIPLIER * abs(qty)
+        total += p.strike * CONTRACT_MULTIPLIER * abs(p.quantity)
     return total
 
 

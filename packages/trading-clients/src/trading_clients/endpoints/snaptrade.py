@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from trading_clients.endpoint import CONTRACT_MULTIPLIER, Endpoint, ParamsRequest, PathRequest
+from trading_clients.portfolio import NormalizedPosition
 from trading_clients.table_helpers import fmt_number, list_table
 
 # OCC option ticker tail: YYMMDD + C/P + 8-digit strike (e.g. "…260710P00027500").
@@ -26,27 +27,27 @@ def _pct(pnl: float, basis: float) -> float:
     return (pnl / abs(basis) * 100.0) if basis else 0.0
 
 
-def _map_position(pos: dict[str, Any]) -> dict[str, Any]:
-    """SnapTrade equity/fund position → normalized position dict."""
+def _map_position(pos: dict[str, Any]) -> NormalizedPosition:
+    """SnapTrade equity/fund position → NormalizedPosition."""
     sym = (pos.get("symbol") or {}).get("symbol") or {}
     units = float(pos.get("units") or 0.0)
     price = float(pos.get("price") or 0.0)
     cost = float(pos.get("average_purchase_price") or 0.0)
     pnl = float(pos.get("open_pnl") or 0.0)
-    return {
-        "symbol": sym.get("symbol") or "",
-        "quantity": units,
-        "last": price,
-        "value": units * price,
-        "cost": cost,
-        "pnl": pnl,
-        "pnl_pct": _pct(pnl, cost * units),
-        "is_option": False,
-        "is_cash": bool(pos.get("cash_equivalent")),
-    }
+    return NormalizedPosition(
+        symbol=sym.get("symbol") or "",
+        quantity=units,
+        last=price,
+        value=units * price,
+        cost=cost,
+        pnl=pnl,
+        pnl_pct=_pct(pnl, cost * units),
+        is_option=False,
+        is_cash=bool(pos.get("cash_equivalent")),
+    )
 
 
-def _map_option(opt: dict[str, Any]) -> dict[str, Any]:
+def _map_option(opt: dict[str, Any]) -> NormalizedPosition:
     """SnapTrade option position → normalized position dict (value at ×100).
 
     SnapTrade reports `price` (last) per-share but `average_purchase_price`
@@ -64,21 +65,21 @@ def _map_option(opt: dict[str, Any]) -> dict[str, Any]:
     avg_per_contract = float(opt.get("average_purchase_price") or 0.0)
     value = units * price * CONTRACT_MULTIPLIER
     cost_basis = avg_per_contract * units
-    return {
-        "symbol": ticker,
-        "underlying": (osym.get("underlying_symbol") or {}).get("symbol") or "",
-        "quantity": units,
-        "last": price,
-        "value": value,
-        "cost": avg_per_contract / CONTRACT_MULTIPLIER,
-        "pnl": value - cost_basis,
-        "pnl_pct": _pct(value - cost_basis, cost_basis),
-        "is_option": True,
-        "is_cash": False,
-        "expiration": osym.get("expiration_date"),
-        "option_type": "call" if (m and m.group(1) == "C") else "put",
-        "strike": float(osym.get("strike_price") or 0.0),
-    }
+    return NormalizedPosition(
+        symbol=ticker,
+        underlying=(osym.get("underlying_symbol") or {}).get("symbol") or "",
+        quantity=units,
+        last=price,
+        value=value,
+        cost=avg_per_contract / CONTRACT_MULTIPLIER,
+        pnl=value - cost_basis,
+        pnl_pct=_pct(value - cost_basis, cost_basis),
+        is_option=True,
+        is_cash=False,
+        expiration=osym.get("expiration_date"),
+        option_type="call" if (m and m.group(1) == "C") else "put",
+        strike=float(osym.get("strike_price") or 0.0),
+    )
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -145,7 +146,7 @@ class AccountPositionsResponse:
     def from_response(cls, data: Any) -> "AccountPositionsResponse":
         return cls(positions=data or [])
 
-    def to_normalized(self) -> list[dict]:
+    def to_normalized(self) -> list[NormalizedPosition]:
         """Normalize equity/fund positions for aggregation (money-market → is_cash)."""
         return [_map_position(p) for p in self.positions]
 
@@ -155,11 +156,11 @@ class AccountPositionsResponse:
             return "(no positions)"
         rows = [
             {
-                "Symbol": p["symbol"],
-                "Qty": fmt_number(p["quantity"], 0),
-                "Last": fmt_number(p["last"]),
-                "Value": fmt_number(p["value"]),
-                "Cash": "✓" if p["is_cash"] else "",
+                "Symbol": p.symbol,
+                "Qty": fmt_number(p.quantity, 0),
+                "Last": fmt_number(p.last),
+                "Value": fmt_number(p.value),
+                "Cash": "✓" if p.is_cash else "",
             }
             for p in norm
         ]
@@ -174,7 +175,7 @@ class AccountOptionsResponse:
     def from_response(cls, data: Any) -> "AccountOptionsResponse":
         return cls(options=data or [])
 
-    def to_normalized(self) -> list[dict]:
+    def to_normalized(self) -> list[NormalizedPosition]:
         """Normalize option positions for aggregation (short = negative value ×100)."""
         return [_map_option(o) for o in self.options]
 
@@ -184,13 +185,13 @@ class AccountOptionsResponse:
             return "(no options)"
         rows = [
             {
-                "Symbol": o["symbol"],
-                "Underlying": o["underlying"],
-                "Type": o["option_type"],
-                "Strike": fmt_number(o["strike"]),
-                "Exp": o.get("expiration") or "",
-                "Qty": fmt_number(o["quantity"], 0),
-                "Value": fmt_number(o["value"]),
+                "Symbol": o.symbol,
+                "Underlying": o.underlying,
+                "Type": o.option_type,
+                "Strike": fmt_number(o.strike),
+                "Exp": o.expiration or "",
+                "Qty": fmt_number(o.quantity, 0),
+                "Value": fmt_number(o.value),
             }
             for o in norm
         ]

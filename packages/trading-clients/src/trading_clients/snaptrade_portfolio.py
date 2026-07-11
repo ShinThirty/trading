@@ -34,7 +34,7 @@ def build_account_summary(
     """
     nlv = _account_nlv(account)
     mapped = positions.to_normalized() + options.to_normalized()
-    market_value = sum(p["value"] for p in mapped if not p["is_cash"])
+    market_value = sum(p.value for p in mapped if not p.is_cash)
     return AccountSummary(
         account_id=account.get("id") or "",
         label=account.get("name") or account.get("id") or "",
@@ -44,7 +44,7 @@ def build_account_summary(
         cash=nlv - market_value,
         market_value=market_value,
         day_pnl=0.0,  # SnapTrade balances expose no clean day P&L
-        unrealized_pnl=sum(p["pnl"] for p in mapped if not p["is_cash"]),
+        unrealized_pnl=sum(p.pnl for p in mapped if not p.is_cash),
         positions=mapped,
     )
 

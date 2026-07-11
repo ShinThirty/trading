@@ -170,16 +170,12 @@ async def calculate_hedge(
     if not index_price:
         return f"Could not get quote for {hedge_index}"
 
-    equities = [
-        p
-        for p in positions
-        if not p.get("is_option") and not p.get("is_cash") and p.get("value", 0) > 0
-    ]
+    equities = [p for p in positions if not p.is_option and not p.is_cash and p.value > 0]
     if not equities:
         return "No equity positions found"
 
-    total_equity = sum(p["value"] for p in equities)
-    symbols = list({p["symbol"] for p in equities})
+    total_equity = sum(p.value for p in equities)
+    symbols = list({p.symbol for p in equities})
 
     if not expiration:
         target = date.today() + timedelta(days=30)
@@ -223,8 +219,8 @@ async def calculate_hedge(
     fallback_count = 0
 
     for p in equities:
-        sym = p["symbol"]
-        weight = p["value"] / total_equity
+        sym = p.symbol
+        weight = p.value / total_equity
         sym_bars = history_data.get(sym, [])
         b = ta.beta(sym_bars, benchmark_bars)
         if b is not None:

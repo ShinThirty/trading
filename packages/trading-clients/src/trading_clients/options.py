@@ -9,6 +9,7 @@ from typing import NamedTuple, TypedDict
 
 from trading_clients.bsm import bsm_price, lognormal_cdf
 from trading_clients.endpoint import CONTRACT_MULTIPLIER
+from trading_clients.portfolio import NormalizedPosition
 
 
 class EnrichedLeg(TypedDict):
@@ -58,13 +59,13 @@ def build_occ(underlying: str, expiration: str, option_type: str, strike: float)
 
 
 def aggregate_greeks(
-    positions: list[dict],
+    positions: list[NormalizedPosition],
     greeks_by_symbol: dict[str, dict],
 ) -> dict:
-    """Aggregate portfolio Greeks from position dicts and a Greeks lookup.
+    """Aggregate portfolio Greeks from NormalizedPosition objects and a Greeks lookup.
 
-    positions: normalized position dicts (from to_normalized() or Fidelity parser).
-      Option entries must have: underlying, option_type, strike, expiration, quantity.
+    positions: normalized positions from any broker's to_normalized().
+      Option entries carry underlying, option_type, strike, expiration, quantity.
       Equity entries contribute delta = quantity (1 delta per share).
     greeks_by_symbol: OCC symbol → {delta, gamma, theta, vega, mid_iv} from Tradier.
 
@@ -87,22 +88,22 @@ def aggregate_greeks(
         return by_underlying[sym]
 
     for p in positions:
-        if p.get("is_cash"):
+        if p.is_cash:
             continue
 
-        symbol = p.get("underlying", p["symbol"])
+        symbol = p.underlying or p.symbol
         entry = _get_underlying(symbol)
         positions_list: list = entry["positions"]
 
-        if p.get("is_option"):
+        if p.is_option:
             occ = build_occ(
-                p["underlying"],
-                p["expiration"],
-                p["option_type"],
-                p["strike"],
+                p.underlying,
+                p.expiration or "",
+                p.option_type,
+                p.strike,
             )
             greeks = greeks_by_symbol.get(occ, {})
-            qty = p.get("quantity", 0)
+            qty = p.quantity
             multiplier = qty * CONTRACT_MULTIPLIER
 
             pos_delta = (greeks.get("delta") or 0) * multiplier
@@ -113,9 +114,9 @@ def aggregate_greeks(
             positions_list.append(
                 {
                     "occ": occ,
-                    "type": p["option_type"],
-                    "strike": p["strike"],
-                    "expiration": p["expiration"],
+                    "type": p.option_type,
+                    "strike": p.strike,
+                    "expiration": p.expiration,
                     "quantity": qty,
                     "delta": pos_delta,
                     "gamma": pos_gamma,
@@ -133,7 +134,7 @@ def aggregate_greeks(
             totals["theta"] += pos_theta
             totals["vega"] += pos_vega
         else:
-            qty = p.get("quantity", 0)
+            qty = p.quantity
             entry["delta"] = float(entry["delta"]) + qty
             positions_list.append(
                 {

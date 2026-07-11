@@ -7,6 +7,7 @@ option leg by type — call = short, put = long — not assume every leg is shor
 """
 
 from trading_clients.endpoints.webull import PositionsResponse
+from trading_clients.portfolio import NormalizedPosition
 
 
 def _covered_call_position() -> dict:
@@ -63,36 +64,36 @@ def _protective_put_position() -> dict:
     }
 
 
-def _option_entry(normalized: list[dict]) -> dict:
-    return next(p for p in normalized if p["is_option"])
+def _option_entry(normalized: list[NormalizedPosition]) -> NormalizedPosition:
+    return next(p for p in normalized if p.is_option)
 
 
-def _equity_entry(normalized: list[dict]) -> dict:
-    return next(p for p in normalized if not p["is_option"])
+def _equity_entry(normalized: list[NormalizedPosition]) -> NormalizedPosition:
+    return next(p for p in normalized if not p.is_option)
 
 
 def test_covered_call_leg_is_short():
     norm = PositionsResponse([_covered_call_position()]).to_normalized()
     call = _option_entry(norm)
-    assert call["option_type"] == "call"
+    assert call.option_type == "call"
     # Short call: negative contracts and negative (liability) market value.
-    assert call["quantity"] == -3
-    assert call["value"] == 2.38 * -3 * 100
-    assert call["value"] < 0
+    assert call.quantity == -3
+    assert call.value == 2.38 * -3 * 100
+    assert call.value < 0
     # Equity leg keeps full long share count.
-    assert _equity_entry(norm)["quantity"] == 300
+    assert _equity_entry(norm).quantity == 300
 
 
 def test_protective_put_leg_is_long():
     norm = PositionsResponse([_protective_put_position()]).to_normalized()
     put = _option_entry(norm)
-    assert put["option_type"] == "put"
+    assert put.option_type == "put"
     # Long put: positive contracts and positive (asset) market value — the bug
     # forced this negative, mislabeling the hedge as a short put.
-    assert put["quantity"] == 1
-    assert put["value"] == 17.85 * 1 * 100
-    assert put["value"] > 0
-    assert _equity_entry(norm)["quantity"] == 100
+    assert put.quantity == 1
+    assert put.value == 17.85 * 1 * 100
+    assert put.value > 0
+    assert _equity_entry(norm).quantity == 100
 
 
 def test_protective_put_not_counted_as_csp_collateral():
@@ -100,5 +101,5 @@ def test_protective_put_not_counted_as_csp_collateral():
     norm = PositionsResponse([_protective_put_position()]).to_normalized()
     put = _option_entry(norm)
     # _compute_csp_collateral only charges collateral for puts with qty < 0.
-    assert put["option_type"] == "put"
-    assert put["quantity"] >= 0
+    assert put.option_type == "put"
+    assert put.quantity >= 0

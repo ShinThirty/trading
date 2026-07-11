@@ -297,21 +297,19 @@ async def get_csp_utilization(ctx: Context) -> str:
     for acct in summaries:
         total_cash += acct.cash
         for p in acct.positions:
-            if not p.get("is_option") or p.get("option_type") != "put":
+            if not p.is_option or p.option_type != "put":
                 continue
-            qty = p.get("quantity", 0)
-            if qty >= 0:
+            if p.quantity >= 0:
                 continue
-            strike = p.get("strike", 0)
-            contracts = abs(qty)
-            collateral = strike * CONTRACT_MULTIPLIER * contracts
+            contracts = abs(p.quantity)
+            collateral = p.strike * CONTRACT_MULTIPLIER * contracts
             total_collateral += collateral
             csp_rows.append(
                 {
                     "Account": acct.label,
-                    "Underlying": p.get("underlying", p.get("symbol", "")),
-                    "Strike": fmt_number(strike),
-                    "Exp": p.get("expiration", ""),
+                    "Underlying": p.underlying or p.symbol,
+                    "Strike": fmt_number(p.strike),
+                    "Exp": p.expiration or "",
                     "Qty": fmt_number(contracts, 0),
                     "Collateral": fmt_number(collateral),
                 }
@@ -368,9 +366,7 @@ async def get_free_capital(ctx: Context) -> str:
 
     for acct in summaries:
         acct_liquid = sum(
-            p.get("value", 0.0)
-            for p in acct.positions
-            if p.get("is_cash") and p.get("symbol", "").upper() == "SGOV"
+            p.value for p in acct.positions if p.is_cash and p.symbol.upper() == "SGOV"
         )
         acct_cash_mm = acct.cash - acct_liquid
         acct_collateral = _compute_csp_collateral(acct.positions)
@@ -440,13 +436,13 @@ async def get_portfolio_greeks(ctx: Context) -> str:
 
     all_positions, errors = await _fetch_all_positions(ctx)
 
-    option_positions = [p for p in all_positions if p.get("is_option")]
+    option_positions = [p for p in all_positions if p.is_option]
     if not option_positions:
         return "(no option positions found)"
 
     occ_set: set[str] = set()
     for p in option_positions:
-        occ_set.add(opts.build_occ(p["underlying"], p["expiration"], p["option_type"], p["strike"]))
+        occ_set.add(opts.build_occ(p.underlying, p.expiration or "", p.option_type, p.strike))
 
     greeks_by_symbol: dict[str, dict] = {}
     quote_resp = await tradier.get(t.QUOTES, t.GetQuotesRequest(",".join(occ_set), greeks=True))

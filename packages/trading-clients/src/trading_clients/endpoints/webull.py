@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from trading_clients.endpoint import CONTRACT_MULTIPLIER, BodyRequest, Endpoint, ParamsRequest
-from trading_clients.portfolio import CASH_EQUIVALENTS
+from trading_clients.portfolio import CASH_EQUIVALENTS, NormalizedPosition
 from trading_clients.table_helpers import fmt_number, kv_table, list_table
 
 
@@ -240,19 +240,14 @@ class PositionsResponse:
     def from_response(cls, data: list[dict]) -> "PositionsResponse":
         return cls(positions=data or [])
 
-    def to_normalized(self) -> list[dict]:
-        """Convert positions to normalized dicts for aggregation.
+    def to_normalized(self) -> list[NormalizedPosition]:
+        """Convert positions to NormalizedPosition objects for aggregation.
 
-        Simple positions (0-1 legs) emit one entry.
-        Multi-leg positions (covered stock, spreads) emit separate entries
-        for each equity and option leg.
-
-        Each dict has: symbol, quantity, last, cost, value, pnl, pnl_pct,
-        is_option, is_cash. Option entries additionally have: underlying,
-        option_type, strike, expiration, strategy.
+        Simple positions (0-1 legs) emit one entry. Multi-leg positions (covered
+        stock, spreads) emit separate entries for each equity and option leg.
         """
         sf = _safe_float
-        result: list[dict] = []
+        result: list[NormalizedPosition] = []
 
         for p in self.positions:
             legs = p.get("legs", [])
@@ -265,24 +260,23 @@ class PositionsResponse:
                     (lg for lg in legs if lg.get("instrument_type") == "OPTION"),
                     None,
                 )
-                is_cash_equiv = symbol in CASH_EQUIVALENTS
-                pos: dict[str, Any] = {
-                    "symbol": symbol,
-                    "quantity": sf(p.get("quantity")),
-                    "last": sf(p.get("last_price")),
-                    "cost": sf(p.get("cost_price")),
-                    "value": sf(p.get("market_value")),
-                    "pnl": sf(p.get("unrealized_profit_loss")),
-                    "pnl_pct": pnl_pct,
-                    "is_option": option_leg is not None,
-                    "is_cash": is_cash_equiv,
-                }
+                pos = NormalizedPosition(
+                    symbol=symbol,
+                    quantity=sf(p.get("quantity")),
+                    last=sf(p.get("last_price")),
+                    cost=sf(p.get("cost_price")),
+                    value=sf(p.get("market_value")),
+                    pnl=sf(p.get("unrealized_profit_loss")),
+                    pnl_pct=pnl_pct,
+                    is_option=option_leg is not None,
+                    is_cash=symbol in CASH_EQUIVALENTS,
+                )
                 if option_leg:
-                    pos["underlying"] = symbol
-                    pos["option_type"] = (option_leg.get("option_type") or "").lower()
-                    pos["strike"] = sf(option_leg.get("option_exercise_price"))
-                    pos["expiration"] = option_leg.get("option_expire_date", "")
-                    pos["strategy"] = p.get("option_strategy", "")
+                    pos.underlying = symbol
+                    pos.option_type = (option_leg.get("option_type") or "").lower()
+                    pos.strike = sf(option_leg.get("option_exercise_price"))
+                    pos.expiration = option_leg.get("option_expire_date", "")
+                    pos.strategy = p.get("option_strategy", "")
                 result.append(pos)
             else:
                 strategy = p.get("option_strategy", "")
@@ -291,17 +285,17 @@ class PositionsResponse:
                     itype = lg.get("instrument_type", "")
                     if itype == "EQUITY":
                         result.append(
-                            {
-                                "symbol": symbol,
-                                "quantity": qty * CONTRACT_MULTIPLIER,
-                                "last": sf(lg.get("last_price")),
-                                "cost": sf(lg.get("cost")),
-                                "value": sf(lg.get("last_price")) * qty * CONTRACT_MULTIPLIER,
-                                "pnl": sf(lg.get("unrealized_profit_loss")),
-                                "pnl_pct": 0.0,
-                                "is_option": False,
-                                "is_cash": False,
-                            }
+                            NormalizedPosition(
+                                symbol=symbol,
+                                quantity=qty * CONTRACT_MULTIPLIER,
+                                last=sf(lg.get("last_price")),
+                                cost=sf(lg.get("cost")),
+                                value=sf(lg.get("last_price")) * qty * CONTRACT_MULTIPLIER,
+                                pnl=sf(lg.get("unrealized_profit_loss")),
+                                pnl_pct=0.0,
+                                is_option=False,
+                                is_cash=False,
+                            )
                         )
                     elif itype == "OPTION":
                         otype = (lg.get("option_type") or "").lower()
@@ -316,22 +310,22 @@ class PositionsResponse:
                             signed_qty = qty
                         last = sf(lg.get("last_price"))
                         result.append(
-                            {
-                                "symbol": symbol,
-                                "quantity": signed_qty,
-                                "last": last,
-                                "cost": sf(lg.get("cost")),
-                                "value": last * signed_qty * CONTRACT_MULTIPLIER,
-                                "pnl": sf(lg.get("unrealized_profit_loss")),
-                                "pnl_pct": 0.0,
-                                "is_option": True,
-                                "is_cash": False,
-                                "underlying": symbol,
-                                "option_type": otype,
-                                "strike": sf(lg.get("option_exercise_price")),
-                                "expiration": lg.get("option_expire_date", ""),
-                                "strategy": strategy,
-                            }
+                            NormalizedPosition(
+                                symbol=symbol,
+                                quantity=signed_qty,
+                                last=last,
+                                cost=sf(lg.get("cost")),
+                                value=last * signed_qty * CONTRACT_MULTIPLIER,
+                                pnl=sf(lg.get("unrealized_profit_loss")),
+                                pnl_pct=0.0,
+                                is_option=True,
+                                is_cash=False,
+                                underlying=symbol,
+                                option_type=otype,
+                                strike=sf(lg.get("option_exercise_price")),
+                                expiration=lg.get("option_expire_date", ""),
+                                strategy=strategy,
+                            )
                         )
 
         return result
