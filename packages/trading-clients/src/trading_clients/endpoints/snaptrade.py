@@ -47,22 +47,30 @@ def _map_position(pos: dict[str, Any]) -> dict[str, Any]:
 
 
 def _map_option(opt: dict[str, Any]) -> dict[str, Any]:
-    """SnapTrade option position → normalized position dict (value at ×100)."""
+    """SnapTrade option position → normalized position dict (value at ×100).
+
+    SnapTrade reports `price` (last) per-share but `average_purchase_price`
+    per-contract (the ×100 is already baked in — a per-share reading of, e.g.,
+    135.34 on a $27.50-strike put is impossible). So the contract multiplier
+    applies only to `price`; the per-share cost is avg ÷ 100, and the total cost
+    basis is avg × units directly. Multiplying avg by the mult again double-counts
+    the ×100 and inflates P&L 100×.
+    """
     osym = (opt.get("symbol") or {}).get("option_symbol") or {}
     ticker = osym.get("ticker") or ""
     m = _OCC_TYPE_RE.search(ticker)
     units = float(opt.get("units") or 0.0)
     price = float(opt.get("price") or 0.0)
-    avg = float(opt.get("average_purchase_price") or 0.0)
+    avg_per_contract = float(opt.get("average_purchase_price") or 0.0)
     value = units * price * CONTRACT_MULTIPLIER
-    cost_basis = avg * units * CONTRACT_MULTIPLIER
+    cost_basis = avg_per_contract * units
     return {
         "symbol": ticker,
         "underlying": (osym.get("underlying_symbol") or {}).get("symbol") or "",
         "quantity": units,
         "last": price,
         "value": value,
-        "cost": avg,
+        "cost": avg_per_contract / CONTRACT_MULTIPLIER,
         "pnl": value - cost_basis,
         "pnl_pct": _pct(value - cost_basis, cost_basis),
         "is_option": True,

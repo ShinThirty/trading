@@ -106,6 +106,31 @@ def test_call_option_type_parsed_from_ticker():
     assert round(acct.positions[0]["value"], 2) == 1_000.00  # 2 × 5.0 × 100
 
 
+def test_option_cost_basis_treats_avg_purchase_price_as_per_contract():
+    # SnapTrade reports average_purchase_price PER CONTRACT (×100 baked in). A
+    # per-share reading would exceed the strike on OTM shorts and multiply cost
+    # basis — and thus P&L — by 100. This pins the real CRDO 7/10 short put that
+    # produced a phantom +$582K "gain" before the fix.
+    raw = {
+        "symbol": {
+            "option_symbol": {
+                "ticker": "CRDO  260710P00250000",
+                "strike_price": 250.0,
+                "expiration_date": "2026-07-10",
+                "underlying_symbol": {"symbol": "CRDO"},
+            }
+        },
+        "units": -3,
+        "price": 1.97,  # per share (last)
+        "average_purchase_price": 1942.62,  # per contract (= $19.4262/share)
+    }
+    opt = ep.AccountOptionsResponse.from_response([raw]).to_normalized()[0]
+    assert round(opt["cost"], 4) == 19.4262  # per-share cost, not 1942.62
+    assert round(opt["value"], 2) == -591.00  # -3 × 1.97 × 100
+    # cost_basis = 1942.62 × -3 = -5827.86 → pnl = -591 − (−5827.86) = +5236.86
+    assert round(opt["pnl"], 2) == 5236.86  # sane ~90% capture, not +582,195
+
+
 def test_zero_balance_account_has_no_positions():
     acct = build_account_summary(_account(0.0), _positions(), _options())
     assert acct.nlv == 0.0
