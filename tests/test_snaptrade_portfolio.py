@@ -7,7 +7,16 @@ market value), short options kept as negative value at the ×100 multiplier, and
 option underlying/type/strike parsed from the OCC ticker.
 """
 
+from trading_clients.endpoints import snaptrade as ep
 from trading_clients.snaptrade_portfolio import build_account_summary
+
+
+def _positions(*rows: dict) -> ep.AccountPositionsResponse:
+    return ep.AccountPositionsResponse.from_response(list(rows))
+
+
+def _options(*rows: dict) -> ep.AccountOptionsResponse:
+    return ep.AccountOptionsResponse.from_response(list(rows))
 
 
 def _account(nlv: float) -> dict:
@@ -54,12 +63,12 @@ def _option(
 def test_maps_nlv_cash_and_market_value():
     acct = build_account_summary(
         _account(158_725.23),
-        [
+        _positions(
             _stock("FDRXX", 80_000.0, 1.0, cash=True),  # money market → cash
             _stock("QCOM", 200, 189.16),
             _stock("ISRG", 100, 406.78),
-        ],
-        [],
+        ),
+        _options(),
     )
     assert acct.broker == "Fidelity"
     assert acct.account_type == "NP"
@@ -73,8 +82,8 @@ def test_maps_nlv_cash_and_market_value():
 def test_short_option_is_negative_value_at_100x_and_excluded_from_long():
     acct = build_account_summary(
         _account(1_000.0),
-        [],
-        [_option("SMCI  260710P00027500", "SMCI", -1, 0.01, 27.5, "2026-07-10")],
+        _positions(),
+        _options(_option("SMCI  260710P00027500", "SMCI", -1, 0.01, 27.5, "2026-07-10")),
     )
     opt = acct.positions[0]
     assert opt["is_option"] is True
@@ -90,14 +99,14 @@ def test_short_option_is_negative_value_at_100x_and_excluded_from_long():
 def test_call_option_type_parsed_from_ticker():
     acct = build_account_summary(
         _account(1_000.0),
-        [],
-        [_option("AAPL  260117C00250000", "AAPL", 2, 5.0, 250.0, "2026-01-17")],
+        _positions(),
+        _options(_option("AAPL  260117C00250000", "AAPL", 2, 5.0, 250.0, "2026-01-17")),
     )
     assert acct.positions[0]["option_type"] == "call"
     assert round(acct.positions[0]["value"], 2) == 1_000.00  # 2 × 5.0 × 100
 
 
 def test_zero_balance_account_has_no_positions():
-    acct = build_account_summary(_account(0.0), [], [])
+    acct = build_account_summary(_account(0.0), _positions(), _options())
     assert acct.nlv == 0.0
     assert acct.positions == []

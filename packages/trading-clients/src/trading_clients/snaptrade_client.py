@@ -4,7 +4,8 @@ SnapTrade exposes read-only brokerage account data (positions, balances, option
 holdings) across many brokers — including Fidelity/NetBenefits via Akoya — behind
 a signed REST API. This is a thin transport in the house BaseClient style rather
 than the official SDK, to keep trading-clients' dependency surface at httpx only
-(the same reason there's no Webull SDK).
+(the same reason there's no Webull SDK). Endpoints + typed request/response
+models live in endpoints/snaptrade.py; callers use client.get(ENDPOINT, request).
 
 This uses **Personal API key** authentication: the key identifies the account
 owner, so requests carry only `clientId` + `timestamp` — no `userId`/`userSecret`,
@@ -67,40 +68,6 @@ class SnapTradeClient(BaseClient):
         self._http = httpx.AsyncClient(timeout=30, http2=True, base_url=BASE_URL)
         self._semaphore = asyncio.Semaphore(CONCURRENCY)
 
-    # ── signed transport ─────────────────────────────────────
-
-    async def _signed(
-        self,
-        method: str,
-        path: str,
-        query: dict[str, str] | None = None,
-        body: dict[str, Any] | None = None,
-    ) -> Any:
-        """Sign and send one request; return parsed JSON (list or dict)."""
-        # clientId first, timestamp last, user params in between — a fixed order so
-        # the signed string is byte-identical to what we put on the wire.
-        merged: dict[str, str] = {"clientId": self._config.client_id}
-        if query:
-            merged.update(query)
-        merged["timestamp"] = str(int(time.time()))
-        query_string = urlencode(merged)
-
-        signature = compute_signature(f"{path}?{query_string}", self._config.consumer_key, body)
-        headers = {"Signature": signature, "Accept": "application/json"}
-
-        async with self._semaphore:
-            if method == "POST":
-                headers["Content-Type"] = "application/json"
-                resp = await self._http.post(f"{path}?{query_string}", headers=headers, json=body)
-            else:
-                resp = await self._http.request(method, f"{path}?{query_string}", headers=headers)
-
-        if not resp.is_success:
-            raise ApiError(resp.status_code, f"SnapTrade API {resp.status_code}: {resp.text}")
-        if not resp.content:
-            return None
-        return resp.json()
-
     async def _request(
         self,
         method: str,
@@ -109,21 +76,30 @@ class SnapTradeClient(BaseClient):
         params: dict[str, str] | None = None,
         body: dict[str, Any] | None = None,
     ) -> Any:
-        """BaseClient hook — delegate to the signed transport."""
-        return await self._signed(method, path or endpoint.path, params, body)
+        """Sign and send one request; return parsed JSON (list or dict / None).
 
-    # ── read endpoints ───────────────────────────────────────
-    # Brokerages are connected in the SnapTrade dashboard (app.snaptrade.com);
-    # this client only reads what's already connected.
+        clientId leads and timestamp trails the query so the signed string is
+        byte-identical to the wire query. The BaseClient get/post wrapper already
+        holds the concurrency semaphore, so this hook doesn't re-acquire it.
+        """
+        resolved = path or endpoint.path
+        merged: dict[str, str] = {"clientId": self._config.client_id}
+        if params:
+            merged.update(params)
+        merged["timestamp"] = str(int(time.time()))
+        url = f"{resolved}?{urlencode(merged)}"
 
-    async def list_accounts(self) -> list[dict[str, Any]]:
-        """All brokerage accounts connected to this Personal SnapTrade account."""
-        return await self._signed("GET", "/accounts")
+        signature = compute_signature(url, self._config.consumer_key, body)
+        headers = {"Signature": signature, "Accept": "application/json"}
 
-    async def get_positions(self, account_id: str) -> list[dict[str, Any]]:
-        """Stock/ETF/mutual-fund positions for one account."""
-        return await self._signed("GET", f"/accounts/{account_id}/positions")
+        if method == "POST":
+            headers["Content-Type"] = "application/json"
+            resp = await self._http.post(url, headers=headers, json=body)
+        else:
+            resp = await self._http.request(method, url, headers=headers)
 
-    async def get_option_positions(self, account_id: str) -> list[dict[str, Any]]:
-        """Option positions for one account."""
-        return await self._signed("GET", f"/accounts/{account_id}/options")
+        if not resp.is_success:
+            raise ApiError(resp.status_code, f"SnapTrade API {resp.status_code}: {resp.text}")
+        if not resp.content:
+            return None
+        return resp.json()
