@@ -81,7 +81,7 @@ When tier ≥ Building, the skill loops over `get_portfolio_summary` positions a
 | RSI | `get_technical_indicators` | Building+: RSI >70 + above 50d = aggressive CC candidate. |
 | Distance from 50d SMA | `get_technical_indicators` | Defensive+: any position above 50d + 30%+ gain = CC candidate. |
 | Portfolio concentration | `get_portfolio_summary` | Defensive+: >15% in single name = oversized flag. |
-| Existing CC overlay | `get_account_positions` | Building+: presence/absence determines CC candidacy. |
+| Existing CC overlay | `get_webull_positions` | Building+: presence/absence determines CC candidacy. |
 
 The cohort cut is `P/S >12 OR PEG >3` — both metrics matter and either one triggers. The threshold values are calibrated to the current market structure (May 2026); revisit annually.
 

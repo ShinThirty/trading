@@ -146,7 +146,10 @@ Present as carry-forward items before starting any analysis.
 
 ## 3. OPTION POSITIONS REVIEW
 
-1. Call `get_account_positions` for each account to identify open option positions.
+1. Enumerate open option positions across all brokers:
+   - `get_webull_positions` per Webull account (`get_webull_accounts` to list them).
+   - `get_snaptrade_positions` (spans all Fidelity accounts).
+   - `get_tradier_positions`, `get_tastytrade_positions`.
 
 2. For each option position:
    - **CCs approaching strike**: Recommend roll up/out or let assign based on CC intent.
@@ -194,7 +197,7 @@ No triggers + hedge exists → **"Hedge healthy, hold."**
 
 ## 6. RETRO & ACTION ITEMS
 
-1. Summarize trades executed since last review (use `get_order_history` if needed).
+1. Summarize trades executed since last review (use `get_webull_order_history` if needed).
 
 2. Check for framework violations:
    - Any single-tranche entries that should have been scaled?

@@ -239,7 +239,7 @@ Before placing the order:
 
 1. Run `calculate_hedge` with **all** of: chosen strike, expiration, and `crisis_multiplier=1.25`. Use the contract count it returns — don't re-derive it.
 2. Run `get_iv_metrics` for SPY — log IV Rank for entry record. Confirm Liquidity rating ≥ 3 (tight spreads); skip the strike if Liq ≤ 2.
-3. Run `preview_order` to confirm cost, then place at the previewed mid or better.
+3. Run `preview_webull_order` to confirm cost, then place at the previewed mid or better.
 4. Record the trade as a `decision_add` with action `WRITE_NEW`, source `hedge`, and `deadline` set 30 days before expiry (the platform handles the date math).
 
 After placing:

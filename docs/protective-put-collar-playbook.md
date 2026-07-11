@@ -223,7 +223,7 @@ The single-name protective put / collar and the [structural tail program](tail-h
 - `get_option_chain` — strike + delta + bid/ask for both legs
 - `analyze_strategy` — collar P&L profile (max gain / max loss / breakevens)
 - `analyze_roll` — for rolling either leg of a collar or a standalone put
-- `preview_order` — always preview multi-leg orders before placing
+- `preview_webull_order` — always preview multi-leg orders before placing
 - [covered-call-overlay.md](covered-call-overlay.md) — companion doc; the CC leg of a collar follows its rules
 - [tail-hedge-playbook.md](tail-hedge-playbook.md) — portfolio-level tail program (separate problem, separate rules)
 - [management-rules.md](management-rules.md) — the brief Hedge section that pointed here

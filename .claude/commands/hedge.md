@@ -9,7 +9,7 @@ The program: **deep OTM (20-25%) SPY puts, 90-120 DTE, rolled on discipline, nev
 ## Step 1: Inventory the hedge
 
 In parallel:
-- `get_account_positions` for the margin account `7PGI7F1AV89E2FBFTK4HDK1JIB` (where the program lives)
+- `get_webull_positions` for the margin account `7PGI7F1AV89E2FBFTK4HDK1JIB` (where the program lives)
 - `decision_list` source `hedge` for entry/anchor context
 - `get_portfolio_summary` for live put P&L %
 
@@ -86,7 +86,7 @@ Sell the tranche (full for T1/T3, partial for T2) → `calculate_hedge` (current
 
 ## Step 4: Cost tracking
 
-`get_order_history` for the margin account `7PGI7F1AV89E2FBFTK4HDK1JIB`, filter SPY/QQQ puts.
+`get_webull_order_history` for the margin account `7PGI7F1AV89E2FBFTK4HDK1JIB`, filter SPY/QQQ puts.
 
 | Metric | Target | If breached |
 |---|---|---|
@@ -116,7 +116,7 @@ Sell the tranche (full for T1/T3, partial for T2) → `calculate_hedge` (current
 
 **Rationale:** one sentence, anchored on trigger criteria — not signals or feel.
 
-Non-HOLD → `preview_order` first, then place; record `decision_close` + `decision_add` (source `hedge`).
+Non-HOLD → `preview_webull_order` first, then place; record `decision_close` + `decision_add` (source `hedge`).
 
 ### If no hedge exists
 

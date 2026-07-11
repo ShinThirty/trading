@@ -114,6 +114,7 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │           ├── prediction_market.py # Shared PredictionEvent / PredictionOutcome types
 │   │           ├── reddit.py            # 3 endpoints (search, subreddit listing, post + comments)
 │   │           ├── sentiment.py         # 3 endpoints (CBOE equity p/c, AAII, NAAIM)
+│   │           ├── snaptrade.py         # 5 read endpoints (accounts, balances, positions, options, activities) + NormalizedPosition mappers
 │   │           └── yahoo.py             # Response models for Yahoo Finance (via yfinance)
 │   ├── trading-mcp/                     # MCP server (composed via fastmcp mount)
 │   │   ├── pyproject.toml               # depends on: trading-clients + fastmcp + yfinance
@@ -132,7 +133,7 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │       │   ├── decisions.py         # Option decisions table schema, enums, async CRUD
 │   │       │   └── twse_revenue.py      # TWSE monthly revenue cache (TSMC + future TW tickers)
 │   │       └── tools/                   # Subdomain-organized tool modules
-│   │           ├── account.py           # Balances, positions, orders, instruments, portfolio aggregates (Webull + Tradier + TastyTrade read-only)
+│   │           ├── account.py           # Balances, positions, orders, activities, instruments, portfolio aggregates (Webull + Tradier + TastyTrade + SnapTrade read-only; per-broker get_<broker>_* tools)
 │   │           ├── orders.py            # Place/preview/replace/cancel orders, order history
 │   │           ├── quotes.py            # Stock/option quotes, history, intraday, technicals, clock
 │   │           ├── options.py           # Chains, expected move, strategy/roll analysis,
@@ -276,7 +277,7 @@ signature) handles button clicks (`mute:<seconds>:<dedup_key>`) and the
 | **Alpha Vantage** | News sentiment, top market movers | API key |
 | **EIA** | Weekly Petroleum Status Report — crude/product stocks, refinery utilization, retail gasoline. WPSR Wed 10:30 ET. Used during oil-price / inflation events; informs CPI energy, consumer demand destruction, Fed policy path. | API key (free, [register](https://www.eia.gov/opendata/register.php)) |
 | **TastyTrade** | IV rank/percentile, backtesting, watchlists, dividends; read-only account (accounts, balances, positions, orders) folded into the portfolio aggregation | OAuth2 refresh token |
-| **SnapTrade** | Read-only Fidelity/NetBenefits holdings (401k, BrokerageLinks, HSA, IRAs) via Akoya — the Fidelity source in the portfolio aggregation, replacing the retired CSV export. Brokerages connected in the SnapTrade dashboard; accounts included automatically when `[snaptrade]` is configured. | Personal API key (clientId + consumerKey; HMAC-SHA256 request signature) |
+| **SnapTrade** | Read-only Fidelity/NetBenefits holdings (401k, BrokerageLinks, HSA, IRAs) via Akoya — the Fidelity source in the portfolio aggregation, replacing the retired CSV export. Standalone read tools at parity with the other brokers: `get_snaptrade_accounts` / `_balances` / `_positions` / `_activities` (transaction history — fills, dividends, option assignment/expiration — since SnapTrade exposes no order-status read). Brokerages connected in the SnapTrade dashboard; accounts included automatically when `[snaptrade]` is configured. | Personal API key (clientId + consumerKey; HMAC-SHA256 request signature) |
 | **Yahoo Finance** | Stock screener, institutional ownership | None (via yfinance) |
 | **Motley Fool** | Earnings call transcripts (scraped, primary source) | None |
 | **Morningstar** | Earnings call transcripts (Playwright fallback for tickers Fool misses — small caps, foreign issuers). URL is `/stocks/{xase\|xnys\|xnas}/{ticker}/earnings-transcript`; AWS WAF JS challenge requires headless-Chromium with `navigator.webdriver` mask. | None (Playwright) |
@@ -362,7 +363,7 @@ All Webull endpoints use the v2 API (`x-version: v2` header). Stock and option o
 - **Unified order endpoint:** Stock and option orders both use `/openapi/trade/order/place`. Options use `instrument_type: "OPTION"` + `legs[]` array. Orders use `symbol` directly (no `instrument_id` lookup needed).
 - **v2 endpoint paths:** All endpoints use `/openapi/` prefix: `/openapi/account/list`, `/openapi/assets/balance`, `/openapi/assets/positions`, `/openapi/trade/order/*`, `/openapi/instrument/stock/list`.
 - **HTTP/2:** The httpx client is configured with `http2=True`.
-- **Multi-account:** All account-specific methods accept an optional `account_id` parameter. Resolution order: explicit param > config default > error with instructions. Use `get_app_subscriptions()` to list all accounts.
+- **Multi-account:** All account-specific methods accept an optional `account_id` parameter. Resolution order: explicit param > config default > error with instructions. Use `get_webull_accounts()` to list all accounts.
 
 ## Conventions
 

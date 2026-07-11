@@ -6,9 +6,10 @@ Scan all equity positions across accounts and identify which ones are ready for 
 
 ## Step 1: Gather All Positions
 
-1. Call `get_account_positions` for the Webull Cash account (5GJ21MGS53M5FU0T8TQN6PEGQA).
-2. If the user has fresh Fidelity CSVs at ~/Downloads/fidelity/, read those too.
-3. Build a list of all equity positions, noting:
+1. Enumerate equity positions across accounts:
+   - `get_webull_positions` per Webull account (`get_webull_accounts` to list them).
+   - `get_snaptrade_positions` (spans all Fidelity accounts).
+2. Build a list of all equity positions, noting:
    - Which already have CCs (COVERED_STOCK strategy)
    - Which are uncovered shares
    - Share count per position (determines max contracts)
@@ -23,7 +24,7 @@ For each **uncovered** equity position, check the CC overlay "When NOT to write"
 | **Pre-catalyst** | Earnings within 2 weeks? | `get_iv_metrics` (earnings date) |
 | **IV Rank too low** | IV Rank < 25%? Premiums not worth capping upside. Exception: thesis exits. | `get_iv_metrics` |
 | **Deep underwater** | Current price >20% below cost basis? | Position cost vs last price |
-| **First 2 weeks** | Was this position entered within the last 14 days? | `get_order_history` or skip if unclear |
+| **First 2 weeks** | Was this position entered within the last 14 days? | `get_webull_order_history` or skip if unclear |
 
 Call `get_iv_metrics` in a single batch for all uncovered symbols to check IV Rank, earnings dates, and liquidity in one call. **In parallel**, call `get_equity_risk_premium` and `get_yield_curve_state` — these flex Step 3 coverage and Step 4 strike aggressiveness. Note the ERP tier and curve regime; carry forward.
 

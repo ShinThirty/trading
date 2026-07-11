@@ -10,7 +10,7 @@ Evaluate whether to roll an option position on **$ARGUMENTS.symbol** and present
 
 ## Step 1: Current Position
 
-1. Call `get_account_positions` to find the current CC or CSP on $ARGUMENTS.symbol. Identify:
+1. Call `get_webull_positions` to find the current CC or CSP on $ARGUMENTS.symbol. Identify:
    - Option type (call or put)
    - Current strike and expiration
    - Current P&L (% of max profit realized)
