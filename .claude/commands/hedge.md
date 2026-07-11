@@ -82,7 +82,7 @@ Green is a preference inside the window, never a reason to breach the 30-DTE flo
 
 ### Universal close+redeploy workflow (any trigger)
 
-Sell the tranche (full for T1/T3, partial for T2) → `calculate_hedge` (current SPY, `crisis_multiplier=1.25`, `fidelity_folder`) → buy new at 25% OTM from *current* SPY → `decision_close` (old) + `decision_add` `WRITE_NEW` source `hedge` (new).
+Sell the tranche (full for T1/T3, partial for T2) → `calculate_hedge` (current SPY, `crisis_multiplier=1.25`) → buy new at 25% OTM from *current* SPY → `decision_close` (old) + `decision_add` `WRITE_NEW` source `hedge` (new).
 
 ## Step 4: Cost tracking
 

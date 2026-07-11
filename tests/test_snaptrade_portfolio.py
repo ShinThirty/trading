@@ -1,0 +1,103 @@
+"""SnapTrade → AccountSummary mapping.
+
+SnapTrade replaces the Fidelity CSV as the source for Fidelity/NetBenefits
+holdings. This pins the shape mapping the aggregation depends on: NLV from the
+authoritative account balance, money-market flagged is_cash (excluded from
+market value), short options kept as negative value at the ×100 multiplier, and
+option underlying/type/strike parsed from the OCC ticker.
+"""
+
+from trading_clients.snaptrade_portfolio import build_account_summary
+
+
+def _account(nlv: float) -> dict:
+    return {
+        "id": "acct-1",
+        "name": "BrokerageLink",
+        "number": "*****4787",
+        "institution_name": "Fidelity",
+        "account_category": "INVESTMENT",
+        "raw_type": "NP",
+        "balance": {"total": {"amount": nlv, "currency": {"code": "USD"}}},
+    }
+
+
+def _stock(ticker: str, units: float, price: float, cash: bool = False) -> dict:
+    return {
+        "symbol": {"symbol": {"symbol": ticker, "description": ticker}},
+        "units": units,
+        "price": price,
+        "average_purchase_price": price,
+        "open_pnl": 0.0,
+        "cash_equivalent": cash,
+    }
+
+
+def _option(
+    ticker: str, underlying: str, units: float, price: float, strike: float, exp: str
+) -> dict:
+    return {
+        "symbol": {
+            "option_symbol": {
+                "ticker": ticker,
+                "strike_price": strike,
+                "expiration_date": exp,
+                "underlying_symbol": {"symbol": underlying},
+            }
+        },
+        "units": units,
+        "price": price,
+        "average_purchase_price": price,
+    }
+
+
+def test_maps_nlv_cash_and_market_value():
+    acct = build_account_summary(
+        _account(158_725.23),
+        [
+            _stock("FDRXX", 80_000.0, 1.0, cash=True),  # money market → cash
+            _stock("QCOM", 200, 189.16),
+            _stock("ISRG", 100, 406.78),
+        ],
+        [],
+    )
+    assert acct.broker == "Fidelity"
+    assert acct.account_type == "NP"
+    assert acct.nlv == 158_725.23  # authoritative balance
+    # market value = non-cash positions only; FDRXX excluded
+    assert round(acct.market_value, 2) == round(200 * 189.16 + 100 * 406.78, 2)
+    # cash absorbs the remainder so nlv == cash + market_value
+    assert round(acct.cash + acct.market_value, 2) == 158_725.23
+
+
+def test_short_option_is_negative_value_at_100x_and_excluded_from_long():
+    acct = build_account_summary(
+        _account(1_000.0),
+        [],
+        [_option("SMCI  260710P00027500", "SMCI", -1, 0.01, 27.5, "2026-07-10")],
+    )
+    opt = acct.positions[0]
+    assert opt["is_option"] is True
+    assert opt["underlying"] == "SMCI"
+    assert opt["option_type"] == "put"
+    assert opt["strike"] == 27.5
+    assert opt["quantity"] == -1
+    assert round(opt["value"], 2) == -1.00  # -1 × 0.01 × 100
+    # short option is a liability → not counted in long market value
+    assert acct.market_value == round(-1.00, 2)
+
+
+def test_call_option_type_parsed_from_ticker():
+    acct = build_account_summary(
+        _account(1_000.0),
+        [],
+        [_option("AAPL  260117C00250000", "AAPL", 2, 5.0, 250.0, "2026-01-17")],
+    )
+    assert acct.positions[0]["option_type"] == "call"
+    assert round(acct.positions[0]["value"], 2) == 1_000.00  # 2 × 5.0 × 100
+
+
+def test_zero_balance_account_has_no_positions():
+    acct = build_account_summary(_account(0.0), [], [])
+    assert acct.nlv == 0.0
+    assert acct.positions == []

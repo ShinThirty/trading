@@ -143,7 +143,7 @@ When due, web-pull DRAMeXchange/TrendForce spot commentary (no free API, no MCP 
 
 ## Step 2: Position Alerts
 
-1. Ask the user if they have fresh Fidelity CSVs to include (exported from Fidelity Positions page to ~/Downloads/fidelity). Call `get_portfolio_summary` with `fidelity_folder` if provided, otherwise Webull-only.
+1. Call `get_portfolio_summary` — it spans Webull + Tradier + TastyTrade + Fidelity in one call.
 
 2. Scan for positions needing attention TODAY or within the next 7 days:
    - **Options expiring within 14 DTE**: flag for roll/close/let-expire decision
@@ -169,7 +169,7 @@ Skip positions with no alerts. Only surface what needs action.
 
 Daily health check on the structural tail hedge. Surfaces whether one of the three playbook triggers is approaching — full evaluation lives in `/hedge`. Per [tail-hedge-playbook.md](../../docs/tail-hedge-playbook.md), do NOT open/close/resize based on regime, vol, or signals.
 
-Call `get_portfolio_greeks` (with `fidelity_folder` if provided). For each long SPY/QQQ put, call `get_quote greeks=True` for current delta.
+Call `get_portfolio_greeks`. For each long SPY/QQQ put, call `get_quote greeks=True` for current delta.
 
 Present a snapshot: contracts, strike % OTM, current put delta, DTE, P&L %.
 

@@ -55,6 +55,8 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │       ├── eia_client.py            # API key auth (EIA Open Data v2)
 │   │       ├── factset_client.py        # No auth, identifies via User-Agent (FactSet Earnings Insight PDF; pdfplumber)
 │   │       ├── tastytrade_client.py     # OAuth2 refresh token auth
+│   │       ├── snaptrade_client.py       # HMAC-SHA256 request-signature auth (Personal API key); read-only Fidelity/NetBenefits via Akoya
+│   │       ├── snaptrade_portfolio.py    # Maps SnapTrade accounts/positions/options → AccountSummary (Fidelity source for portfolio aggregation)
 │   │       ├── fool_client.py           # No auth (Motley Fool sitemap+page scrape)
 │   │       ├── morningstar_client.py    # Playwright-based scraper (earnings transcripts; AWS WAF bypass via webdriver mask); takes PlaywrightHost
 │   │       ├── edgar_client.py          # No auth, identifies via User-Agent (SEC EDGAR)
@@ -79,7 +81,7 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │       ├── indicators.py            # Technical analysis indicators on OHLCV bars (pure functions)
 │   │       ├── options.py               # Options analytics: expected move, HV, strategy P&L (pure functions)
 │   │       ├── options_multi_exp.py     # Multi-expiration strategy analysis: calendars, diagonals, PMCC (uses BSM for far leg)
-│   │       ├── portfolio.py             # Multi-account portfolio aggregation (Webull + Tradier + TastyTrade APIs + Fidelity CSV)
+│   │       ├── portfolio.py             # Multi-account portfolio aggregation (Webull + Tradier + TastyTrade + SnapTrade/Fidelity APIs)
 │   │       ├── regime.py                # Market regime classification from pre-fetched data (pure functions)
 │   │       └── endpoints/               # Typed request/response models + Endpoint defs
 │   │           ├── webull.py            # 11 endpoints (account, orders, instruments)
@@ -274,6 +276,7 @@ signature) handles button clicks (`mute:<seconds>:<dedup_key>`) and the
 | **Alpha Vantage** | News sentiment, top market movers | API key |
 | **EIA** | Weekly Petroleum Status Report — crude/product stocks, refinery utilization, retail gasoline. WPSR Wed 10:30 ET. Used during oil-price / inflation events; informs CPI energy, consumer demand destruction, Fed policy path. | API key (free, [register](https://www.eia.gov/opendata/register.php)) |
 | **TastyTrade** | IV rank/percentile, backtesting, watchlists, dividends; read-only account (accounts, balances, positions, orders) folded into the portfolio aggregation | OAuth2 refresh token |
+| **SnapTrade** | Read-only Fidelity/NetBenefits holdings (401k, BrokerageLinks, HSA, IRAs) via Akoya — the Fidelity source in the portfolio aggregation, replacing the retired CSV export. Brokerages connected in the SnapTrade dashboard; accounts included automatically when `[snaptrade]` is configured. | Personal API key (clientId + consumerKey; HMAC-SHA256 request signature) |
 | **Yahoo Finance** | Stock screener, institutional ownership | None (via yfinance) |
 | **Motley Fool** | Earnings call transcripts (scraped, primary source) | None |
 | **Morningstar** | Earnings call transcripts (Playwright fallback for tickers Fool misses — small caps, foreign issuers). URL is `/stocks/{xase\|xnys\|xnas}/{ticker}/earnings-transcript`; AWS WAF JS challenge requires headless-Chromium with `navigator.webdriver` mask. | None (Playwright) |
@@ -333,6 +336,10 @@ api_key = <your_api_key>
 [tastytrade]
 client_secret = <your_oauth_client_secret>
 refresh_token = <your_oauth_refresh_token>
+
+[snaptrade]
+client_id = <your_personal_client_id>
+consumer_key = <your_personal_consumer_key>
 
 [discord]
 bot_token      = <discord_bot_token>       # used by trading-alerts to post embeds

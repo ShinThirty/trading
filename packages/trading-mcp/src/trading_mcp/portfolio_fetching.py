@@ -1,8 +1,8 @@
 """Cross-account portfolio fetching helpers used by tradier/signals/webull tools.
 
 Aggregates account summaries, positions, NLV, and CSP collateral across the
-user's Webull, Tradier, and TastyTrade accounts (and optional Fidelity CSV
-folder). Also exposes the risk-free rate fetch since it conceptually pairs with
+user's Webull, Tradier, TastyTrade, and SnapTrade (Fidelity/NetBenefits)
+accounts. Also exposes the risk-free rate fetch since it conceptually pairs with
 portfolio-level math.
 
 Per the concurrency rule: providers are fetched concurrently with each other,
@@ -23,11 +23,13 @@ from trading_clients.endpoints.webull import (
     AccountRequest,
     EmptyRequest,
 )
-from trading_clients.portfolio import AccountSummary, parse_fidelity_folder
+from trading_clients.portfolio import AccountSummary
+from trading_clients.snaptrade_portfolio import fetch_snaptrade_accounts, fetch_snaptrade_nlv
 from trading_clients.table_helpers import to_float_zero
 
 from trading_mcp.helpers import (
     _fred,
+    _optional_snaptrade,
     _optional_tastytrade,
     _optional_tradier,
     _retry,
@@ -230,28 +232,29 @@ async def _fetch_tastytrade_accounts(ctx: Context) -> ProviderResult:
     return summaries, errors
 
 
+async def _fetch_snaptrade_accounts(ctx: Context) -> ProviderResult:
+    """Fidelity/NetBenefits accounts via SnapTrade (Personal API key)."""
+    client = _optional_snaptrade(ctx)
+    if client is None:
+        return [], {}
+    try:
+        return await fetch_snaptrade_accounts(client), {}
+    except Exception as e:
+        return [], {"SnapTrade": str(e)}
+
+
 async def _fetch_accounts(
     ctx: Context,
-    fidelity_folder: str | None = None,
 ) -> tuple[list[AccountSummary], dict[str, str]]:
-    """Aggregate account summaries across all configured brokers + Fidelity.
+    """Aggregate account summaries across all configured brokers + SnapTrade.
 
     Providers run concurrently; accounts within a provider run sequentially.
     """
-
-    async def _fidelity() -> ProviderResult:
-        if not fidelity_folder:
-            return [], {}
-        try:
-            return await parse_fidelity_folder(fidelity_folder), {}
-        except Exception as e:
-            return [], {"Fidelity": str(e)}
-
     results = await asyncio.gather(
         _fetch_webull_accounts(ctx),
         _fetch_tradier_accounts(ctx),
         _fetch_tastytrade_accounts(ctx),
-        _fidelity(),
+        _fetch_snaptrade_accounts(ctx),
         return_exceptions=True,
     )
 
@@ -270,13 +273,12 @@ async def _fetch_accounts(
 
 async def _fetch_all_positions(
     ctx: Context,
-    fidelity_folder: str | None = None,
 ) -> tuple[list[dict], list[str]]:
     """Flatten every normalized position across all brokers (for greeks/hedge).
 
     Reuses _fetch_accounts so Tradier positions arrive already quote-enriched.
     """
-    summaries, errors = await _fetch_accounts(ctx, fidelity_folder)
+    summaries, errors = await _fetch_accounts(ctx)
     all_positions = [p for acct in summaries for p in acct.positions]
     return all_positions, [f"{k}: {v}" for k, v in errors.items()]
 
@@ -316,8 +318,8 @@ async def _fetch_risk_free_rate(ctx: Context) -> float:
     return 0.0
 
 
-async def _fetch_total_nlv(ctx: Context, fidelity_folder: str | None = None) -> float:
-    """Sum net liquidation value across all brokers + Fidelity.
+async def _fetch_total_nlv(ctx: Context) -> float:
+    """Sum net liquidation value across all brokers + SnapTrade.
 
     Kept lightweight (balances only, no positions/quotes) so it can run
     concurrently with _fetch_all_positions without duplicating the heavy fetch.
@@ -353,10 +355,10 @@ async def _fetch_total_nlv(ctx: Context, fidelity_folder: str | None = None) -> 
         except Exception:
             pass
 
-    if fidelity_folder:
+    snaptrade = _optional_snaptrade(ctx)
+    if snaptrade is not None:
         try:
-            for acct in await parse_fidelity_folder(fidelity_folder):
-                total += acct.nlv
+            total += await fetch_snaptrade_nlv(snaptrade)
         except Exception:
             pass
 

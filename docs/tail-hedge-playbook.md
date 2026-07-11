@@ -143,12 +143,11 @@ Use `calculate_hedge` with these parameters for tail-risk hedging:
 | `hedge_index` | `SPY` | See "Hedge index selection" — almost always SPY; QQQ only with explicit justification |
 | `hedge_ratio` | `0.5` | Hedge half the long delta; the other half rides the recovery |
 | `delta_adjusted` | `False` | Tail-risk mode (notional sizing) — sized for full payout when puts go ITM, not 1:1 delta hedging |
-| `fidelity_folder` | `~/Downloads/fidelity` (if applicable) | **Required if you hold equity in Fidelity.** Without this, sizing only covers Webull NLV |
 | `crisis_multiplier` | `1.25` | Amplifies trailing beta to account for correlation spikes during crashes (tech betas inflate ~25% in real selloffs) |
 
-The tool **rounds contracts UP** in tail-risk mode — undersizing is the costly direction.
+The tool **rounds contracts UP** in tail-risk mode — undersizing is the costly direction. It sizes against the full book across all accounts, not just Webull.
 
-**Why both `crisis_multiplier` and `fidelity_folder` are required:** Trailing 90-day beta understates crash beta (correlations spike to ~1.0; high-beta names amplify ~25%); the multiplier corrects for that. The Fidelity CSV is needed because Webull-only sizing misses any equity held there. Skipping either combination typically undersizes the hedge by 20-30%. Don't estimate manually — the tool needs the full picture.
+**Why `crisis_multiplier` is required:** Trailing 90-day beta understates crash beta (correlations spike to ~1.0; high-beta names amplify ~25%); the multiplier corrects for that. Skipping it typically undersizes the hedge by 20-30%. Don't estimate manually — the tool needs the full picture.
 
 **Annual budget target: 0.5-1.5% portfolio drag.** Above 2% means hedging too frequently, at the wrong IV window, or correction-hedging in disguise.
 
@@ -162,7 +161,7 @@ These are what separate a tail program from a tactical trade. Without these, the
 | **Don't close on rallies** | "Nothing is wrong" doesn't mean "no risk." That's the entire premise. *Closing* (going to zero protection) is not the same as *re-striking up*: a rally that drifts the put past ~30% OTM warrants a maintenance roll-up (Trigger 1, rally side) — close-and-immediate-redeploy, never absent protection. |
 | **Don't close on losses** | Premium decay is the *normal* outcome. Losing the entire premium most of the time is how the program is supposed to work. |
 | **Only close on a rebalancing trigger** | Three valid triggers: maintenance roll (delta drift to -0.20 to -0.40), major harvest (5x+ via tranches), or routine 30-DTE roll. All three are close-and-immediate-redeploy. See Rebalancing the Program. |
-| **Resize at every roll** | Re-run `calculate_hedge` (with `fidelity_folder` + `crisis_multiplier`) before each new contract — the tool reads current NLV/beta, so you never need to track portfolio drift manually. |
+| **Resize at every roll** | Re-run `calculate_hedge` (with `crisis_multiplier`) before each new contract — the tool reads current NLV/beta, so you never need to track portfolio drift manually. |
 | **Don't short-circuit on signals** | The /hedge skill's reversal checklist is for opening discussions, not for closing this structural hedge. |
 
 ## Rebalancing the program
@@ -238,7 +237,7 @@ Real Path 2 decisions are based on what the puts ARE (delta, IV state, distance 
 
 Before placing the order:
 
-1. Run `calculate_hedge` with **all** of: chosen strike, expiration, `fidelity_folder` (if applicable), and `crisis_multiplier=1.25`. Use the contract count it returns — don't re-derive it.
+1. Run `calculate_hedge` with **all** of: chosen strike, expiration, and `crisis_multiplier=1.25`. Use the contract count it returns — don't re-derive it.
 2. Run `get_iv_metrics` for SPY — log IV Rank for entry record. Confirm Liquidity rating ≥ 3 (tight spreads); skip the strike if Liq ≤ 2.
 3. Run `preview_order` to confirm cost, then place at the previewed mid or better.
 4. Record the trade as a `decision_add` with action `WRITE_NEW`, source `hedge`, and `deadline` set 30 days before expiry (the platform handles the date math).

@@ -230,22 +230,18 @@ async def get_tastytrade_orders(
 
 
 @mcp.tool()
-async def get_portfolio_summary(
-    ctx: Context,
-    fidelity_folder: str | None = None,
-) -> str:
-    """Get a consolidated view across ALL Webull accounts and optionally Fidelity.
+async def get_portfolio_summary(ctx: Context) -> str:
+    """Get a consolidated view across ALL Webull, Tradier, TastyTrade, and
+    Fidelity accounts.
 
     Iterates all Webull accounts (Roth IRA, Individual Cash, Margin, etc.),
     fetches balance and positions for each, and aggregates into one summary.
-    Optionally includes Fidelity positions from exported CSVs.
-
-    fidelity_folder: path to folder containing Fidelity Positions_*.csv files
-      (e.g. '~/Downloads/fidelity'). Omit to show Webull only.
+    Fidelity/NetBenefits accounts are included automatically via SnapTrade when
+    [snaptrade] is configured (connect brokerages in the SnapTrade dashboard).
 
     Note: fetches Webull data sequentially to respect rate limits (~1 req/second).
     """
-    summaries, errors = await _fetch_accounts(ctx, fidelity_folder)
+    summaries, errors = await _fetch_accounts(ctx)
     portfolio = PortfolioSummary(summaries, errors)
     full_output = format_portfolio_summary(portfolio)
 
@@ -259,7 +255,6 @@ async def get_cluster_concentration(
     ctx: Context,
     tickers: str,
     cap_pct: float = 35.0,
-    fidelity_folder: str | None = None,
 ) -> str:
     """Aggregate a correlated cluster's long exposure as a % of total book NLV,
     measured against a target cap.
@@ -269,37 +264,31 @@ async def get_cluster_concentration(
     cluster's share of total net liquidation value, the cap dollar value at
     cap_pct, and the overage — how much to trim to get back under the cap.
     Short options (CSPs/CCs) are excluded: they are cash-secured premium, not
-    deployed long exposure.
+    deployed long exposure. Fidelity/NetBenefits accounts are included
+    automatically via SnapTrade when [snaptrade] is configured.
 
     Use to size a correlated-cluster cap (e.g. the AI-capex / circular-financing
     cluster) so a group of names that derate together is capped as one exposure.
 
     tickers: comma-separated cluster members (e.g. 'META,MU,AMZN,NVDA,AVGO,CRDO').
     cap_pct: ceiling as a percent of total book NLV (default 35.0).
-    fidelity_folder: path to the Fidelity Positions CSV folder to include Fidelity
-      accounts (e.g. '~/Downloads/fidelity'). Omit for Webull-only.
     """
     ticker_list = [t.strip() for t in tickers.split(",") if t.strip()]
-    summaries, _ = await _fetch_accounts(ctx, fidelity_folder)
+    summaries, _ = await _fetch_accounts(ctx)
     cc = compute_cluster_concentration(summaries, ticker_list, cap_pct)
     return format_cluster_concentration(cc)
 
 
 @mcp.tool()
-async def get_csp_utilization(
-    ctx: Context,
-    fidelity_folder: str | None = None,
-) -> str:
+async def get_csp_utilization(ctx: Context) -> str:
     """Calculate CSP collateral utilization across all accounts.
 
     Shows total cash-secured put collateral vs available cash (including SGOV),
     utilization %, remaining capacity, and per-position detail. Use before
-    writing new CSPs to check the 60% cash utilization limit.
-
-    fidelity_folder: path to folder containing Fidelity Positions_*.csv files
-      (e.g. '~/Downloads/fidelity'). Omit to show Webull only.
+    writing new CSPs to check the 60% cash utilization limit. Fidelity accounts
+    are included automatically via SnapTrade when [snaptrade] is configured.
     """
-    summaries, _ = await _fetch_accounts(ctx, fidelity_folder)
+    summaries, _ = await _fetch_accounts(ctx)
 
     csp_rows: list[dict[str, str]] = []
     total_collateral = 0.0
@@ -352,10 +341,7 @@ async def get_csp_utilization(
 
 
 @mcp.tool()
-async def get_free_capital(
-    ctx: Context,
-    fidelity_folder: str | None = None,
-) -> str:
+async def get_free_capital(ctx: Context) -> str:
     """Calculate free (deployable) capital across all brokerage accounts.
 
     For each account shows total cash/money market, CSP collateral tied up,
@@ -369,10 +355,10 @@ async def get_free_capital(
     - Long options don't tie up collateral
     - SGOV (0-3 month treasury) is treated as liquid/deployable
 
-    fidelity_folder: path to folder containing Fidelity Portfolio_Positions_*.csv
-      files (e.g. '~/Downloads/fidelity'). Omit to show Webull only.
+    Fidelity accounts are included automatically via SnapTrade when [snaptrade]
+    is configured.
     """
-    summaries, errors = await _fetch_accounts(ctx, fidelity_folder)
+    summaries, errors = await _fetch_accounts(ctx)
 
     rows: list[dict[str, str]] = []
     grand_cash = 0.0
@@ -441,24 +427,18 @@ async def get_free_capital(
 
 
 @mcp.tool()
-async def get_portfolio_greeks(
-    ctx: Context,
-    fidelity_folder: str | None = None,
-) -> str:
+async def get_portfolio_greeks(ctx: Context) -> str:
     """Get aggregate portfolio Greeks (delta, theta, gamma, vega) across all accounts.
 
-    Fetches all option positions from Webull (and optionally Fidelity CSVs),
-    constructs OCC symbols, batch-quotes Greeks from Tradier, and aggregates
-    per-underlying and portfolio-wide.
-
-    fidelity_folder: path to folder containing Fidelity Positions_*.csv files
-      (e.g. '~/Downloads/fidelity'). Omit for Webull only.
+    Fetches all option positions from Webull (and Fidelity via SnapTrade when
+    configured), constructs OCC symbols, batch-quotes Greeks from Tradier, and
+    aggregates per-underlying and portfolio-wide.
 
     Requires [webull] and [tradier] sections in ~/.tradingrc.
     """
     tradier = _tradier(ctx)
 
-    all_positions, errors = await _fetch_all_positions(ctx, fidelity_folder)
+    all_positions, errors = await _fetch_all_positions(ctx)
 
     option_positions = [p for p in all_positions if p.get("is_option")]
     if not option_positions:

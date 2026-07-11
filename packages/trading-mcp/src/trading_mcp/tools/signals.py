@@ -129,7 +129,6 @@ async def calculate_hedge(
     strike: float | None = None,
     hedge_ratio: float = 1.0,
     delta_adjusted: bool = False,
-    fidelity_folder: str | None = None,
     crisis_multiplier: float = 1.0,
 ) -> str:
     """Calculate put contracts needed to hedge the portfolio.
@@ -143,9 +142,6 @@ async def calculate_hedge(
     hedge_ratio: fraction to hedge, 0.0-1.0 (default 1.0 = 100%).
     delta_adjusted: if True, divide by put delta for continuous 1:1 hedging.
       Default False = tail-risk mode (sized for full payout when puts go ITM).
-    fidelity_folder: path to folder containing Fidelity Positions_*.csv files
-      (e.g. '~/Downloads/fidelity'). Includes Fidelity equity + NLV in the
-      sizing math. Omit for Webull only.
     crisis_multiplier: amplify portfolio beta to account for correlation spikes
       during crashes (default 1.0 = trailing beta as-is). Recommended 1.25 for
       tail-risk hedges per docs/tail-hedge-playbook.md — tech betas inflate
@@ -161,10 +157,10 @@ async def calculate_hedge(
 
     tradier = _tradier(ctx)
 
-    positions_task = _fetch_all_positions(ctx, fidelity_folder)
+    positions_task = _fetch_all_positions(ctx)
     quote_task = tradier.get(t.QUOTES, t.GetQuotesRequest(hedge_index, greeks=False))
     exp_task = tradier.get(t.EXPIRATIONS, t.GetExpirationsRequest(hedge_index))
-    bal_task = _fetch_total_nlv(ctx, fidelity_folder)
+    bal_task = _fetch_total_nlv(ctx)
 
     (positions, _pos_errors), quote_resp, exp_resp, total_nlv = await asyncio.gather(
         positions_task, quote_task, exp_task, bal_task

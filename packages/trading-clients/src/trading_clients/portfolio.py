@@ -1,57 +1,23 @@
 """Multi-account portfolio aggregation and formatting.
 
-Parses Fidelity CSVs and composes Webull API data into a consolidated
-cross-account portfolio summary.
+Composes Webull/Tradier/TastyTrade/SnapTrade account data (fetched by the MCP
+server) into a consolidated cross-account portfolio summary and cluster
+concentration. The account/position shapes are provider-neutral AccountSummary
+objects; provider-specific fetching lives in trading-mcp.
 """
 
-import asyncio
-import csv
-import re
-from collections.abc import Sequence
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any
 
 from trading_clients.table_helpers import fmt_number, list_table
 
 CASH_EQUIVALENTS = {"FDRXX", "SGOV"}
 
 
-def _safe_float(val: Any) -> float:
-    """Parse a value to float, stripping commas, dollar signs, and percent signs."""
-    if val is None or val == "" or val == "--":
-        return 0.0
-    try:
-        return float(str(val).replace(",", "").replace("$", "").replace("+", "").replace("%", ""))
-    except (ValueError, TypeError):
-        return 0.0
-
-
-# Fidelity uses shortened OCC symbols: ROOT + YYMMDD + C/P + STRIKE (no zero-padding)
-_FIDELITY_OPTION_RE = re.compile(r"^([A-Z]+)(\d{6})([CP])(\d+(?:\.\d+)?)$")
-
-
-def parse_fidelity_option(symbol: str) -> tuple[str, str, str, float] | None:
-    """Parse Fidelity option symbol into (underlying, expiration, option_type, strike).
-
-    Fidelity format: ROOT + YYMMDD + C/P + STRIKE (no zero-padding).
-    Example: 'COIN260515P160' → ('COIN', '2026-05-15', 'put', 160.0)
-    Returns None if not an option symbol.
-    """
-    m = _FIDELITY_OPTION_RE.match(symbol)
-    if not m:
-        return None
-    root, d, cp, strike = m.groups()
-    exp = f"20{d[:2]}-{d[2:4]}-{d[4:6]}"
-    option_type = "call" if cp == "C" else "put"
-    return root, exp, option_type, float(strike)
-
-
 @dataclass
 class AccountSummary:
     account_id: str
     label: str
-    broker: str  # "Webull" or "Fidelity"
+    broker: str  # "Webull", "Tradier", "TastyTrade", "Fidelity" (via SnapTrade)
     account_type: str  # "CASH", "MARGIN", etc.
     nlv: float = 0.0
     cash: float = 0.0
@@ -65,226 +31,6 @@ class AccountSummary:
 class PortfolioSummary:
     accounts: list[AccountSummary]
     errors: dict[str, str] = field(default_factory=dict)
-
-
-_FIDELITY_REQUIRED_COLUMNS = {
-    "Account Number",
-    "Account Name",
-    "Symbol",
-    "Quantity",
-    "Last Price",
-    "Current Value",
-    "Average Cost Basis",
-    "Total Gain/Loss Dollar",
-    "Total Gain/Loss Percent",
-    "Today's Gain/Loss Dollar",
-}
-
-# Fidelity has shipped this export with both Title Case ("Current Value") and
-# Sentence case ("Current value") headers; match case-insensitively and
-# canonicalize back to the Title Case the parser reads by, so a header-case
-# flip doesn't silently drop the entire file.
-_FIDELITY_CANONICAL_COLUMNS = {
-    "account number": "Account Number",
-    "account name": "Account Name",
-    "symbol": "Symbol",
-    "description": "Description",
-    "quantity": "Quantity",
-    "last price": "Last Price",
-    "current value": "Current Value",
-    "average cost basis": "Average Cost Basis",
-    "total gain/loss dollar": "Total Gain/Loss Dollar",
-    "total gain/loss percent": "Total Gain/Loss Percent",
-    "today's gain/loss dollar": "Today's Gain/Loss Dollar",
-}
-
-
-def _canonicalize_fidelity_columns(fieldnames: Sequence[str] | None) -> list[str]:
-    """Map each header to its canonical Title Case name, case-insensitively."""
-    return [
-        _FIDELITY_CANONICAL_COLUMNS.get((name or "").strip().lower(), name)
-        for name in (fieldnames or [])
-    ]
-
-
-class FidelityFormatError(ValueError):
-    """Raised when a Fidelity CSV doesn't match the expected format."""
-
-
-async def parse_fidelity_csv(path: str) -> list[AccountSummary]:
-    """Parse a Fidelity positions CSV into one summary per account.
-
-    Handles the current Fidelity export format:
-    - Row 1: CSV header (Account Number, Account Name, Symbol, ...)
-    - Data rows with account info in each row. A single export commonly
-      contains several accounts (BrokerageLink, Roth, HSA, 401k, ...); each
-      distinct Account Number becomes its own AccountSummary.
-    - No-ticker core/sweep rows (e.g. a BrokerageLink core balance, which has
-      an empty Symbol but a real Current Value) are counted as cash.
-    - Trailing blank line + disclaimer text at the bottom (ignored).
-
-    Raises FidelityFormatError if the CSV format is unrecognized.
-    """
-    text = (await asyncio.to_thread(Path(path).read_text, encoding="utf-8-sig")).splitlines()
-
-    # Find header row
-    header_idx = -1
-    for i, line in enumerate(text):
-        if "Symbol" in line and "," in line:
-            header_idx = i
-            break
-    if header_idx < 0:
-        raise FidelityFormatError(
-            f"No CSV header row found in {Path(path).name}. "
-            "Expected a row containing 'Symbol' and other column headers."
-        )
-
-    reader = csv.DictReader(text[header_idx:])
-    reader.fieldnames = _canonicalize_fidelity_columns(reader.fieldnames)
-    columns = set(reader.fieldnames or [])
-    missing = _FIDELITY_REQUIRED_COLUMNS - columns
-    if missing:
-        raise FidelityFormatError(
-            f"Fidelity CSV format changed — {Path(path).name} is missing columns: "
-            f"{', '.join(sorted(missing))}. "
-            f"Found columns: {', '.join(sorted(columns))}"
-        )
-
-    stem = Path(path).stem
-    accounts: dict[str, AccountSummary] = {}
-
-    def _account_for(number: str, name: str) -> AccountSummary:
-        acct = accounts.get(number)
-        if acct is None:
-            acct = AccountSummary(
-                account_id=number or stem,
-                label=name or number or stem,
-                broker="Fidelity",
-                account_type="CASH",
-            )
-            accounts[number] = acct
-        return acct
-
-    for row in reader:
-        symbol = (row.get("Symbol") or "").strip()
-        account_number = (row.get("Account Number") or "").strip()
-        account_name = (row.get("Account Name") or "").strip()
-        current_value_raw = (row.get("Current Value") or "").strip()
-
-        # A row with no Symbol is one of three things:
-        #   1. A roll-up pointer (Description "BROKERAGELINK") whose underlying
-        #      holdings are enumerated separately under their own Account
-        #      Numbers — e.g. a 401k whose BrokerageLink sub-accounts are
-        #      listed as distinct accounts later in the file. Counting it would
-        #      double-count those sub-accounts, so skip it.
-        #   2. A genuine no-ticker core/sweep cash balance — count as cash.
-        #   3. The trailing blank line / disclaimer text — end of holdings.
-        # The core balance and roll-up both carry an Account Number AND a
-        # Current Value; the disclaimer/blank rows carry neither — so use that
-        # to find the end of holdings instead of breaking on the first empty
-        # Symbol (which silently dropped the entire file when a no-Symbol line
-        # came first).
-        if not symbol:
-            if not account_number or not current_value_raw:
-                break  # blank line or disclaimer — end of holdings
-            description = (row.get("Description") or "").strip()
-            if description.upper() == "BROKERAGELINK":
-                continue  # roll-up of sub-accounts enumerated separately
-            acct = _account_for(account_number, account_name)
-            value = _safe_float(current_value_raw)
-            acct.cash += value
-            acct.positions.append(
-                {
-                    "symbol": description or "Core",
-                    "quantity": _safe_float(row.get("Quantity")),
-                    "last": _safe_float(row.get("Last Price")),
-                    "cost": _safe_float(row.get("Average Cost Basis")),
-                    "value": value,
-                    "pnl": _safe_float(row.get("Total Gain/Loss Dollar")),
-                    "pnl_pct": _safe_float(row.get("Total Gain/Loss Percent")),
-                    "is_option": False,
-                    "is_cash": True,
-                }
-            )
-            continue
-
-        acct = _account_for(account_number, account_name)
-
-        # Normalize: strip trailing asterisks (e.g. FDRXX** → FDRXX)
-        symbol = symbol.rstrip("*")
-
-        # Handle pending activity as cash adjustment (unsettled transactions)
-        if symbol.lower() == "pending activity":
-            acct.cash += _safe_float(row.get("Current Value"))
-            continue
-
-        # Handle cash / money market / cash equivalents
-        if symbol in CASH_EQUIVALENTS:
-            value = _safe_float(row.get("Current Value"))
-            acct.cash += value
-            acct.positions.append(
-                {
-                    "symbol": symbol,
-                    "quantity": _safe_float(row.get("Quantity")),
-                    "last": _safe_float(row.get("Last Price")),
-                    "cost": _safe_float(row.get("Average Cost Basis")),
-                    "value": value,
-                    "pnl": _safe_float(row.get("Total Gain/Loss Dollar")),
-                    "pnl_pct": _safe_float(row.get("Total Gain/Loss Percent")),
-                    "is_option": False,
-                    "is_cash": True,
-                }
-            )
-            continue
-
-        # Strip leading " -" prefix on short option symbols
-        clean_symbol = symbol.lstrip(" -")
-
-        value = _safe_float(row.get("Current Value"))
-        qty = _safe_float(row.get("Quantity"))
-        last = _safe_float(row.get("Last Price"))
-        cost = _safe_float(row.get("Average Cost Basis"))
-        pnl = _safe_float(row.get("Total Gain/Loss Dollar"))
-        pnl_pct = _safe_float(row.get("Total Gain/Loss Percent"))
-        acct.day_pnl += _safe_float(row.get("Today's Gain/Loss Dollar"))
-        acct.unrealized_pnl += pnl
-
-        opt = parse_fidelity_option(clean_symbol)
-        pos: dict[str, Any] = {
-            "symbol": clean_symbol,
-            "quantity": qty,
-            "last": last,
-            "cost": cost,
-            "value": value,
-            "pnl": pnl,
-            "pnl_pct": pnl_pct,
-            "is_option": opt is not None,
-            "is_cash": False,
-        }
-        if opt:
-            underlying, exp, option_type, strike = opt
-            pos["underlying"] = underlying
-            pos["expiration"] = exp
-            pos["option_type"] = option_type
-            pos["strike"] = strike
-
-        acct.positions.append(pos)
-
-    for acct in accounts.values():
-        acct.market_value = sum(p.get("value", 0.0) for p in acct.positions if not p.get("is_cash"))
-        acct.nlv = acct.cash + acct.market_value
-
-    return list(accounts.values())
-
-
-async def parse_fidelity_folder(folder: str) -> list[AccountSummary]:
-    """Parse all Fidelity position CSVs in a folder."""
-    folder_path = Path(folder).expanduser()
-    if not folder_path.is_dir():
-        return []
-    csvs = sorted(folder_path.glob("*Positions*.csv"))
-    per_file = await asyncio.gather(*(parse_fidelity_csv(str(p)) for p in csvs))
-    return [acct for file_accounts in per_file for acct in file_accounts]
 
 
 def compact_portfolio_summary(summary: PortfolioSummary, file_path: str) -> str:

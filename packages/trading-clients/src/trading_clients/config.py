@@ -54,6 +54,20 @@ class TastyTradeConfig:
 
 
 @dataclass(frozen=True)
+class SnapTradeConfig:
+    """SnapTrade Personal API key (read-only Fidelity/others via Akoya).
+
+    Personal keys authenticate with just client_id + consumer_key: the key
+    identifies the account owner, so requests carry no userId/userSecret and
+    registerUser is not used (that's the Commercial model). Brokerages are
+    connected in the SnapTrade dashboard; this key then reads them.
+    """
+
+    client_id: str
+    consumer_key: str
+
+
+@dataclass(frozen=True)
 class EdgarConfig:
     """Optional. user_agent should be 'Your Name your@email.com' per SEC fair-use policy."""
 
@@ -70,6 +84,7 @@ class AppConfig:
     alphavantage: AlphaVantageConfig | None = None
     eia: EiaConfig | None = None
     tastytrade: TastyTradeConfig | None = None
+    snaptrade: SnapTradeConfig | None = None
     edgar: EdgarConfig | None = None
 
 
@@ -141,6 +156,14 @@ def load_config(path: Path = RC_PATH) -> AppConfig:
             refresh_token=parser.get("tastytrade", "refresh_token"),
         )
 
+    # SnapTrade (optional)
+    snaptrade = None
+    if parser.has_section("snaptrade"):
+        snaptrade = SnapTradeConfig(
+            client_id=parser.get("snaptrade", "client_id"),
+            consumer_key=parser.get("snaptrade", "consumer_key"),
+        )
+
     # EDGAR (optional — defaults work for low-volume personal use)
     edgar = None
     if parser.has_section("edgar"):
@@ -155,6 +178,7 @@ def load_config(path: Path = RC_PATH) -> AppConfig:
         alphavantage=alphavantage,
         eia=eia,
         tastytrade=tastytrade,
+        snaptrade=snaptrade,
         edgar=edgar,
     )
 

@@ -134,7 +134,7 @@ Present as carry-forward items before starting any analysis.
 
 ## 2. PORTFOLIO HEALTH CHECK (positions across all accounts)
 
-1. Ask the user if they have fresh Fidelity CSVs to include (exported from Fidelity Positions page to ~/Downloads/fidelity). Call `get_portfolio_summary` with `fidelity_folder` if provided, otherwise Webull-only. Note: Fidelity holds ~$311K across 3 accounts (401k BrokerageLink, blue-chip CSPs, tech CSPs) — without CSVs, the portfolio view is incomplete.
+1. Call `get_portfolio_summary` — it spans Webull + Tradier + TastyTrade + Fidelity in one call.
 
 2. For each position, check:
    - **Down >15%**: Run the thesis checkpoint (5 questions from docs/management-rules.md). State pass/fail for each. If any fail → recommend exit.
@@ -167,7 +167,7 @@ Present as carry-forward items before starting any analysis.
 
 Biweekly health check on the structural tail hedge. Per [tail-hedge-playbook.md](../../docs/tail-hedge-playbook.md), do NOT open/close/resize based on regime, vol, or signals — only the three playbook triggers drive action.
 
-Call `get_portfolio_greeks` (with `fidelity_folder` if provided). For each long SPY/QQQ put, call `get_quote greeks=True` for current delta.
+Call `get_portfolio_greeks`. For each long SPY/QQQ put, call `get_quote greeks=True` for current delta.
 
 Present a snapshot: contracts, strike % OTM, current put delta, DTE, cost basis, P&L %.
 
