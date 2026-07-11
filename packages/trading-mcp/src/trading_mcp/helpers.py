@@ -79,6 +79,13 @@ def _optional_tradier(ctx: Context) -> TradierClient | None:
     return _lc(ctx).get("tradier")
 
 
+def _snaptrade(ctx: Context) -> SnapTradeClient:
+    client = _optional_snaptrade(ctx)
+    if client is None:
+        raise RuntimeError("SnapTrade not configured. Add [snaptrade] section to ~/.tradingrc")
+    return client
+
+
 def _optional_snaptrade(ctx: Context) -> SnapTradeClient | None:
     """SnapTrade client if [snaptrade] is configured, else None — the source for
     Fidelity/NetBenefits holdings in the portfolio aggregation."""

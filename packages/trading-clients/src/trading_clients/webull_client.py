@@ -111,7 +111,7 @@ class WebullClient(BaseClient):
         """Validate account_id. Always required to prevent wrong-account mistakes."""
         if not account_id:
             raise RuntimeError(
-                "account_id is required. Use get_app_subscriptions() to list accounts."
+                "account_id is required. Use get_webull_accounts() to list accounts."
             )
         return account_id
 

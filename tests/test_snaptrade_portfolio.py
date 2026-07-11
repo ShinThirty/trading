@@ -135,3 +135,68 @@ def test_zero_balance_account_has_no_positions():
     acct = build_account_summary(_account(0.0), _positions(), _options())
     assert acct.nlv == 0.0
     assert acct.positions == []
+
+
+def test_balances_output_shows_cash_and_buying_power():
+    resp = ep.BalancesResponse.from_response(
+        [{"currency": {"code": "USD"}, "cash": 12_345.67, "buying_power": 24_691.34}]
+    )
+    out = resp.to_output()
+    assert "USD" in out
+    assert "12,345.67" in out
+    assert "24,691.34" in out
+
+
+def test_activities_parses_pagination_and_option_ticker():
+    resp = ep.AccountActivitiesResponse.from_response(
+        {
+            "data": [
+                {
+                    "type": "OPTIONEXPIRATION",
+                    "option_symbol": {"ticker": "SMCI  260710P00027500"},
+                    "units": -1,
+                    "price": 0.0,
+                    "amount": 0.0,
+                    "trade_date": "2026-07-10T00:00:00Z",
+                    "description": "Option expired worthless",
+                },
+                {
+                    "type": "DIVIDEND",
+                    "symbol": {"symbol": "QCOM"},
+                    "amount": 178.50,
+                    "trade_date": "2026-06-25T00:00:00Z",
+                    "description": "Qualcomm dividend",
+                },
+            ],
+            "pagination": {"offset": 0, "limit": 2, "total": 57},
+        }
+    )
+    assert resp.total == 57
+    out = resp.to_output()
+    assert "OPTIONEXPIRATION" in out
+    assert "SMCI  260710P00027500" in out
+    assert "2026-07-10" in out  # datetime trimmed to the date
+    assert "QCOM" in out
+    # paginated: footer reports the window since total > rows shown
+    assert "of 57" in out
+
+
+def test_activities_from_bare_list_is_defensive():
+    resp = ep.AccountActivitiesResponse.from_response([{"type": "INTEREST", "amount": 1.23}])
+    assert resp.total == 0
+    assert "INTEREST" in resp.to_output()
+
+
+def test_activities_request_params_omit_unset_filters():
+    bare = ep.AccountActivitiesRequest("acct-1").to_params()
+    assert bare == {"offset": "0", "limit": "100"}
+    filtered = ep.AccountActivitiesRequest(
+        "acct-1", limit=50, start_date="2026-01-01", end_date="2026-06-30", type="DIVIDEND,INTEREST"
+    ).to_params()
+    assert filtered == {
+        "offset": "0",
+        "limit": "50",
+        "startDate": "2026-01-01",
+        "endDate": "2026-06-30",
+        "type": "DIVIDEND,INTEREST",
+    }

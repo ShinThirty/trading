@@ -833,7 +833,7 @@ async def analyze_roll(
     Gate 2 (vs assignment): debit must be less than the intrinsic value lost at assignment.
 
     current_symbol: OCC option symbol of current position
-      (e.g. 'SMH260501C00410000'). Use get_account_positions to find it,
+      (e.g. 'SMH260501C00410000'). Use get_webull_positions to find it,
       or get_option_lookup to construct it.
     target_expiration: expiration date for the new position (YYYY-MM-DD).
       Use get_option_expirations to find available dates.

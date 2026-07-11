@@ -38,11 +38,18 @@ from urllib.parse import urlencode
 
 import httpx
 
+from trading_clients.cache import TTLCache
 from trading_clients.config import SnapTradeConfig
 from trading_clients.endpoint import ApiError, BaseClient, Endpoint
+from trading_clients.rate_limit import RateLimiter
 
 BASE_URL = "https://api.snaptrade.com"
 CONCURRENCY = 2
+
+# SnapTrade allows ~250 req/min per clientId; stay well under with a burst cap.
+RATE_LIMITS: dict[str, tuple[int, float]] = {
+    "default": (4, 2.0),  # 4 tokens / 2s ≈ 120 req/min
+}
 
 
 def compute_signature(path_with_query: str, consumer_key: str, body: Any = None) -> str:
@@ -67,6 +74,16 @@ class SnapTradeClient(BaseClient):
         self._config = config
         self._http = httpx.AsyncClient(timeout=30, http2=True, base_url=BASE_URL)
         self._semaphore = asyncio.Semaphore(CONCURRENCY)
+        self._cache = TTLCache()
+        self._limiter = RateLimiter(RATE_LIMITS)
+
+    def _cache_key(self, path: str, params: dict[str, str] | None) -> str:
+        """Cache key over the resolved path + request params only — never the
+        per-request clientId/timestamp added at sign time (those always change)."""
+        parts = [path]
+        if params:
+            parts.extend(f"{k}={v}" for k, v in sorted(params.items()))
+        return "&".join(parts)
 
     async def _request(
         self,
@@ -83,6 +100,16 @@ class SnapTradeClient(BaseClient):
         holds the concurrency semaphore, so this hook doesn't re-acquire it.
         """
         resolved = path or endpoint.path
+
+        # Cache check (GET only) — keyed before auth params are added.
+        if method == "GET" and endpoint.cache_ttl > 0:
+            key = self._cache_key(resolved, params)
+            cached = self._cache.get(key, endpoint.cache_ttl)
+            if cached is not None:
+                return cached
+
+        await self._limiter.acquire(endpoint.rate_key)
+
         merged: dict[str, str] = {"clientId": self._config.client_id}
         if params:
             merged.update(params)
@@ -100,6 +127,10 @@ class SnapTradeClient(BaseClient):
 
         if not resp.is_success:
             raise ApiError(resp.status_code, f"SnapTrade API {resp.status_code}: {resp.text}")
-        if not resp.content:
-            return None
-        return resp.json()
+        data = resp.json() if resp.content else None
+
+        # Cache store (GET only).
+        if method == "GET" and endpoint.cache_ttl > 0:
+            self._cache.put(key, data)  # type: ignore[possibly-unbound]
+
+        return data

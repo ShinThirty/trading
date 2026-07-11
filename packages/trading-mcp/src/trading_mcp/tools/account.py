@@ -1,8 +1,11 @@
 """Brokerage account state: balances, positions, instruments, portfolio aggregates."""
 
+import asyncio
+
 from fastmcp import Context, FastMCP
 from trading_clients import options as opts
 from trading_clients.endpoint import CONTRACT_MULTIPLIER
+from trading_clients.endpoints import snaptrade as sn
 from trading_clients.endpoints import tastytrade as tt
 from trading_clients.endpoints import tradier as t
 from trading_clients.endpoints.webull import (
@@ -25,7 +28,7 @@ from trading_clients.portfolio import (
 )
 from trading_clients.table_helpers import fmt_number, kv_table, list_table
 
-from trading_mcp.helpers import _tastytrade, _tradier, _webull, _write_temp_file
+from trading_mcp.helpers import _snaptrade, _tastytrade, _tradier, _webull, _write_temp_file
 from trading_mcp.portfolio_fetching import (
     _compute_csp_collateral,
     _fetch_accounts,
@@ -36,11 +39,11 @@ mcp = FastMCP("account-tools")
 
 
 @mcp.tool()
-async def get_account_balance(ctx: Context, account_id: str) -> str:
+async def get_webull_balance(ctx: Context, account_id: str) -> str:
     """Get account balance: net liquidation, cash, buying power, market value, day P&L,
     unrealized P&L, margin info.
 
-    account_id: Webull account ID (use get_app_subscriptions to find it).
+    account_id: Webull account ID (use get_webull_accounts to find it).
     """
     client = _webull(ctx)
     resp = await client.get(BALANCE, AccountRequest(client.ensure_account_id(account_id)))
@@ -48,12 +51,12 @@ async def get_account_balance(ctx: Context, account_id: str) -> str:
 
 
 @mcp.tool()
-async def get_account_positions(ctx: Context, account_id: str) -> str:
+async def get_webull_positions(ctx: Context, account_id: str) -> str:
     """Get all current portfolio holdings including option positions with full leg details
     (strike, expiration, option type, strategy). Returns each position's symbol, type,
     quantity, cost, last price, and unrealized P&L.
 
-    account_id: Webull account ID (use get_app_subscriptions to find it).
+    account_id: Webull account ID (use get_webull_accounts to find it).
     """
     client = _webull(ctx)
     resp = await client.get(POSITIONS, AccountRequest(client.ensure_account_id(account_id)))
@@ -82,7 +85,7 @@ async def refresh_webull_token(ctx: Context) -> str:
 
 
 @mcp.tool()
-async def get_app_subscriptions(ctx: Context) -> str:
+async def get_webull_accounts(ctx: Context) -> str:
     """Get all Webull accounts linked to this API key.
 
     Returns Account ID, Type, and Label for each account.
@@ -92,7 +95,7 @@ async def get_app_subscriptions(ctx: Context) -> str:
 
 
 @mcp.tool()
-async def get_instruments(ctx: Context, symbols: str, category: str = "US_STOCK") -> str:
+async def get_webull_instruments(ctx: Context, symbols: str, category: str = "US_STOCK") -> str:
     """Look up instrument details for symbols: instrument_id, exchange, currency,
     and trading attributes (shortable, fractionable, marginable).
 
@@ -227,6 +230,125 @@ async def get_tastytrade_orders(
     num = await _resolve_tastytrade_account(client, account_number)
     resp = await client.get(tt.ORDERS, tt.AccountPathRequest(num))
     return resp.filter_by_status(status).to_output()
+
+
+# ── SnapTrade (read-only; Fidelity/NetBenefits via Akoya) ───────
+
+
+def _snaptrade_label(account: dict) -> str:
+    """'Institution · Name' header for a SnapTrade account section."""
+    name = account.get("name") or account.get("id") or ""
+    inst = account.get("institution_name") or ""
+    return f"{inst} · {name}" if inst else name
+
+
+async def _snaptrade_targets(client, account_id: str | None) -> list[dict]:
+    """Accounts a scoped SnapTrade tool runs over: the one named by id, else every
+    connected investment account (SnapTrade has no single 'default' account)."""
+    accts = (await client.get(sn.ACCOUNTS, sn.EmptyRequest())).investment_accounts()
+    if account_id:
+        picked = [a for a in accts if a.get("id") == account_id]
+        if not picked:
+            raise RuntimeError(f"No SnapTrade investment account with id {account_id!r}.")
+        return picked
+    return accts
+
+
+@mcp.tool()
+async def get_snaptrade_accounts(ctx: Context) -> str:
+    """List all SnapTrade-connected brokerage accounts (Fidelity/NetBenefits via
+    Akoya): institution, name, type, NLV, and the account id. Use the 'ID' value
+    as the account_id parameter for the other SnapTrade tools (or omit it there to
+    span every account).
+    """
+    return (await _snaptrade(ctx).get(sn.ACCOUNTS, sn.EmptyRequest())).to_output()
+
+
+@mcp.tool()
+async def get_snaptrade_balances(ctx: Context, account_id: str | None = None) -> str:
+    """Get SnapTrade cash + buying power per currency (money-market funds are
+    included in cash). Authoritative cash, unlike the aggregation's derived plug.
+
+    account_id: a SnapTrade account id (use get_snaptrade_accounts). Omit to show
+    every connected investment account.
+    """
+    client = _snaptrade(ctx)
+    targets = await _snaptrade_targets(client, account_id)
+    results = await asyncio.gather(
+        *(client.get(sn.BALANCES, sn.AccountPathRequest(a.get("id") or "")) for a in targets)
+    )
+    sections = [f"## {_snaptrade_label(a)}\n\n{r.to_output()}" for a, r in zip(targets, results)]
+    return "\n\n".join(sections) if sections else "(no accounts)"
+
+
+@mcp.tool()
+async def get_snaptrade_positions(ctx: Context, account_id: str | None = None) -> str:
+    """Get SnapTrade stock/fund + option positions per account (option legs parsed
+    into underlying/type/strike; money-market flagged as cash).
+
+    Positioned market value/P&L come straight from the brokerage feed — use
+    get_portfolio_summary for the cross-broker consolidated view.
+
+    account_id: a SnapTrade account id (use get_snaptrade_accounts). Omit to show
+    every connected investment account.
+    """
+    client = _snaptrade(ctx)
+    targets = await _snaptrade_targets(client, account_id)
+
+    async def _one(account: dict) -> str:
+        aid = account.get("id") or ""
+        positions, options = await asyncio.gather(
+            client.get(sn.POSITIONS, sn.AccountPathRequest(aid)),
+            client.get(sn.OPTIONS, sn.AccountPathRequest(aid)),
+        )
+        body = positions.to_output()
+        opt_out = options.to_output()
+        if opt_out != "(no options)":
+            body += f"\n\nOptions:\n{opt_out}"
+        return f"## {_snaptrade_label(account)}\n\n{body}"
+
+    sections = await asyncio.gather(*(_one(a) for a in targets))
+    return "\n\n".join(sections) if sections else "(no accounts)"
+
+
+@mcp.tool()
+async def get_snaptrade_activities(
+    ctx: Context,
+    account_id: str | None = None,
+    activity_type: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    limit: int = 100,
+) -> str:
+    """Get SnapTrade transaction history — fills, dividends, interest, option
+    assignment/expiration, contributions/withdrawals, transfers. SnapTrade exposes
+    no order-status read, so this is the record of what actually settled.
+
+    account_id: a SnapTrade account id (use get_snaptrade_accounts). Omit to span
+    every connected investment account.
+    activity_type: comma-separated filter, e.g. 'DIVIDEND,INTEREST' or 'BUY,SELL'.
+    start_date / end_date: inclusive YYYY-MM-DD bounds (default: full history).
+    limit: max rows per account (default 100, max 1000).
+    """
+    client = _snaptrade(ctx)
+    targets = await _snaptrade_targets(client, account_id)
+    results = await asyncio.gather(
+        *(
+            client.get(
+                sn.ACTIVITIES,
+                sn.AccountActivitiesRequest(
+                    a.get("id") or "",
+                    limit=limit,
+                    start_date=start_date,
+                    end_date=end_date,
+                    type=activity_type,
+                ),
+            )
+            for a in targets
+        )
+    )
+    sections = [f"## {_snaptrade_label(a)}\n\n{r.to_output()}" for a, r in zip(targets, results)]
+    return "\n\n".join(sections) if sections else "(no accounts)"
 
 
 @mcp.tool()

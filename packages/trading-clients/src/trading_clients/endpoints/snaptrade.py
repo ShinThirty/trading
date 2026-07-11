@@ -82,6 +82,33 @@ def _map_option(opt: dict[str, Any]) -> NormalizedPosition:
     )
 
 
+def _activity_symbol(act: dict[str, Any]) -> str:
+    """Display ticker for an activity row: option ticker if present, else the
+    equity symbol (UniversalSymbol nests the ticker one or two levels deep)."""
+    opt = act.get("option_symbol") or {}
+    if opt.get("ticker"):
+        return opt["ticker"]
+    sym = act.get("symbol") or {}
+    inner = sym.get("symbol")
+    if isinstance(inner, dict):
+        return inner.get("symbol") or ""
+    return inner or ""
+
+
+def _activity_row(act: dict[str, Any]) -> dict[str, str]:
+    """One transaction → a display row (amount signed: +inflow / −outflow)."""
+    return {
+        "Date": (act.get("trade_date") or "")[:10],
+        "Type": act.get("type") or "",
+        "Symbol": _activity_symbol(act),
+        "Units": fmt_number(act.get("units"), 0),
+        "Price": fmt_number(act.get("price")),
+        "Amount": fmt_number(act.get("amount")),
+        "Fee": fmt_number(act.get("fee")),
+        "Description": (act.get("description") or "")[:40],
+    }
+
+
 # ═══════════════════════════════════════════════════════════════
 # Request Models
 # ═══════════════════════════════════════════════════════════════
@@ -104,6 +131,35 @@ class AccountPathRequest(PathRequest, ParamsRequest):
 
     def to_params(self) -> dict[str, str]:
         return {}
+
+
+@dataclass
+class AccountActivitiesRequest(PathRequest, ParamsRequest):
+    """Transaction history for one account, with pagination + optional filters.
+
+    type is a comma-separated SnapTrade activity filter (e.g. "DIVIDEND,INTEREST"
+    or "BUY,SELL"); dates are inclusive YYYY-MM-DD bounds.
+    """
+
+    account_id: str
+    offset: int = 0
+    limit: int = 100
+    start_date: str | None = None
+    end_date: str | None = None
+    type: str | None = None
+
+    def to_path_params(self) -> dict[str, str]:
+        return {"account_id": self.account_id}
+
+    def to_params(self) -> dict[str, str]:
+        params = {"offset": str(self.offset), "limit": str(self.limit)}
+        if self.start_date:
+            params["startDate"] = self.start_date
+        if self.end_date:
+            params["endDate"] = self.end_date
+        if self.type:
+            params["type"] = self.type
+        return params
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -132,6 +188,7 @@ class AccountListResponse:
                 "Institution": a.get("institution_name") or "",
                 "Type": a.get("raw_type") or a.get("account_category") or "",
                 "NLV": fmt_number(((a.get("balance") or {}).get("total") or {}).get("amount")),
+                "ID": a.get("id") or "",
             }
             for a in self.accounts
         ]
@@ -198,21 +255,97 @@ class AccountOptionsResponse:
         return list_table(rows)
 
 
+@dataclass
+class BalancesResponse:
+    """Per-currency cash + buying power for one account (usually a single USD row)."""
+
+    balances: list[dict]
+
+    @classmethod
+    def from_response(cls, data: Any) -> "BalancesResponse":
+        return cls(balances=data or [])
+
+    def to_output(self) -> str:
+        if not self.balances:
+            return "(no balances)"
+        rows = [
+            {
+                "Currency": (b.get("currency") or {}).get("code") or "",
+                "Cash": fmt_number(b.get("cash")),
+                "Buying Power": fmt_number(b.get("buying_power")),
+            }
+            for b in self.balances
+        ]
+        return list_table(rows)
+
+
+@dataclass
+class AccountActivitiesResponse:
+    """Paginated transaction history (fills, dividends, interest, option
+    assignment/expiration, transfers) — SnapTrade has no order-status read, so
+    this is the record of what actually settled."""
+
+    activities: list[dict]
+    total: int = 0
+    offset: int = 0
+
+    @classmethod
+    def from_response(cls, data: Any) -> "AccountActivitiesResponse":
+        if isinstance(data, dict):
+            pagination = data.get("pagination") or {}
+            return cls(
+                activities=data.get("data") or [],
+                total=int(pagination.get("total") or 0),
+                offset=int(pagination.get("offset") or 0),
+            )
+        return cls(activities=data or [])  # defensive: some responses are a bare list
+
+    def to_output(self) -> str:
+        if not self.activities:
+            return "(no activities)"
+        table = list_table([_activity_row(a) for a in self.activities])
+        shown = len(self.activities)
+        if self.total > shown:
+            last = self.offset + shown
+            table += f"\n\nShowing {self.offset + 1}–{last} of {self.total} (paginate via offset)."
+        return table
+
+
 # ═══════════════════════════════════════════════════════════════
 # Endpoints (all read-only; brokerages are connected in the dashboard)
 # ═══════════════════════════════════════════════════════════════
 
 ACCOUNTS = Endpoint(
     "/accounts",
+    cache_ttl=300,
+    rate_key="snaptrade",
     response_model=AccountListResponse,
+)
+
+BALANCES = Endpoint(
+    "/accounts/{account_id}/balances",
+    cache_ttl=60,
+    rate_key="snaptrade",
+    response_model=BalancesResponse,
 )
 
 POSITIONS = Endpoint(
     "/accounts/{account_id}/positions",
+    cache_ttl=60,
+    rate_key="snaptrade",
     response_model=AccountPositionsResponse,
 )
 
 OPTIONS = Endpoint(
     "/accounts/{account_id}/options",
+    cache_ttl=60,
+    rate_key="snaptrade",
     response_model=AccountOptionsResponse,
+)
+
+ACTIVITIES = Endpoint(
+    "/accounts/{account_id}/activities",
+    cache_ttl=30,
+    rate_key="snaptrade",
+    response_model=AccountActivitiesResponse,
 )

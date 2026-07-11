@@ -24,12 +24,12 @@ mcp = FastMCP("orders-tools")
 
 
 @mcp.tool()
-async def get_open_orders(ctx: Context, account_id: str, page_size: int = 50) -> str:
+async def get_webull_orders(ctx: Context, account_id: str, page_size: int = 50) -> str:
     """Get all currently open/pending orders (stocks, options, futures, crypto).
     Returns symbol, side, order_type, quantity, filled_quantity, price, status,
     and option leg details if applicable.
 
-    account_id: Webull account ID (use get_app_subscriptions to find it).
+    account_id: Webull account ID (use get_webull_accounts to find it).
     """
     client = _webull(ctx)
     return (
@@ -41,7 +41,7 @@ async def get_open_orders(ctx: Context, account_id: str, page_size: int = 50) ->
 
 
 @mcp.tool()
-async def get_order_history(
+async def get_webull_order_history(
     ctx: Context,
     account_id: str,
     page_size: int = 50,
@@ -53,7 +53,7 @@ async def get_order_history(
 
     Supports any date range — use for reviewing past trades, not just today's orders.
 
-    account_id: Webull account ID (use get_app_subscriptions to find it).
+    account_id: Webull account ID (use get_webull_accounts to find it).
     page_size: max number of orders to return (default 50).
     start_date: start date (YYYY-MM-DD). Defaults to today.
     end_date: end date (YYYY-MM-DD). Defaults to today.
@@ -72,13 +72,13 @@ async def get_order_history(
 
 
 @mcp.tool()
-async def get_order_detail(ctx: Context, client_order_id: str, account_id: str) -> str:
+async def get_webull_order_detail(ctx: Context, client_order_id: str, account_id: str) -> str:
     """Get full detail for a specific order including status, fill info, timestamps,
     and option leg details.
 
     client_order_id: the unique order ID assigned when the order was placed.
-    Use get_open_orders or get_today_orders to find client_order_ids.
-    account_id: Webull account ID (use get_app_subscriptions to find it).
+    Use get_webull_orders or get_webull_order_history to find client_order_ids.
+    account_id: Webull account ID (use get_webull_accounts to find it).
     """
     client = _webull(ctx)
     return (
@@ -90,7 +90,7 @@ async def get_order_detail(ctx: Context, client_order_id: str, account_id: str) 
 
 
 @mcp.tool()
-async def preview_order(ctx: Context, new_orders: list[dict], account_id: str) -> str:
+async def preview_webull_order(ctx: Context, new_orders: list[dict], account_id: str) -> str:
     """Preview an order before placing it. Returns estimated cost and transaction fees.
     Supports stocks, options (single-leg and multi-leg), futures, and crypto.
 
@@ -116,7 +116,7 @@ async def preview_order(ctx: Context, new_orders: list[dict], account_id: str) -
         option_expire_date (YYYY-MM-DD), option_type ('CALL' or 'PUT'),
         instrument_type ('OPTION'), market ('US')
 
-    account_id: Webull account ID (use get_app_subscriptions to find it).
+    account_id: Webull account ID (use get_webull_accounts to find it).
     """
     client = _webull(ctx)
     req = PreviewOrderRequest(account_id=client.ensure_account_id(account_id), **new_orders[0])
@@ -124,7 +124,7 @@ async def preview_order(ctx: Context, new_orders: list[dict], account_id: str) -
 
 
 @mcp.tool()
-async def place_order(
+async def place_webull_order(
     ctx: Context,
     account_id: str,
     symbol: str,
@@ -165,7 +165,7 @@ async def place_order(
         strike_price, option_expire_date ('YYYY-MM-DD'), option_type ('CALL'/'PUT'),
         instrument_type ('OPTION'), market ('US').
 
-    account_id: Webull account ID (use get_app_subscriptions to find it).
+    account_id: Webull account ID (use get_webull_accounts to find it).
     """
     await _check_market(ctx, order_type, trading_session == "ALL")
     client = _webull(ctx)
@@ -191,7 +191,7 @@ async def place_order(
 
 
 @mcp.tool()
-async def replace_order(
+async def replace_webull_order(
     ctx: Context,
     account_id: str,
     client_order_id: str,
@@ -205,7 +205,7 @@ async def replace_order(
 ) -> str:
     """Modify a pending order. Only price, quantity, type, and time_in_force can be changed.
 
-    account_id: Webull account ID (use get_app_subscriptions to find it).
+    account_id: Webull account ID (use get_webull_accounts to find it).
     client_order_id: the unique order ID of the order to modify.
     quantity: new quantity (optional).
     order_type: new order type (optional).
@@ -229,12 +229,12 @@ async def replace_order(
 
 
 @mcp.tool()
-async def cancel_order(ctx: Context, account_id: str, client_order_id: str) -> str:
+async def cancel_webull_order(ctx: Context, account_id: str, client_order_id: str) -> str:
     """Cancel a pending order (stock or option). The order must still be open/unfilled.
 
-    account_id: Webull account ID (use get_app_subscriptions to find it).
+    account_id: Webull account ID (use get_webull_accounts to find it).
     client_order_id: the unique order ID from when the order was placed.
-    Use get_open_orders to find cancellable orders.
+    Use get_webull_orders to find cancellable orders.
     """
     client = _webull(ctx)
     req = CancelOrderRequest(client.ensure_account_id(account_id), client_order_id)
