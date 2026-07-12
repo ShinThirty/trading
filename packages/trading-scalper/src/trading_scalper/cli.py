@@ -30,10 +30,11 @@ from trading_clients.config import load_config
 from trading_clients.dxlink_stream_client import DxLinkStreamClient
 from trading_clients.tastytrade_client import TastyTradeClient
 
+from trading_scalper.basis import BasisRecorder, default_basis_path
 from trading_scalper.detector import SetupDetector, watch_setups
 from trading_scalper.domain import OrderId, Side, TradeProposal
 from trading_scalper.feed import DxLinkFeed, drive_paper_fills
-from trading_scalper.instruments import Instrument, instrument_for
+from trading_scalper.instruments import Instrument, front_month, instrument_for
 from trading_scalper.notify import Notifier
 from trading_scalper.paper import PaperBroker, round_to_tick
 from trading_scalper.persist import (
@@ -59,6 +60,7 @@ class ScalpSession:
     persister: PaperPersister
     signals: SignalLog
     shadow: ShadowRecorder
+    basis: BasisRecorder | None  # SPX↔future carry-basis shadow; None when no reference symbol
 
 
 def make_executor(
@@ -112,6 +114,8 @@ def build_session(
     signals_path: Path | None = None,
     tape_path: Path | None = None,
     shadow_path: Path | None = None,
+    reference_symbol: str | None = None,
+    basis_path: Path | None = None,
     interval: float = 30.0,
 ) -> ScalpSession:
     """Wire detector → proposal → paper bracket → persisted ledger onto the tape.
@@ -122,7 +126,10 @@ def build_session(
     the B4 telemetry in a per-fire ``SignalLog`` alongside the fills/summary.
 
     A ``ShadowRecorder`` is also wired onto the tape — pure telemetry, gating nothing
-    (see ``shadow.py``). It tracks the ``underlyings`` only.
+    (see ``shadow.py``). It tracks the ``underlyings`` only. When ``reference_symbol`` is
+    given (e.g. ``SPX``), a ``BasisRecorder`` records the live future↔reference carry
+    basis — also shadow, gating nothing (see ``basis.py``); the future leg is the first
+    ``underlyings`` symbol.
     """
     notifier = notifier or Notifier()
     signals = SignalLog(signals_path or default_signals_path(date))
@@ -142,9 +149,19 @@ def build_session(
         shadow_path=shadow_path or default_shadow_path(date),
         interval=interval,
     )
+    basis: BasisRecorder | None = None
+    if reference_symbol and underlyings:
+        basis = BasisRecorder(
+            underlyings[0],
+            reference_symbol,
+            basis_path=basis_path or default_basis_path(date),
+            interval=interval,
+        )
     drive_paper_fills(feed, broker)  # tape prints fill the engine
     watch_setups(feed, detector)  # tape → detector
     shadow.attach(feed)  # tape → shadow volume telemetry (reads nothing back)
+    if basis is not None:
+        basis.attach(feed)  # future + reference quotes → basis telemetry (reads nothing back)
     return ScalpSession(
         feed=feed,
         broker=broker,
@@ -153,6 +170,7 @@ def build_session(
         persister=persister,
         signals=signals,
         shadow=shadow,
+        basis=basis,
     )
 
 
@@ -238,6 +256,38 @@ def _run_demo(broker: PaperBroker, session: ScalpSession, notifier: Notifier, ar
     print("=" * 64)
 
 
+async def _run_basis(tt_cfg, future_symbol: str, reference_symbol: str) -> None:
+    """`--basis`: print the current future↔reference carry basis and exit (prep helper).
+
+    `/scalp` prep adds this basis to each SPX gamma wall to get its /MES level. Reads
+    only — never writes the shadow artifact. Meaningful during RTH only (SPX must be
+    live); off-hours the future has drifted against a stale cash index.
+    """
+    tasty = TastyTradeClient(tt_cfg)
+    feed = DxLinkFeed(DxLinkStreamClient(tasty.get_quote_token))
+    rec = BasisRecorder(future_symbol, reference_symbol, basis_path=Path("/dev/null"))
+    rec.attach(feed)
+    await feed.subscribe([future_symbol, reference_symbol])
+    task = asyncio.create_task(feed.run())
+    try:
+        for _ in range(40):  # poll up to ~20 s for both legs to print
+            await asyncio.sleep(0.5)
+            if rec.snapshot_row() is not None:
+                break
+    finally:
+        task.cancel()
+        await tasty.close()
+    row = rec.snapshot_row()
+    if row is None:
+        print(f"no basis yet — {future_symbol}/{reference_symbol} haven't both printed (try RTH)")
+        return
+    print(
+        f"{future_symbol} {row['future_price']:g}  −  {reference_symbol} "
+        f"{row['reference_level']:g}  =  basis {row['basis']:+.2f}"
+    )
+    print("→ add basis to each SPX wall for its /MES level (RTH only — SPX must be live)")
+
+
 async def _demo_token() -> tuple[str, str]:
     """A throwaway token provider for the offline demo — never actually invoked."""
     return ("demo", "wss://demo")
@@ -252,6 +302,13 @@ async def _run(args: argparse.Namespace) -> None:
     plan_store = PlanStore(plan_path, on_error=notifier.notify)  # bad hot-edit -> warn, keep last
     plan = plan_store.current()
     broker = PaperBroker(multiplier=inst.point_value, tick=inst.tick)
+
+    if args.basis:
+        if cfg.tastytrade is None:
+            raise SystemExit("--basis needs a [tastytrade] section in ~/.tradingrc (DXLink feed).")
+        fut = primary if ":" in primary else front_month(primary, date.fromisoformat(args.date))
+        await _run_basis(cfg.tastytrade, fut, args.reference or "SPX")
+        return
 
     if args.demo_setup:
         # offline: no feed/network. A throwaway feed just satisfies build_session's wiring.
@@ -274,6 +331,7 @@ async def _run(args: argparse.Namespace) -> None:
     tasty = TastyTradeClient(cfg.tastytrade)
     stream = DxLinkStreamClient(tasty.get_quote_token)
     feed = DxLinkFeed(stream)
+    reference = args.reference or None  # "" disables the SPX basis shadow
     session = build_session(
         feed,
         broker,
@@ -281,14 +339,20 @@ async def _run(args: argparse.Namespace) -> None:
         notifier=notifier,
         date=args.date,
         underlyings=args.symbols,
+        reference_symbol=reference,
     )
 
     _print_banner(plan, plan_path, args.symbols, args.date, inst)
     symbols = collect_symbols(plan, args.symbols)
+    if reference and reference not in symbols:
+        symbols.append(reference)  # stream the SPX reference for the carry-basis shadow
     print(f"streaming: {' '.join(symbols)}")
     await feed.subscribe(symbols)
+    tasks = [feed.run(), session.persister.run(), session.shadow.run()]
+    if session.basis is not None:
+        tasks.append(session.basis.run())
     try:
-        await asyncio.gather(feed.run(), session.persister.run(), session.shadow.run())
+        await asyncio.gather(*tasks)
     except (KeyboardInterrupt, asyncio.CancelledError):
         pass
     except httpx.HTTPStatusError as exc:
@@ -299,11 +363,15 @@ async def _run(args: argparse.Namespace) -> None:
         session.persister.write_summary()
         session.shadow.flush_tape()  # mirror the persister: don't lose the tail on a hard exit
         session.shadow.write_snapshots()
+        if session.basis is not None:
+            session.basis.write_snapshot()
         print(
             f"\nscalp session closed — {session.signals.n_fires} fires logged → "
             f"{session.signals.path}"
         )
         print(f"shadow telemetry → {session.shadow.tape_path} + {session.shadow.shadow_path}")
+        if session.basis is not None:
+            print(f"basis telemetry  → {session.basis.basis_path}")
 
 
 def _dxlink_http_msg(exc: httpx.HTTPStatusError) -> str:
@@ -324,6 +392,11 @@ def main() -> None:
         default=["/MES"],
         help="futures tape symbols (first drives the plan + instrument economics)",
     )
+    ap.add_argument(
+        "--reference",
+        default="SPX",
+        help="cash-index reference streamed for the carry-basis shadow (empty to disable)",
+    )
     ap.add_argument("--date", default=date.today().isoformat(), help="plan date YYYY-MM-DD")
     ap.add_argument(
         "--stop-points", type=float, default=6.0, help="(--demo-setup only) stop distance in points"
@@ -341,6 +414,11 @@ def main() -> None:
         help="(--demo-setup only) quantity; live qty is plan-set",
     )
     ap.add_argument("--no-bell", action="store_true", help="silence the terminal bell")
+    ap.add_argument(
+        "--basis",
+        action="store_true",
+        help="print the current front-month↔reference (SPX) carry basis and exit (prep helper)",
+    )
     ap.add_argument(
         "--demo-setup",
         metavar="SYMBOL[:QTY[:PRICE]]",

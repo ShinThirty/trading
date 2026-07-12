@@ -17,9 +17,15 @@ This is the executable counterpart to the [`/scalp`](../.claude/commands/scalp.m
 skill: the skill *draws the map* (pre-session levels, lean, day-type, and the
 per-level **direction**); this app *watches the map* during the session, points
 your eyes at a level the instant price tags it, and forward-tests the trade on
-paper. Because the MCP quote/gamma tools cover **SPY**, not the futures contract,
-the map is drawn on SPY and **scaled ×10 to /MES** prices (SPX ≈ SPY × 10 ≈ /MES,
-e.g. SPY 630 → /MES 6300).
+paper. The gamma walls come from **SPX cash-index options** (`get_gamma_profile SPX`
+— the deepest, cleanest dealer-gamma pool; ETFs like SPY are out because their
+index gap is dividend/tracking noise, not clean carry), already in index points
+(~7575), and are **shifted to /MES prices by the live carry basis** — `basis =
+/MES − SPX`, pure cost-of-carry (financing − dividends), converging to 0 at expiry
+and resetting at the quarterly roll. The basis is *measured*, not modelled: the
+daemon streams SPX alongside /MES and records it as a shadow series, and
+`trading-scalper --basis` prints it for prep. (SPX + ~50 basis → /MES; **not** a
+×10 of SPY.)
 
 > Learning to read the map by eye — tape, VWAP, volume profile, gamma walls, L2 —
 > is its own skill: see [chart-reading-curriculum.md](chart-reading-curriculum.md).
@@ -150,9 +156,11 @@ bracket, not a spam stream.
 
 1. **`DxLinkFeed` / `MarketDataFeed`** — wraps `DxLinkStreamClient` (streamer-token
    fetch + DXLink channel handshake + auto-reconnect) and subscribes to the traded
-   /MES contract; emits quote/trade/timesale. `drive_paper_fills` fans every print
-   into the `PaperBroker` matching engine *and* the detector — one symbol serves
-   both roles.
+   /MES front-month contract (picked by date via `instruments.front_month`, which
+   rolls ~8 days before the quarterly third-Friday expiry) **plus the SPX cash index**
+   for the carry-basis shadow; emits quote/trade/timesale. `drive_paper_fills` fans
+   every /MES print into the `PaperBroker` matching engine *and* the detector — one
+   symbol serves both roles (SPX feeds only the basis shadow).
 2. **`SetupDetector` + `Notifier`** — fires only a *confirmed* setup, gated on
    things already on the wire: **geometry** keyed to the level's `mode` (`fade` =
    touch-and-reject within the band, the +GEX trade; `break` =
@@ -198,6 +206,15 @@ bracket, not a spam stream.
    paper run mines these against the realized win/loss to learn which metrics
    actually separate winners from losers *before* any of them is allowed to veto a
    setup.
+6. **Shadow observers (`ShadowRecorder`, `BasisRecorder`)** — pure telemetry wired
+   onto the tape, **read by nothing in the decision path** (`feedback_shadow_then_live`).
+   `ShadowRecorder` captures the raw /MES tape + live volume-profile / volume-rate
+   snapshots (`{date}-tape.jsonl` + `{date}-shadow.jsonl`) to settle the runaway-gap
+   question from evidence. `BasisRecorder` tracks the live `/MES − SPX` carry basis
+   (`{date}-basis.jsonl`) so the later choice — bake a per-session offset into the map
+   vs. track basis live in the detector's geometry — rests on recorded data.
+   **Basis rows are valid RTH only** (SPX computes only while its components trade;
+   off-hours the future has drifted against a stale cash close). Both gate nothing.
 
 ## The `/scalp` handoff — the session plan (daily file)
 
@@ -215,16 +232,16 @@ lean: both                   # long-only | short-only | both | no-trade
 contracts: 1                 # quantity per setup
 default_stop_points: 6.0     # child stop-loss offset from the fill (points)
 default_target_points: 8.0   # child take-profit offset from the fill (points)
-zero_gamma: 6300.0           # the gamma flip (SPY 630 × 10) — tripwire, alerts on a cross
-levels:                      # /MES prices (SPY gamma walls × 10) + the direction to trade
+zero_gamma: 7625.0           # the gamma flip (SPX 7575 + basis 50) — tripwire, alerts on a cross
+levels:                      # /MES prices (SPX gamma walls + carry basis) + the direction to trade
   # +GEX → fade: put wall (support) → long, call wall (resistance) → short
-  - {price: 6194.0, side: support,    direction: long,  mode: fade}
-  - {price: 6231.0, side: resistance, direction: short, mode: fade}
+  - {price: 7600.0, side: support,    direction: long,  mode: fade}
+  - {price: 7675.0, side: resistance, direction: short, mode: fade}
 notes: "Fragile pin: fade the walls to the zero-gamma flip; a break of it = trend, stop fading"
 ```
 
-- `levels` are **/MES prices** (ideally the GEX **walls** from `get_gamma_profile`
-  on SPY, **×10**) that drive the detector. Each `mode` picks the trigger geometry —
+- `levels` are **/MES prices** (the GEX **walls** from `get_gamma_profile SPX`, each
+  **+ the carry basis** from `trading-scalper --basis`) that drive the detector. Each `mode` picks the trigger geometry —
   `fade` / `break` / `reversal` / `retest` — and `direction` (`long` | `short` |
   omitted) is the side to trade when it triggers. **There is no contract / strike /
   expiry / OCC step — the future itself is the instrument.** Optionally set explicit
@@ -248,9 +265,10 @@ notes: "Fragile pin: fade the walls to the zero-gamma flip; a break of it = tren
 - **Missing file = graceful degrade:** no plan → the detector is silent (no prompts,
   no paper trades). A level with no `direction` → alert-only.
 - `/scalp prep` **writes this file** — it reads the regime + gamma walls from
-  `get_gamma_profile` on SPY, sets each level's `mode` from the GEX sign, scales the
-  walls ×10 to /MES, assigns a `direction` per wall (mode-correct), and emits the
-  YAML; the file stays hand-editable to nudge an edge before the open.
+  `get_gamma_profile SPX`, sets each level's `mode` from the GEX sign, shifts the
+  walls to /MES by the live carry basis (`trading-scalper --basis`), assigns a
+  `direction` per wall (mode-correct), and emits the YAML; the file stays
+  hand-editable to nudge an edge before the open.
 
 This is the seam: **skill draws the map → `~/.trading/scalp/*.yaml` → daemon watches
 the map and paper-trades it.**
@@ -262,9 +280,9 @@ the map and paper-trades it.**
 paper-trades through the session, and you Ctrl-C at the close. **POSIX-first
 (Linux + macOS).**
 
-- **Single asyncio loop.** One feed connection, one paper broker, one persister task
-  (`asyncio.gather(feed.run(), persister.run())`). The persister flushes a final
-  summary on shutdown.
+- **Single asyncio loop.** One feed connection, one paper broker, and the persister +
+  shadow + basis recorder tasks (`asyncio.gather(feed.run(), persister.run(),
+  shadow.run(), basis.run())`). Each flushes a final write on shutdown.
 - **Feed resilience.** WS auto-reconnect with exponential backoff, a fresh streamer
   token per reconnect, and re-subscribe on drop; a 401/403 on the token fetch (a
   bad/expired Tastytrade OAuth token) is treated as fatal, not retried.
@@ -274,6 +292,10 @@ paper-trades through the session, and you Ctrl-C at the close. **POSIX-first
   /MES:1:6300`) injects one long setup, fills the direction-aware bracket, writes a
   summary, and exits — no network, no Tastytrade creds needed, for smoke-testing the
   loop.
+- **Basis query.** `--basis` streams the front-month /MES + SPX briefly, prints the
+  live carry basis, and exits — the prep helper for shifting SPX walls to /MES.
+  `--reference SYMBOL` picks the cash index (default `SPX`); `--reference ''` disables
+  the basis shadow.
 
 ## Monorepo placement
 
@@ -335,11 +357,25 @@ sweep) and its dateless name keeps the retention archiver from ever gzipping it.
 
 ## Roadmap (deferred)
 
-- **Tastytrade greeks feed** — the DXLink client already streams
+- **Tastytrade greeks feed / on-the-future gamma** — the DXLink client already streams
   quote/trade/timesale; adding live delta/gamma/theta/vega + IV is a matter of
   subscribing the `Greeks` event type and slotting a new neutral value type alongside
-  `Quote`/`Trade`/`TimeSale`. Most useful once an options overlay is back on the
-  table; the futures scalp itself needs only price + tape.
+  `Quote`/`Trade`/`TimeSale`. Tastytrade *does* expose ES/MES futures options
+  (`/futures-option-chains/:product/nested` → streamer symbols; `Greeks` carries
+  per-strike gamma, `Summary` carries `openInterest`), so a **zero-basis gamma map on
+  the future itself** is buildable — but deliberately deferred: it only removes a basis
+  we already measure live, ES-option gamma is a smaller/different pool than the
+  dominant SPX 0DTE gamma, and it needs a streaming-assembler (gamma + OI aren't in any
+  REST payload). SPX-walls + live-basis stays the source; this is the enabler for a
+  later ES cross-check.
+- **Live cash-space geometry** — instead of baking a per-session basis into the map,
+  run the detector's geometry in SPX-cash space and convert /MES↔SPX live off the
+  recorded basis. Decide between this and the static baked offset once
+  `{date}-basis.jsonl` has separated the two on real RTH tape.
+- **Native /MES levels** — overnight H/L, Globex range, futures VWAP, prior settle,
+  sourced from DXLink `Candle` events (`/MESU26:XCME{=1m}` + `fromTime`). A fourth,
+  non-gamma level source; `BreakoutTracker` is already level-source-agnostic so they
+  plug in as `reversal`/`retest` rows.
 - **Phone-push notifier** — reuse the `trading-alerts` Discord bot to land prompts on
   your phone. v1 is desk-only console + bell.
 - **Autonomous entry (live)** — only after a verdict mode passes the go-live gate
@@ -349,7 +385,8 @@ sweep) and its dateless name keeps the retention archiver from ever gzipping it.
 
 ---
 
-*v2. Paper-only entry-detector. Pivoted from the assist-only stop-enforcer
+*v3. Paper-only entry-detector. Pivoted from the assist-only stop-enforcer
 2026-06-12 (Webull's native option bracket made `AutoStop` redundant), then migrated
-from SPY/QQQ 0DTE options to /MES index futures 2026-07-12. Safety property: no real
-capital is ever at risk.*
+from SPY/QQQ 0DTE options to /MES index futures 2026-07-12; the level map now sources
+gamma walls from SPX cash-index options (no ETF) shifted to /MES by a live-measured
+carry basis, not a ×10 of SPY. Safety property: no real capital is ever at risk.*

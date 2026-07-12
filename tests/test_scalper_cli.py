@@ -115,6 +115,30 @@ def test_build_session_wires_tape_and_quote_consumers(tmp_path: Path) -> None:
     assert len(feed._timesale) == 3
     assert len(feed._quote) == 2
     assert isinstance(session.persister, PaperPersister)
+    assert session.basis is None  # no reference symbol → no carry-basis shadow
+
+
+def test_reference_symbol_wires_the_basis_shadow(tmp_path: Path) -> None:
+    feed, broker = FakeFeed(), PaperBroker(multiplier=5)
+    session = build_session(
+        feed,
+        broker,
+        lambda: _plan(),
+        notifier=Notifier(bell=False, write=lambda _l: None),
+        date="2026-07-12",
+        underlyings=["/MESU26:XCME"],
+        fills_path=tmp_path / "fills.jsonl",
+        summary_path=tmp_path / "summary.json",
+        signals_path=tmp_path / "signals.jsonl",
+        tape_path=tmp_path / "tape.jsonl",
+        shadow_path=tmp_path / "shadow.jsonl",
+        reference_symbol="SPX",
+        basis_path=tmp_path / "basis.jsonl",
+    )
+    # the basis recorder adds one quote + one trade subscriber on top of the base wiring
+    assert session.basis is not None
+    assert len(feed._quote) == 3
+    assert len(feed._trade) == 3
 
 
 def test_confirmed_tag_auto_places_a_bracket(tmp_path: Path) -> None:

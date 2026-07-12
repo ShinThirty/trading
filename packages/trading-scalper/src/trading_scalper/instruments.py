@@ -11,6 +11,16 @@ or a dated contract.
 """
 
 from dataclasses import dataclass
+from datetime import date, timedelta
+
+# CME equity-index futures are quarterly: the front contract is Mar/Jun/Sep/Dec,
+# expiring the third Friday of the contract month (settling to the S&P SOQ).
+_QUARTERLY_CODES = {3: "H", 6: "M", 9: "U", 12: "Z"}
+
+# Liquidity migrates to the next quarter ~8 calendar days before expiry (the CME
+# roll date for the equity-index complex), so we roll the streamer symbol then —
+# staying on the expiring contract past this means scalping a drying-up book.
+_ROLL_DAYS = 8
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,3 +53,27 @@ def instrument_for(symbol: str) -> Instrument:
         if symbol.startswith(root):
             return Instrument(symbol, base.point_value, base.tick)
     raise KeyError(f"unknown futures symbol {symbol!r}; known roots: {', '.join(_INSTRUMENTS)}")
+
+
+def third_friday(year: int, month: int) -> date:
+    """The third Friday of a month — CME equity-index futures/options expiry."""
+    first = date(year, month, 1)
+    first_friday = first + timedelta(days=(4 - first.weekday()) % 7)  # weekday: Fri == 4
+    return first_friday + timedelta(days=14)
+
+
+def front_month(root: str, on_date: date, *, exchange: str = "XCME") -> str:
+    """The active front-month streamer symbol for ``root`` on ``on_date``.
+
+    Returns e.g. ``/MESU26:XCME``. Picks the nearest quarterly contract whose roll
+    date (expiry − 8 days) is still ahead — on/after the roll the next quarter is
+    the liquid book. ``/scalp`` prep calls this so the once-a-quarter roll is a
+    deterministic, date-driven choice, not a symbol you remember to hand-edit.
+    """
+    # Walk this year's and next year's quarterlies in order; take the first not yet rolled.
+    for year in (on_date.year, on_date.year + 1):
+        for month, code in _QUARTERLY_CODES.items():
+            expiry = third_friday(year, month)
+            if on_date < expiry - timedelta(days=_ROLL_DAYS):
+                return f"{root}{code}{year % 100:02d}:{exchange}"
+    raise ValueError(f"no front-month contract found for {root!r} on {on_date}")
