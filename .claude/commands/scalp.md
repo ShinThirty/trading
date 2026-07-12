@@ -198,6 +198,12 @@ The feedback loop on the **paper detector** — the bot's own track record. Ther
 - **Volume-rate (lower priority).** At each cross/fire, was the move on expanding or contracting volume (`ratio` >1 / <1)? Note whether expansion lined up with the paper winners — but this is the **confidence/size modulator** idea, **never a fire gate** (B4 died gating on tape; 6/29's retest won against an 8:1 sell tape).
 - **Stay shadow until it separates.** n is tiny — one session is one or two rows; don't over-conclude from a single day, and do not wire the read into the plan or the daemon. The promotion bar is the table separating across multiple conflicted-box sessions (`feedback_shadow_then_live`).
 
+**Step 3 — basis drift (the SPX↔/MES carry) — SHADOW, evidence-only.** The basis recorder (`basis.py`, `feedback_shadow_then_live`) writes `{date}-basis.jsonl` — periodic `{future_price, reference_level, basis}` snapshots. It **gates nothing**; this step accumulates the data that settles the **static-offset vs live-cash-space (SPX-trigger)** decision (`project-scalper-wall-source`).
+- **Read RTH rows only.** SPX cash freezes off-hours, so a row whose `reference_level` is *unchanged* from the prior row is a live-/MES − frozen-SPX reading — drop it. The valid rows are the contiguous stretch where `reference_level` is **moving** (≈ 13:30–20:00 UTC in EDT / 14:30–21:00 in EST; the moving-`reference_level` test is the robust filter, DST-proof).
+- **Report the RTH basis range:** min / max / mean and the **intraday drift** (max − min), one line — "today RTH basis = X.X ± , drift Z.Z pt." That drift *is* the cost of a per-session baked offset: ≪ a scalp's few points → the shipped /MES-trigger + static-shift keeps ~all its value (and its tape gate + 23h + futures lead), so leave it; several points → the SPX-trigger / live-cash-space option gets attractive (revisit, possibly `reversal`/`retest`-in-SPX only, since those don't need the tape).
+- **Sanity vs carry:** basis should be a smooth, mildly-decaying positive number (financing − dividends), ~0 near expiry, **jumping up at the quarterly roll**. A mid-session discontinuity = a roll (symbol changed) or an off-hours row that slipped the filter — flag it, don't average across it.
+- **Stay shadow.** Don't wire the measured basis into prep or the detector yet; it's a multi-session read.
+
 ---
 
 ## Mode `check` — thin live snapshot (use sparingly)
