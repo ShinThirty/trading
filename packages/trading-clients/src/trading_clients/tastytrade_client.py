@@ -44,6 +44,24 @@ class TastyTradeClient(BaseClient):
                 return self._access_token
             return await self._do_refresh()
 
+    async def get_quote_token(self) -> tuple[str, str]:
+        """Fetch the dxFeed streamer token + DXLink WebSocket URL for market-data streaming.
+
+        Returns ``(token, dxlink_url)``. The token is short-lived (single-use per
+        connection), so the streaming client re-fetches it on every (re)connect. Uses
+        the account's OAuth bearer; a bad/expired refresh token surfaces as an
+        ``httpx.HTTPStatusError`` here, which the streamer treats as fatal.
+        """
+        await self._limiter.acquire()
+        token = await self._ensure_token()
+        resp = await self._http.get(
+            f"{BASE_URL}/api-quote-tokens",
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+        )
+        resp.raise_for_status()
+        data = resp.json()["data"]
+        return data["token"], data["dxlink-url"]
+
     async def _do_refresh(self) -> str:
         """Exchange refresh token for a new access token."""
         resp = await self._http.post(

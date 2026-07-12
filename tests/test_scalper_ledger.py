@@ -59,3 +59,14 @@ def test_multiplier_one_for_underlying() -> None:
     ledger = Ledger(multiplier=1)
     ledger.record("SPY", True, 10, 100.0)
     assert ledger.record("SPY", False, 10, 101.0) == 10.0
+
+
+def test_micro_futures_multiplier() -> None:
+    """/MES is $5/point: a 20-point winner on one contract is +$100, a short the mirror."""
+    ledger = Ledger(multiplier=5)
+    ledger.record("/MES", True, 1, 6300.0)  # long 1 @ 6300
+    assert ledger.record("/MES", False, 1, 6320.0) == 100.0  # (6320-6300) * 1 * 5
+
+    short = Ledger(multiplier=5)
+    short.record("/MES", False, 2, 6300.0)  # short 2 @ 6300
+    assert short.record("/MES", True, 2, 6290.0) == 100.0  # (6300-6290) * 2 * 5, covering lower

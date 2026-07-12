@@ -8,20 +8,19 @@ three things that are all already on the wire:
      — the mean-reversion trade at a gamma wall (touch-and-reject).
    - ``break`` (negative-GEX setup): price *crosses* the level by ``break_margin``
      in the trade's direction — the momentum trade (cross-and-follow-through).
-2. **Lean** — the plan's ``lean`` must allow the trade *direction* (a call/long
-   needs ``long-only`` or ``both``; a put/short needs ``short-only`` or ``both``).
-3. **Tape** — the last timesale's aggressor side must agree with the option's
-   direction (a call wants buyers lifting offers; a put wants sellers hitting
-   bids). Direction is read from the level's ``contract`` (``parse_occ``); for an
-   alert-only level it's derived from ``side`` + ``mode``.
+2. **Lean** — the plan's ``lean`` must allow the trade *direction* (a long needs
+   ``long-only`` or ``both``; a short needs ``short-only`` or ``both``).
+3. **Tape** — the last timesale's aggressor side must agree with the trade
+   direction (a long wants buyers lifting offers; a short wants sellers hitting
+   bids). Direction is read from the level's ``direction`` (``long``/``short``);
+   for an alert-only level (no ``direction``) it's derived from ``side`` + ``mode``.
 
 Only a setup that clears all three fires — there is no bare-touch heads-up. The
-fire ``notify``s the human and, if the level names a ``contract``, emits a
-``TradeProposal`` so the paper broker auto-executes the same bracket. A
-**spread gate** sits on the proposal only: a confirmed-but-wide option still
-alerts (work a limit) but is not paper-filled, keeping the paper book's fills
-honest. The underlying's top-of-book size imbalance is a soft annotation, never
-a gate.
+fire ``notify``s the human and, if the level names a ``direction``, emits a
+``TradeProposal`` so the paper broker auto-executes the same absolute-price bracket.
+A **spread gate** sits on the proposal only: a confirmed-but-wide book still alerts
+(work a limit) but is not paper-filled, keeping the paper book's fills honest. The
+top-of-book size imbalance is a soft annotation, never a gate.
 
 Hysteresis: ``_active`` is set only on a *confirmed* fire, so an unconfirmed tag
 keeps re-evaluating in-zone until the tape turns, then fires once; it re-arms
@@ -89,10 +88,9 @@ from collections.abc import Callable
 from typing import NamedTuple
 
 from trading_clients.market_stream import Quote, TimeSale, Trade
-from trading_clients.options import parse_occ
 
 from trading_scalper.breakout import BreakoutTracker, Verdict
-from trading_scalper.domain import FireRecord, OrderId, TradeProposal
+from trading_scalper.domain import FireRecord, OrderId, Side, TradeProposal
 from trading_scalper.plan import Level, SessionPlan
 from trading_scalper.ports import MarketDataFeed
 
@@ -124,22 +122,25 @@ class SetupDetector:
         notify: Callable[[str], None],
         propose: Callable[[TradeProposal], OrderId | None] | None = None,
         *,
-        tolerance: float = 0.10,
-        rearm_margin: float = 0.05,
-        break_margin: float = 0.05,
+        # ── geometry, in index points — scaled ~10× from the QQQ-era defaults for the
+        # /ES-family price magnitude (~6250 vs QQQ ~600); recalibrate against recorded
+        # /MES tape as 6/23 did for QQQ (a fresh version cohort insulates the history).
+        tolerance: float = 1.0,
+        rearm_margin: float = 0.5,
+        break_margin: float = 0.5,
         spread_max_pct: float = 0.10,
-        flip_margin: float = 0.10,
+        flip_margin: float = 1.0,
         record: Callable[[FireRecord], None] | None = None,
         window_s: float = 5.0,
         window_max: int = 256,
         gap_s: float = 90.0,
         cooldown_s: float = 300.0,
-        min_break_excursion: float = 0.75,
-        follow_through_margin: float = 2.00,
+        min_break_excursion: float = 7.5,
+        follow_through_margin: float = 20.0,
         confirm_s: float = 150.0,
         failure_window_s: float = 120.0,
-        reentry_margin: float = 0.10,
-        retest_proximity: float = 0.20,
+        reentry_margin: float = 1.0,
+        retest_proximity: float = 2.0,
         retest_window_s: float = 360.0,
     ) -> None:
         self._plan_source = plan_source
@@ -403,7 +404,7 @@ class SetupDetector:
         if ms is not None:
             self._last_fire_ms[level] = ms
         message = self._message(symbol, level)
-        bracket_id = self._prompt(plan, level, message)
+        bracket_id = self._prompt(plan, symbol, level, confirming, message)
         if self._record is not None:
             velocity, cum_conf, cum_contra = self._tape_metrics(symbol, confirming)
             self._record(
@@ -414,7 +415,8 @@ class SetupDetector:
                     mode=level.mode,
                     confirming=confirming,
                     price=price,
-                    contract=level.contract,
+                    # the traded instrument for a tradeable level, else None (alert-only)
+                    contract=(symbol if level.direction is not None else None),
                     bracket_id=bracket_id,
                     velocity=velocity,
                     cum_confirming_size=cum_conf,
@@ -423,25 +425,66 @@ class SetupDetector:
                 )
             )
 
-    def _prompt(self, plan: SessionPlan, level: Level, message: str) -> OrderId | None:
-        """Notify the human and, on a contract with a tradeable spread, place the paper
-        bracket; return its ``bracket_id`` (entry-order id) or ``None`` if nothing filled."""
-        if level.contract and self._propose is not None:
-            if self._spread_ok(level.contract):
-                self._notify(message)
-                return self._propose(
-                    TradeProposal(
-                        contract=level.contract,
-                        quantity=plan.contracts,
-                        stop_pct=plan.default_stop_pct,
-                        target_pct=plan.target_pct,
-                        reason=message,
-                    )
-                )
-            self._notify(f"{message} — option spread too wide; alert only, no paper fill")
+    def _prompt(
+        self, plan: SessionPlan, symbol: str, level: Level, confirming: str, message: str
+    ) -> OrderId | None:
+        """Notify the human and, on a tradeable level with a sane bracket + tight spread,
+        place the paper bracket; return its ``bracket_id`` (entry-order id) or ``None``.
+
+        A level with no ``direction`` is alert-only. An inverted bracket (stop/target on
+        the wrong side of the level for the direction) or a too-wide book alerts but is
+        not paper-filled, keeping the paper book's fills honest.
+        """
+        if level.direction is None or self._propose is None:
+            self._notify(message)
+            return None
+        direction = Side.BUY if confirming == "buy" else Side.SELL
+        stop_price, target_price = self._bracket_prices(plan, level, confirming)
+        if not _bracket_sane(confirming, level.price, stop_price, target_price):
+            self._notify(
+                f"{message} — bracket geometry inverted "
+                f"(stop {stop_price:g} / target {target_price:g}); alert only, no paper fill"
+            )
+            return None
+        if not self._spread_ok(symbol):
+            self._notify(f"{message} — spread too wide; alert only, no paper fill")
             return None
         self._notify(message)
-        return None
+        return self._propose(
+            TradeProposal(
+                symbol=symbol,
+                direction=direction,
+                quantity=plan.contracts,
+                stop_price=stop_price,
+                target_price=target_price,
+                reason=message,
+            )
+        )
+
+    def _bracket_prices(
+        self, plan: SessionPlan, level: Level, confirming: str
+    ) -> tuple[float, float]:
+        """Resolve the bracket's absolute stop/target prices for a fire.
+
+        Explicit ``level.stop`` / ``level.target`` win; otherwise each is derived by
+        offsetting the level price by the plan's default points on the correct side for
+        the trade direction (``confirming`` = buy → long: stop below, target above; a
+        short is the mirror)."""
+        if confirming == "buy":  # long
+            stop = level.stop if level.stop is not None else level.price - plan.default_stop_points
+            target = (
+                level.target
+                if level.target is not None
+                else level.price + plan.default_target_points
+            )
+        else:  # short
+            stop = level.stop if level.stop is not None else level.price + plan.default_stop_points
+            target = (
+                level.target
+                if level.target is not None
+                else level.price - plan.default_target_points
+            )
+        return stop, target
 
     def _spread_ok(self, contract: str) -> bool:
         """Spread gate (proposal only): True unless the option's quoted spread is too wide."""
@@ -455,9 +498,10 @@ class SetupDetector:
     def _message(self, symbol: str, level: Level) -> str:
         tape = _TAPE_PHRASE.get(self._tape_side.get(symbol, "mixed"), "tape mixed")
         verb = _VERB.get(level.mode, "tagged")
+        stop_txt = f"; plan stop {level.stop:g}" if level.stop is not None else ""
         return (
             f"{symbol} {verb} {level.price:g} {level.side} [{level.mode}] — "
-            f"{tape}{self._book_note(symbol)}; plan stop {level.stop:g}"
+            f"{tape}{self._book_note(symbol)}{stop_txt}"
         )
 
     def _book_note(self, symbol: str) -> str:
@@ -522,18 +566,25 @@ def _tape_side(ts: TimeSale) -> str:
 
 def _confirming_side(level: Level) -> str:
     """The tape aggressor side that confirms this level's trade direction (buy/sell)."""
-    if level.contract is not None:
-        try:
-            _root, _exp, opt_type, _strike = parse_occ(level.contract)
-            return "buy" if opt_type == "call" else "sell"
-        except (IndexError, ValueError):
-            pass  # malformed contract — fall back to side + mode
-    # alert-only (or unparseable): derive direction from side + mode.
+    if level.direction == "long":
+        return "buy"
+    if level.direction == "short":
+        return "sell"
+    # alert-only (direction None) or unrecognized: derive direction from side + mode.
     # momentum modes (break, retest) go *with* the cross — a resistance breakout/retest is
     # a long; mean-revert modes (fade, reversal) go back *inside* — a failed-break reversal
     # at resistance is a short, mirroring fade.
     bullish = (level.side == "support") != (level.mode in _MOMENTUM_MODES)
     return "buy" if bullish else "sell"
+
+
+def _bracket_sane(confirming: str, anchor: float, stop: float, target: float) -> bool:
+    """Guard against an inverted bracket: a long needs ``stop < anchor < target``; a
+    short the mirror (``target < anchor < stop``). ``anchor`` is the level price (the
+    entry proxy — fills land within a margin of it)."""
+    if confirming == "buy":
+        return stop < anchor < target
+    return target < anchor < stop
 
 
 def _lean_allows(lean: str, confirming: str) -> bool:

@@ -77,28 +77,31 @@ class BreakoutTracker:
     price: float
     side: str  # "resistance" | "support"
     # distance past the wall that starts an attempt (shared with the detector's break mode)
-    break_margin: float = 0.05
-    # ── tunables calibrated against the 2026-06-18 (chop) + 06-22 (breakdown) QQQ 740 tape ──
+    break_margin: float = 0.5
+    # ── point-scale tunables. Origin: the 2026-06-18 (chop) + 06-22 (breakdown) QQQ 740 tape;
+    # scaled ~10× here for the /ES-family magnitude (~6250 vs QQQ ~600), pending recalibration
+    # against recorded /MES tape (a fresh version cohort insulates the QQQ history). The QQQ
+    # figures below are the *origin* the ratios came from, not the live /MES values. ──
     # A break must commit this far past the wall to be tradeable in EITHER direction — gates both
-    # the reversal qualification and the time-confirm. Set just above 6/18's 0.62 chop ceiling so
-    # micro-pokes don't read as "failed breaks"; this single knob zeroes out the chop machine-gun.
-    # The reversal path has no *positive* (real fast false-break) example in the 6/18+6/22 window,
-    # so this floor is its main guard — revisit it on a day that actually shows one.
-    min_break_excursion: float = 0.75
-    # Excursion that confirms a break by distance alone (6/18 chop maxed at 0.62 so distance never
-    # false-confirms; 6/22's breakdown reached ~2.0 by ~10:33).
-    follow_through_margin: float = 2.00
+    # the reversal qualification and the time-confirm. Set above the chop ceiling (QQQ: just above
+    # 6/18's 0.62) so micro-pokes don't read as "failed breaks"; this single knob zeroes out the
+    # chop machine-gun. The reversal path had no *positive* (real fast false-break) example in the
+    # 6/18+6/22 window, so this floor is its main guard — revisit it on a day that shows one.
+    min_break_excursion: float = 7.5
+    # Excursion that confirms a break by distance alone (QQQ: 6/18 chop maxed at 0.62 so distance
+    # never false-confirmed; 6/22's breakdown reached ~2.0 by ~10:33).
+    follow_through_margin: float = 20.0
     # Time held outside that confirms a break — kept ≥ failure_window_s so a still-reversible break
     # isn't prematurely time-confirmed; 6/22's breakdown still confirms before its ~5-min retest.
     confirm_s: float = 150.0
     # A snap-back within this of the cross = a failed break. Only negatively bounded here (6/22's
     # 60-min top must NOT read as a reversal); no fast-fail example in-window to positively fit it.
     failure_window_s: float = 120.0
-    # Distance back inside that counts as a genuine re-cross (filters 6/18 sub-0.10 chop wiggles;
-    # 6/22's retest peaked 0.08 below 740 so it never false-tripped the late-failure exit).
-    reentry_margin: float = 0.10
-    # Distance from the wall that counts as a retest touch (caught 6/22's bounce to 739.92).
-    retest_proximity: float = 0.20
+    # Distance back inside that counts as a genuine re-cross (filters QQQ 6/18 sub-0.10 chop
+    # wiggles; 6/22's retest peaked 0.08 below 740 so it never false-tripped the late-failure exit).
+    reentry_margin: float = 1.0
+    # Distance from the wall that counts as a retest touch (QQQ: caught 6/22's bounce to 739.92).
+    retest_proximity: float = 2.0
     # Retest-and-resume must complete within this of confirm. THE calibration fix: 6/22's
     # confirm→resume took ~4.5 min, so the old 120s placeholder would have missed the trade.
     retest_window_s: float = 360.0

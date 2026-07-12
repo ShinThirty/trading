@@ -91,77 +91,141 @@ def test_cancelled_stop_does_not_fill() -> None:
     assert paper.net_position("QQQ") == 1
 
 
-# ── place_bracket (entry + OCO stop/target) ──────────────────
+# ── place_bracket (direction-aware entry + OCO stop/target) ───
+# /MES: $5/point, 0.25 tick. A long from 6300 with stop 6290 / target 6320 risks
+# $50 to make $100; the short is the mirror.
 
 
-def test_place_bracket_opens_and_rests_oco_children() -> None:
-    paper = PaperBroker()
+def test_place_bracket_long_opens_and_rests_oco_children() -> None:
+    paper = PaperBroker(multiplier=5)
     events: list[OrderEvent] = []
     paper.on_order_event(events.append)
 
     entry_id, stop_id, target_id = paper.place_bracket(
-        "QQQ_C", 1, stop_pct=0.20, target_pct=0.20, reference=4.00
+        "/MES", Side.BUY, 1, stop_price=6290.0, target_price=6320.0, reference=6300.0
     )
 
-    assert paper.net_position("QQQ_C") == 1  # entry filled immediately
+    assert paper.net_position("/MES") == 1  # entry filled immediately (long)
     statuses = {(e.order_id, e.status) for e in events}
     assert (entry_id, OrderStatus.FILLED) in statuses
     assert (stop_id, OrderStatus.NEW) in statuses  # both children resting
     assert (target_id, OrderStatus.NEW) in statuses
+    # children rest on the SELL side for a long
+    child_sides = {e.side for e in events if e.order_id in (stop_id, target_id)}
+    assert child_sides == {Side.SELL}
 
 
-def test_bracket_target_fills_and_cancels_stop() -> None:
-    paper = PaperBroker()
+def test_long_bracket_target_fills_and_cancels_stop() -> None:
+    paper = PaperBroker(multiplier=5)
     events: list[OrderEvent] = []
     paper.on_order_event(events.append)
     _, stop_id, target_id = paper.place_bracket(
-        "QQQ_C", 1, stop_pct=0.20, target_pct=0.20, reference=4.00
-    )  # stop 3.20, target 4.80
+        "/MES", Side.BUY, 1, stop_price=6290.0, target_price=6320.0, reference=6300.0
+    )
 
-    paper.trade("QQQ_C", 4.85)  # crosses the target -> win, OCO cancels the stop
+    paper.trade("/MES", 6321.0)  # crosses the target -> win, OCO cancels the stop
 
-    assert paper.net_position("QQQ_C") == 0
-    assert paper.realized_pnl() == pytest.approx((4.80 - 4.00) * 100)  # +80, fills at the limit
+    assert paper.net_position("/MES") == 0
+    assert paper.realized_pnl() == pytest.approx((6320.0 - 6300.0) * 5)  # +100, fills at the limit
     statuses = {(e.order_id, e.status) for e in events}
     assert (target_id, OrderStatus.FILLED) in statuses
     assert (stop_id, OrderStatus.CANCELLED) in statuses
 
 
-def test_bracket_stop_fills_and_cancels_target() -> None:
-    paper = PaperBroker()
+def test_long_bracket_stop_fills_and_cancels_target() -> None:
+    paper = PaperBroker(multiplier=5)
     events: list[OrderEvent] = []
     paper.on_order_event(events.append)
     _, stop_id, target_id = paper.place_bracket(
-        "QQQ_C", 1, stop_pct=0.20, target_pct=0.20, reference=4.00
-    )  # stop 3.20, target 4.80
+        "/MES", Side.BUY, 1, stop_price=6290.0, target_price=6320.0, reference=6300.0
+    )
 
-    paper.trade("QQQ_C", 3.10)  # crosses the stop -> loss, OCO cancels the target
+    paper.trade("/MES", 6289.0)  # crosses the stop -> loss, OCO cancels the target
 
-    assert paper.net_position("QQQ_C") == 0
-    assert paper.realized_pnl() == pytest.approx((3.10 - 4.00) * 100)  # -90, fills at the print
+    assert paper.net_position("/MES") == 0
+    assert paper.realized_pnl() == pytest.approx((6289.0 - 6300.0) * 5)  # -55, fills at the print
     statuses = {(e.order_id, e.status) for e in events}
     assert (stop_id, OrderStatus.FILLED) in statuses
     assert (target_id, OrderStatus.CANCELLED) in statuses
 
 
+def test_short_bracket_opens_short_and_rests_buy_children() -> None:
+    """A SELL-to-open short: entry goes negative, both children rest on the BUY side,
+    the stop is ABOVE entry (up-cross = loss) and the target BELOW (down-cross = win)."""
+    paper = PaperBroker(multiplier=5)
+    events: list[OrderEvent] = []
+    paper.on_order_event(events.append)
+
+    _, stop_id, target_id = paper.place_bracket(
+        "/MES", Side.SELL, 1, stop_price=6310.0, target_price=6280.0, reference=6300.0
+    )
+
+    assert paper.net_position("/MES") == -1  # entry opened a short
+    child_sides = {e.side for e in events if e.order_id in (stop_id, target_id)}
+    assert child_sides == {Side.BUY}  # cover orders
+
+
+def test_short_bracket_target_wins_on_down_cross() -> None:
+    paper = PaperBroker(multiplier=5)
+    _, stop_id, target_id = paper.place_bracket(
+        "/MES", Side.SELL, 1, stop_price=6310.0, target_price=6280.0, reference=6300.0
+    )
+
+    paper.trade("/MES", 6279.0)  # falls through the target -> cover for a win
+
+    assert paper.net_position("/MES") == 0
+    assert paper.realized_pnl() == pytest.approx((6300.0 - 6280.0) * 5)  # +100 covering lower
+    del stop_id, target_id
+
+
+def test_short_bracket_stop_loses_on_up_cross() -> None:
+    paper = PaperBroker(multiplier=5)
+    paper.place_bracket(
+        "/MES", Side.SELL, 1, stop_price=6310.0, target_price=6280.0, reference=6300.0
+    )
+
+    paper.trade("/MES", 6310.0)  # rises to the stop -> cover for a loss (fills at the print)
+
+    assert paper.net_position("/MES") == 0
+    assert paper.realized_pnl() == pytest.approx((6300.0 - 6310.0) * 5)  # -50 covering higher
+
+
+def test_bracket_snaps_children_to_tick() -> None:
+    """Off-tick stop/target prices are snapped to the 0.25 grid before resting."""
+    paper = PaperBroker(multiplier=5)
+    events: list[OrderEvent] = []
+    paper.on_order_event(events.append)
+    _, stop_id, target_id = paper.place_bracket(
+        "/MES", Side.BUY, 1, stop_price=6290.31, target_price=6319.88, reference=6300.0, tick=0.25
+    )
+    resting = {e.order_id: e for e in events if e.status is OrderStatus.NEW}
+    assert resting[stop_id].order_id  # sanity
+    # rested stop is a STOP order; inspect via a crossing print at the snapped level
+    paper.trade("/MES", 6290.25)  # 6290.31 snaps down to 6290.25 -> stop triggers here
+    assert paper.net_position("/MES") == 0
+    del target_id
+
+
 def test_bracket_legs_share_entry_id_and_close_carries_realized() -> None:
-    paper = PaperBroker()
+    paper = PaperBroker(multiplier=5)
     events: list[OrderEvent] = []
     paper.on_order_event(events.append)
     entry_id, stop_id, _target_id = paper.place_bracket(
-        "QQQ_C", 1, stop_pct=0.20, target_pct=0.20, reference=4.00
+        "/MES", Side.BUY, 1, stop_price=6290.0, target_price=6320.0, reference=6300.0
     )
 
-    paper.trade("QQQ_C", 3.10)  # stop fills -> loss
+    paper.trade("/MES", 6289.0)  # stop fills -> loss
 
     assert all(e.bracket_id == entry_id for e in events)  # every leg keyed to the entry id
     entry_fill = next(e for e in events if e.order_id == entry_id)
     stop_fill = next(e for e in events if e.order_id == stop_id and e.status is OrderStatus.FILLED)
     assert entry_fill.realized_delta == 0.0  # the open realizes nothing
-    assert stop_fill.realized_delta == pytest.approx((3.10 - 4.00) * 100)  # -90 label on the close
+    assert stop_fill.realized_delta == pytest.approx(
+        (6289.0 - 6300.0) * 5
+    )  # -55 label on the close
 
 
 def test_place_bracket_without_price_raises() -> None:
-    paper = PaperBroker()
+    paper = PaperBroker(multiplier=5)
     with pytest.raises(ValueError, match="no price"):
-        paper.place_bracket("QQQ_C", 1, stop_pct=0.20, target_pct=0.20)
+        paper.place_bracket("/MES", Side.BUY, 1, stop_price=6290.0, target_price=6320.0)

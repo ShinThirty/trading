@@ -38,6 +38,13 @@ _STOP_TYPES = (OrderType.STOP, OrderType.STOP_LIMIT)
 _LIMIT_PRICED = (OrderType.LIMIT, OrderType.STOP_LIMIT)
 
 
+def round_to_tick(price: float, tick: float) -> float:
+    """Snap ``price`` to the nearest ``tick`` (e.g. 0.25 for /ES-family futures)."""
+    if tick <= 0:
+        return price
+    return round(round(price / tick) * tick, 4)
+
+
 def _crosses(order: Order, price: float) -> bool:
     """True if a tape print at ``price`` should fill this resting order."""
     if order.type in _STOP_TYPES:
@@ -61,9 +68,10 @@ class _Resting:
 class PaperBroker:
     """A ``BrokerExecution`` backed by an in-memory matching engine."""
 
-    def __init__(self, multiplier: int = 100) -> None:
+    def __init__(self, multiplier: int = 100, tick: float = 0.25) -> None:
         self._ids = count(1)
         self._ledger = Ledger(multiplier=multiplier)
+        self._tick = tick
         self._last: dict[str, float] = {}
         self._book: dict[str, tuple[float | None, float | None]] = {}  # symbol -> (bid, ask)
         self._resting: dict[OrderId, _Resting] = {}
@@ -100,40 +108,46 @@ class PaperBroker:
     def place_bracket(
         self,
         symbol: str,
+        direction: Side,
         quantity: int,
         *,
-        stop_pct: float,
-        target_pct: float,
+        stop_price: float,
+        target_price: float,
         reference: float | None = None,
+        tick: float | None = None,
     ) -> tuple[OrderId, OrderId, OrderId]:
-        """Open ``quantity`` of ``symbol`` at market and rest an OCO stop/target.
+        """Open ``quantity`` of ``symbol`` in ``direction`` at market and rest an OCO stop/target.
 
-        Entry fills immediately at ``reference`` (or the last tape price); the
-        child stop-loss rests at ``entry*(1-stop_pct)`` and the take-profit at
-        ``entry*(1+target_pct)``, linked so a fill on one cancels the other.
-        Returns ``(entry_id, stop_id, target_id)``; ``entry_id`` doubles as the
-        bracket's correlation key, stamped on every leg's ``OrderEvent`` so a
-        closing fill joins back to the open.
+        Entry fills immediately at ``reference`` (or the marketable side of the book,
+        falling back to the last tape print) — ``direction`` = ``BUY`` opens a long,
+        ``SELL`` opens a short. Both children rest on the **opposite** side at the given
+        absolute prices, snapped to ``tick``: for a long, a SELL-STOP below and a
+        SELL-LIMIT above; for a short, a BUY-STOP above and a BUY-LIMIT below. The pair is
+        OCO-linked (a fill on one cancels the other). Returns ``(entry_id, stop_id,
+        target_id)``; ``entry_id`` doubles as the bracket's correlation key, stamped on
+        every leg's ``OrderEvent`` so a closing fill joins back to the open.
         """
         entry_price = (
-            reference if reference is not None else self._marketable_price(symbol, Side.BUY)
+            reference if reference is not None else self._marketable_price(symbol, direction)
         )
         if entry_price is None:
             raise ValueError(
                 f"PaperBroker has no price for {symbol}; pass reference or seed one via trade()"
             )
+        exit_side = Side.SELL if direction is Side.BUY else Side.BUY
         entry_id = f"paper-{next(self._ids)}"
-        entry = Order(symbol, Side.BUY, quantity, OrderType.MARKET, limit_price=entry_price)
+        entry = Order(symbol, direction, quantity, OrderType.MARKET, limit_price=entry_price)
         self._fill(entry_id, entry, entry_price, bracket_id=entry_id)
 
-        stop_px = round(entry_price * (1 - stop_pct), 2)
-        target_px = round(entry_price * (1 + target_pct), 2)
+        grid = tick if tick is not None else self._tick
+        stop_px = round_to_tick(stop_price, grid)
+        target_px = round_to_tick(target_price, grid)
         stop_id = self.place(
-            Order(symbol, Side.SELL, quantity, OrderType.STOP, stop_price=stop_px),
+            Order(symbol, exit_side, quantity, OrderType.STOP, stop_price=stop_px),
             bracket_id=entry_id,
         )
         target_id = self.place(
-            Order(symbol, Side.SELL, quantity, OrderType.LIMIT, limit_price=target_px),
+            Order(symbol, exit_side, quantity, OrderType.LIMIT, limit_price=target_px),
             bracket_id=entry_id,
         )
         self._oco[stop_id] = target_id

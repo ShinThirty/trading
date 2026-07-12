@@ -1,37 +1,32 @@
-"""TradierFeed: adapts the Tradier streaming transport to the MarketDataFeed port.
+"""DxLinkFeed: adapts the DXLink (dxFeed) streaming transport to the MarketDataFeed port.
 
 Holds the per-event-type callback registries and fans each parsed market event
 out to its subscribers. ``run`` drives the underlying auto-reconnecting stream;
 ``_dispatch`` is the seam the run loop (and the tests) push events through, so
 the routing is verifiable without a live socket.
 
-``drive_paper_fills`` is the Phase-2 wiring that connects the live tape to the
-PaperBroker matching engine: every trade/timesale print advances the broker so
-resting STOP/LIMIT orders trigger when the tape crosses them, and every quote
-updates the broker's top-of-book so a MARKET entry fills at the marketable side
-(the ask) rather than printing through at the last trade. Quotes never trigger a
-resting order — only prints do.
+``drive_paper_fills`` connects the live tape to the PaperBroker matching engine:
+every trade/timesale print advances the broker so resting STOP/LIMIT orders
+trigger when the tape crosses them, and every quote updates the broker's
+top-of-book so a MARKET entry fills at the marketable side (bid/ask) rather than
+printing through at the last trade. Quotes never trigger a resting order — only
+prints do.
 """
 
 from collections.abc import Callable
 
+from trading_clients.dxlink_stream_client import DxLinkStreamClient
 from trading_clients.market_stream import MarketEvent, Quote, TimeSale, Trade
-from trading_clients.tradier_stream_client import DEFAULT_FILTERS, TradierStreamClient
 
 from trading_scalper.paper import PaperBroker
 from trading_scalper.ports import MarketDataFeed
 
 
-class TradierFeed:
-    """A ``MarketDataFeed`` backed by ``TradierStreamClient``."""
+class DxLinkFeed:
+    """A ``MarketDataFeed`` backed by ``DxLinkStreamClient`` (Tastytrade dxFeed)."""
 
-    def __init__(
-        self,
-        client: TradierStreamClient,
-        filters: tuple[str, ...] = DEFAULT_FILTERS,
-    ) -> None:
+    def __init__(self, client: DxLinkStreamClient) -> None:
         self._client = client
-        self._filters = filters
         self._symbols: list[str] = []
         self._quote_cbs: list[Callable[[Quote], None]] = []
         self._trade_cbs: list[Callable[[Trade], None]] = []
@@ -51,7 +46,7 @@ class TradierFeed:
 
     async def run(self) -> None:
         """Consume the live stream until cancelled, dispatching each event."""
-        async for event in self._client.stream(self._symbols, self._filters):
+        async for event in self._client.stream(self._symbols):
             self._dispatch(event)
 
     def _dispatch(self, event: MarketEvent) -> None:
@@ -71,8 +66,8 @@ def drive_paper_fills(feed: MarketDataFeed, broker: PaperBroker) -> None:
 
     Each trade/timesale print advances ``PaperBroker`` so resting STOP/LIMIT
     orders trigger when the tape crosses them; each quote updates the broker's
-    top-of-book so a MARKET entry fills at the marketable side (the ask). Quotes
-    never move the engine — only prints trigger a resting order.
+    top-of-book so a MARKET entry fills at the marketable side. Quotes never move
+    the engine — only prints trigger a resting order.
     """
     feed.on_trade(lambda t: broker.trade(t.symbol, t.price))
     feed.on_timesale(lambda ts: broker.trade(ts.symbol, ts.price))

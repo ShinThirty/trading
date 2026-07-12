@@ -1,21 +1,21 @@
 """Composition root: wire the subsystems into one runnable paper session.
 
-The daemon detects a setup off the live underlying tape, **prompts** the human,
-and on every prompt **auto-executes the same option bracket** in an in-memory
-``PaperBroker`` (entry + OCO stop-loss / take-profit), **persisting** fills + a
-P&L summary so the detector's track record is reviewable.
+The daemon detects a setup off the live futures tape, **prompts** the human, and on
+every prompt **auto-executes the same bracket** in an in-memory ``PaperBroker`` (a
+direction-aware entry + OCO stop-loss / take-profit at absolute prices),
+**persisting** fills + a P&L summary so the detector's track record is reviewable.
 
 Paper-only by construction — there is no live-order path. The safety story is
 simply that no real capital is ever at risk, so the daemon opening positions
 (which the old assist-only guard forbade) is now its whole job.
 
-    feed (Tradier WS) ──underlying tape──▶ SetupDetector ──▶ notify(human)
-                       │                                  ├─▶ propose ─▶ PaperBroker.place_bracket
-                       │                                  └─▶ record  ─▶ SignalLog (B4 telemetry)
-                       └──option tape──▶ PaperBroker (fills entry + OCO children)
-                                              │ order events
-                                              ▼
-                                         PaperPersister (fills JSONL + summary JSON)
+    feed (DXLink WS) ──futures tape──▶ SetupDetector ──▶ notify(human)
+                     │                                 ├─▶ propose ─▶ PaperBroker.place_bracket
+                     │                                 └─▶ record  ─▶ SignalLog (B4 telemetry)
+                     └──────tape──────▶ PaperBroker (fills entry + OCO children)
+                                             │ order events
+                                             ▼
+                                        PaperPersister (fills JSONL + summary JSON)
 """
 
 import argparse
@@ -27,13 +27,15 @@ from pathlib import Path
 
 import httpx
 from trading_clients.config import load_config
-from trading_clients.tradier_stream_client import TradierStreamClient
+from trading_clients.dxlink_stream_client import DxLinkStreamClient
+from trading_clients.tastytrade_client import TastyTradeClient
 
 from trading_scalper.detector import SetupDetector, watch_setups
-from trading_scalper.domain import OrderId, TradeProposal
-from trading_scalper.feed import TradierFeed, drive_paper_fills
+from trading_scalper.domain import OrderId, Side, TradeProposal
+from trading_scalper.feed import DxLinkFeed, drive_paper_fills
+from trading_scalper.instruments import Instrument, instrument_for
 from trading_scalper.notify import Notifier
-from trading_scalper.paper import PaperBroker
+from trading_scalper.paper import PaperBroker, round_to_tick
 from trading_scalper.persist import (
     PaperPersister,
     SignalLog,
@@ -71,23 +73,29 @@ def make_executor(
     def execute(p: TradeProposal) -> OrderId | None:
         try:
             entry_id, _stop_id, _target_id = broker.place_bracket(
-                p.contract, p.quantity, stop_pct=p.stop_pct, target_pct=p.target_pct
+                p.symbol,
+                p.direction,
+                p.quantity,
+                stop_price=p.stop_price,
+                target_price=p.target_price,
             )
             return entry_id
         except ValueError:
-            notifier.notify(f"(paper) skipped {p.contract}: no price on the tape yet")
+            notifier.notify(f"(paper) skipped {p.symbol}: no price on the tape yet")
             return None
 
     return execute
 
 
 def collect_symbols(plan: SessionPlan | None, underlyings: list[str]) -> list[str]:
-    """Underlyings + every level's option contract (deduped, order-preserved)."""
+    """The subscribe list: the watched/traded symbols, plus the plan's symbol if distinct.
+
+    For futures the watched tape and the traded instrument are one symbol, so this
+    just dedupes and guarantees the plan's symbol is subscribed even if ``--symbols``
+    didn't name it."""
     out = list(underlyings)
-    if plan is not None:
-        for lvl in plan.levels:
-            if lvl.contract and lvl.contract not in out:
-                out.append(lvl.contract)
+    if plan is not None and plan.symbol and plan.symbol not in out:
+        out.append(plan.symbol)
     return out
 
 
@@ -109,13 +117,12 @@ def build_session(
     """Wire detector → proposal → paper bracket → persisted ledger onto the tape.
 
     Stop/target/qty are read from the plan at fire time (in the detector), so this
-    composition is plan-driven; the CLI ``--stop-pct``/``--target-pct``/``--contracts``
+    composition is plan-driven; the CLI ``--stop-points``/``--target-points``/``--contracts``
     only feed the offline ``--demo-setup`` path. The detector's ``record`` sink lands
     the B4 telemetry in a per-fire ``SignalLog`` alongside the fills/summary.
 
     A ``ShadowRecorder`` is also wired onto the tape — pure telemetry, gating nothing
-    (see ``shadow.py``). It tracks the ``underlyings`` only; the option contracts on the
-    feed feed the matching engine, not the volume profile.
+    (see ``shadow.py``). It tracks the ``underlyings`` only.
     """
     notifier = notifier or Notifier()
     signals = SignalLog(signals_path or default_signals_path(date))
@@ -135,9 +142,9 @@ def build_session(
         shadow_path=shadow_path or default_shadow_path(date),
         interval=interval,
     )
-    drive_paper_fills(feed, broker)  # option + underlying prints fill the engine
-    watch_setups(feed, detector)  # underlying tape → detector
-    shadow.attach(feed)  # underlying tape → shadow volume telemetry (reads nothing back)
+    drive_paper_fills(feed, broker)  # tape prints fill the engine
+    watch_setups(feed, detector)  # tape → detector
+    shadow.attach(feed)  # tape → shadow volume telemetry (reads nothing back)
     return ScalpSession(
         feed=feed,
         broker=broker,
@@ -149,62 +156,81 @@ def build_session(
     )
 
 
+def _plan_key(symbol: str) -> str:
+    """Filesystem-safe plan-file key from a futures symbol.
+
+    ``/MESU25:XCME`` → ``MESU25``; ``/MES`` → ``MES``. Both the daemon and
+    ``/scalp prep`` must derive the plan path the same way.
+    """
+    return symbol.lstrip("/").split(":")[0]
+
+
 def _parse_demo_setup(spec: str) -> tuple[str, int, float]:
-    """Parse ``CONTRACT[:QTY[:PRICE]]`` for the offline --demo-setup affordance."""
+    """Parse ``SYMBOL[:QTY[:PRICE]]`` for the offline --demo-setup affordance.
+
+    Use the plain root (e.g. ``/MES``) here — the ``:XCME`` streamer suffix collides
+    with the ``:`` field delimiter, and the demo symbol is just a paper-broker key.
+    """
     parts = spec.split(":")
     if not parts[0]:
-        raise SystemExit(f"--demo-setup needs a contract, got {spec!r}")
+        raise SystemExit(f"--demo-setup needs a symbol, got {spec!r}")
     try:
         qty = int(parts[1]) if len(parts) > 1 and parts[1] else 1
-        price = float(parts[2]) if len(parts) > 2 and parts[2] else 2.00
+        price = float(parts[2]) if len(parts) > 2 and parts[2] else 6300.00
     except ValueError as exc:
-        raise SystemExit(f"--demo-setup expects CONTRACT[:QTY[:PRICE]], got {spec!r}") from exc
+        raise SystemExit(f"--demo-setup expects SYMBOL[:QTY[:PRICE]], got {spec!r}") from exc
     return parts[0], qty, price
 
 
 def _print_banner(
-    plan: SessionPlan | None, path: object, symbols: list[str], date: str, sandbox: bool
+    plan: SessionPlan | None, path: object, symbols: list[str], date: str, inst: Instrument
 ) -> None:
     print("=" * 64)
     print("trading-scalper — PAPER entry-detector (no live orders)")
-    print(f"date: {date}   underlyings: {' '.join(symbols)}")
+    print(
+        f"date: {date}   symbol: {' '.join(symbols)}   "
+        f"(${inst.point_value}/pt, {inst.tick:g} tick)"
+    )
     if plan is not None:
         print(f"plan: {path}")
         print(
             f"  regime={plan.regime}  lean={plan.lean}  qty={plan.contracts}  "
-            f"bracket={plan.default_stop_pct:.0%} stop / {plan.target_pct:.0%} target"
+            f"bracket={plan.default_stop_points:g}pt stop / {plan.default_target_points:g}pt target"
         )
         for lvl in plan.levels:
-            tag = f"→ buy {lvl.contract}" if lvl.contract else "(alert-only, no contract)"
-            print(f"  {lvl.side:<10} {lvl.price:g} [{lvl.mode}]  {tag}")
+            tag = f"→ {lvl.direction} {plan.symbol}" if lvl.direction else "(alert-only, no trade)"
+            stop_txt = f"  stop {lvl.stop:g}" if lvl.stop is not None else ""
+            print(f"  {lvl.side:<10} {lvl.price:g} [{lvl.mode}]  {tag}{stop_txt}")
         if plan.zero_gamma is not None:
             print(f"  zero-gamma flip {plan.zero_gamma:g}  (tripwire — alerts on cross, no trade)")
         if plan.notes:
             print(f"  notes: {plan.notes}")
     else:
         print(f"plan: NONE ({path}) — detector silent until /scalp prep writes today's plan")
-    if sandbox:
-        print("WARNING: [tradier] sandbox=true — streaming is PRODUCTION-ONLY; it will 401.")
     print("=" * 64)
 
 
 def _run_demo(broker: PaperBroker, session: ScalpSession, notifier: Notifier, args) -> None:
-    """Offline (no-network) demo: inject a setup, fill the bracket, persist a summary."""
-    contract, qty, price = _parse_demo_setup(args.demo_setup)
+    """Offline (no-network) demo: inject a long setup, fill the bracket, persist a summary."""
+    symbol, qty, price = _parse_demo_setup(args.demo_setup)
+    inst = instrument_for(symbol)
     print("=" * 64)
     print("trading-scalper — DEMO (offline, no network)")
-    broker.trade(contract, price)  # seed a tape price for the option
+    broker.trade(symbol, price)  # seed a tape price
+    stop_price = round_to_tick(price - args.stop_points, inst.tick)
+    target_price = round_to_tick(price + args.target_points, inst.tick)
     notifier.notify(
-        f"(demo) {contract} setup — buy {qty}, "
-        f"stop {args.stop_pct:.0%} / target {args.target_pct:.0%}"
+        f"(demo) {symbol} long {qty} — stop {args.stop_points:g}pt ({stop_price:g}) / "
+        f"target {args.target_points:g}pt ({target_price:g})"
     )
     make_executor(broker, notifier)(
-        TradeProposal(contract, qty, args.stop_pct, args.target_pct, reason="(demo setup)")
+        TradeProposal(symbol, Side.BUY, qty, stop_price, target_price, reason="(demo setup)")
     )
-    stop_px = round(price * (1 - args.stop_pct), 2)
-    target_px = round(price * (1 + args.target_pct), 2)
-    print(f"  entry filled @ {price:g}; bracket resting (stop {stop_px:g} / target {target_px:g})")
-    broker.trade(contract, target_px + 0.01)  # cross the target → win; OCO cancels the stop
+    print(
+        f"  entry filled @ {price:g}; bracket resting "
+        f"(stop {stop_price:g} / target {target_price:g})"
+    )
+    broker.trade(symbol, target_price + inst.tick)  # cross the target → win; OCO cancels the stop
     print(f"  target hit; position flat; realized ${broker.realized_pnl():.0f}")
     session.persister.write_summary()
     print(f"  fills   → {session.persister.fills_path}")
@@ -212,22 +238,42 @@ def _run_demo(broker: PaperBroker, session: ScalpSession, notifier: Notifier, ar
     print("=" * 64)
 
 
+async def _demo_token() -> tuple[str, str]:
+    """A throwaway token provider for the offline demo — never actually invoked."""
+    return ("demo", "wss://demo")
+
+
 async def _run(args: argparse.Namespace) -> None:
     cfg = load_config()
-    if cfg.tradier is None:
-        raise SystemExit(
-            "No [tradier] section in ~/.tradingrc — streaming needs a production Tradier token."
-        )
-
     primary = args.symbols[0]
-    plan_path = default_plan_path(primary, args.date)
+    inst = instrument_for(primary)
+    plan_path = default_plan_path(_plan_key(primary), args.date)
     notifier = Notifier(bell=not args.no_bell)
     plan_store = PlanStore(plan_path, on_error=notifier.notify)  # bad hot-edit -> warn, keep last
     plan = plan_store.current()
+    broker = PaperBroker(multiplier=inst.point_value, tick=inst.tick)
 
-    broker = PaperBroker()
-    stream = TradierStreamClient(cfg.tradier.api_token)
-    feed = TradierFeed(stream)
+    if args.demo_setup:
+        # offline: no feed/network. A throwaway feed just satisfies build_session's wiring.
+        session = build_session(
+            DxLinkFeed(DxLinkStreamClient(_demo_token)),
+            broker,
+            plan_store.current,
+            notifier=notifier,
+            date=args.date,
+            underlyings=args.symbols,
+        )
+        _run_demo(broker, session, notifier, args)
+        return
+
+    if cfg.tastytrade is None:
+        raise SystemExit(
+            "No [tastytrade] section in ~/.tradingrc — the futures feed streams via "
+            "Tastytrade DXLink (needs OAuth client_secret + refresh_token)."
+        )
+    tasty = TastyTradeClient(cfg.tastytrade)
+    stream = DxLinkStreamClient(tasty.get_quote_token)
+    feed = DxLinkFeed(stream)
     session = build_session(
         feed,
         broker,
@@ -237,12 +283,7 @@ async def _run(args: argparse.Namespace) -> None:
         underlyings=args.symbols,
     )
 
-    if args.demo_setup:
-        _run_demo(broker, session, notifier, args)
-        await stream.close()
-        return
-
-    _print_banner(plan, plan_path, args.symbols, args.date, cfg.tradier.sandbox)
+    _print_banner(plan, plan_path, args.symbols, args.date, inst)
     symbols = collect_symbols(plan, args.symbols)
     print(f"streaming: {' '.join(symbols)}")
     await feed.subscribe(symbols)
@@ -251,9 +292,10 @@ async def _run(args: argparse.Namespace) -> None:
     except (KeyboardInterrupt, asyncio.CancelledError):
         pass
     except httpx.HTTPStatusError as exc:
-        raise SystemExit(_tradier_http_msg(exc)) from exc
+        raise SystemExit(_dxlink_http_msg(exc)) from exc
     finally:
         await stream.close()
+        await tasty.close()
         session.persister.write_summary()
         session.shadow.flush_tape()  # mirror the persister: don't lose the tail on a hard exit
         session.shadow.write_snapshots()
@@ -264,26 +306,33 @@ async def _run(args: argparse.Namespace) -> None:
         print(f"shadow telemetry → {session.shadow.tape_path} + {session.shadow.shadow_path}")
 
 
-def _tradier_http_msg(exc: httpx.HTTPStatusError) -> str:
+def _dxlink_http_msg(exc: httpx.HTTPStatusError) -> str:
     return (
-        f"Tradier session-create failed: HTTP {exc.response.status_code}. "
-        "401/403 means the token isn't authorized for production streaming."
+        f"Tastytrade quote-token fetch failed: HTTP {exc.response.status_code}. "
+        "401/403 means the OAuth refresh token is invalid/expired, or the account "
+        "isn't a funded customer (DXLink futures streaming needs a real tastytrade customer)."
     )
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(
-        description="Paper entry-detector for intraday SPY/QQQ options scalps."
+        description="Paper entry-detector for intraday index-futures (/MES) scalps."
     )
     ap.add_argument(
-        "--symbols", nargs="+", default=["QQQ"], help="underlying tape symbols (first drives plan)"
+        "--symbols",
+        nargs="+",
+        default=["/MES"],
+        help="futures tape symbols (first drives the plan + instrument economics)",
     )
     ap.add_argument("--date", default=date.today().isoformat(), help="plan date YYYY-MM-DD")
     ap.add_argument(
-        "--stop-pct", type=float, default=0.20, help="(--demo-setup only) stop %% of premium"
+        "--stop-points", type=float, default=6.0, help="(--demo-setup only) stop distance in points"
     )
     ap.add_argument(
-        "--target-pct", type=float, default=0.20, help="(--demo-setup only) target %% of premium"
+        "--target-points",
+        type=float,
+        default=8.0,
+        help="(--demo-setup only) target distance in points",
     )
     ap.add_argument(
         "--contracts",
@@ -294,7 +343,7 @@ def main() -> None:
     ap.add_argument("--no-bell", action="store_true", help="silence the terminal bell")
     ap.add_argument(
         "--demo-setup",
-        metavar="CONTRACT[:QTY[:PRICE]]",
+        metavar="SYMBOL[:QTY[:PRICE]]",
         help="offline: inject a setup, fill the bracket, write a summary, exit",
     )
     args = ap.parse_args()

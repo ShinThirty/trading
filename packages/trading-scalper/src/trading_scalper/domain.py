@@ -84,18 +84,20 @@ type OrderEventCallback = Callable[[OrderEvent], None]
 
 @dataclass(frozen=True, slots=True)
 class TradeProposal:
-    """A detector-blessed entry: BUY-to-open ``contract`` with a premium-% bracket.
+    """A detector-blessed entry: open ``symbol`` in ``direction`` with a price bracket.
 
-    The child stop-loss rests at ``entry * (1 - stop_pct)`` and the take-profit at
-    ``entry * (1 + target_pct)`` (entry = the option's fill price), mirroring the
-    native Webull bracket the paper run is validating. ``reason`` is the human-
+    The entry fills at market — ``direction`` = ``BUY`` opens a long, ``SELL`` opens a
+    short (futures short freely; no put wrapper). The OCO children rest on the opposite
+    side at **absolute** prices resolved upstream from the session plan: ``stop_price``
+    (the bail level) and ``target_price`` (the take-profit). ``reason`` is the human-
     readable alert text that triggered it.
     """
 
-    contract: str  # OCC option symbol to buy
+    symbol: str  # the futures symbol to trade (e.g. "/MES")
+    direction: Side  # BUY = open long, SELL = open short
     quantity: int
-    stop_pct: float
-    target_pct: float
+    stop_price: float
+    target_price: float
     reason: str = ""
 
 
@@ -124,10 +126,10 @@ class FireRecord:
     symbol: str
     level: float  # the blessed level price
     side: str  # support | resistance
-    mode: str  # fade | break
+    mode: str  # fade | break | reversal | retest
     confirming: str  # buy | sell — the tape side that confirmed
     price: float  # underlying price at the fire
-    contract: str | None  # OCC, or None for an alert-only level
+    contract: str | None  # the traded futures symbol, or None for an alert-only level
     bracket_id: OrderId | None  # entry-order id of the placed bracket (join key); None if no fill
     velocity: float | None
     cum_confirming_size: int

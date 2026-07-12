@@ -1,9 +1,9 @@
-"""Local paper entry-detector for intraday SPY/QQQ options scalps.
+"""Local paper entry-detector for intraday index-futures (/MES) scalps.
 
-See docs/scalper-automation.md. The daemon detects a setup off the live tape,
-prompts the human, and auto-executes the same option bracket in an in-memory
-``PaperBroker`` — persisting fills + a P&L summary so the detector's track record
-is reviewable. Paper-only: no real capital is ever at risk.
+See docs/scalper-automation.md. The daemon detects a setup off the live futures
+tape, prompts the human, and auto-executes the same direction-aware bracket in an
+in-memory ``PaperBroker`` — persisting fills + a P&L summary so the detector's
+track record is reviewable. Paper-only: no real capital is ever at risk.
 """
 
 from trading_clients.market_stream import MarketEvent, Quote, TimeSale, Trade
@@ -26,7 +26,7 @@ from trading_scalper.domain import (
     Side,
     TradeProposal,
 )
-from trading_scalper.feed import TradierFeed, drive_paper_fills
+from trading_scalper.feed import DxLinkFeed, drive_paper_fills
 from trading_scalper.ledger import Ledger
 from trading_scalper.notify import Notifier
 from trading_scalper.paper import PaperBroker
@@ -62,9 +62,9 @@ __all__ = [
     "SetupDetector",
     "Side",
     "TimeSale",
+    "DxLinkFeed",
     "Trade",
     "TradeProposal",
-    "TradierFeed",
     "build_session",
     "collect_symbols",
     "default_fills_path",

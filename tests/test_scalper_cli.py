@@ -1,10 +1,10 @@
 """Composition root — the subsystems wired into one paper session.
 
 These pin the new wiring contract: the tape drives both the matching engine and
-the detector; quotes feed the detector's spread/book gates; a *confirmed* level
-tag that names a contract auto-places an OCO bracket; an OCO leg fill flattens +
-realizes; a confirmed tag with no option price yet soft-warns instead of trading;
-and the subscribe list folds in the plan's option contracts.
+the detector (so the traded futures symbol is always priced before a fire); quotes
+feed the detector's spread/book gates; a *confirmed* level tag with a direction
+auto-places a direction-aware OCO bracket; an OCO leg fill flattens + realizes; and
+the subscribe list includes the plan's symbol.
 """
 
 import json
@@ -13,7 +13,14 @@ from pathlib import Path
 
 import pytest
 from trading_clients.market_stream import Quote, TimeSale, Trade
-from trading_scalper.cli import _parse_demo_setup, build_session, collect_symbols
+from trading_scalper.cli import (
+    _parse_demo_setup,
+    _plan_key,
+    build_session,
+    collect_symbols,
+    make_executor,
+)
+from trading_scalper.domain import Side, TradeProposal
 from trading_scalper.notify import Notifier
 from trading_scalper.paper import PaperBroker
 from trading_scalper.persist import PaperPersister
@@ -21,7 +28,7 @@ from trading_scalper.plan import Level, SessionPlan
 
 
 def _buy_ts(symbol: str, price: float) -> TimeSale:
-    return TimeSale(symbol, price=price, bid=price - 0.02, ask=price)  # print at offer -> buy
+    return TimeSale(symbol, price=price, bid=price - 0.25, ask=price)  # print at offer -> buy
 
 
 class FakeFeed:
@@ -58,15 +65,15 @@ class FakeFeed:
             cb(ts)
 
 
-def _plan(lean: str = "both", contract: str | None = "QQQ_C") -> SessionPlan:
+def _plan(lean: str = "both", direction: str | None = "long") -> SessionPlan:
     return SessionPlan(
-        date="2026-06-12",
-        symbol="QQQ",
+        date="2026-07-12",
+        symbol="/MES",
         regime="fragile-pin",
         lean=lean,
-        levels=[Level(719.40, "support", 718.90, contract=contract)],
-        default_stop_pct=0.20,
-        target_pct=0.20,
+        levels=[Level(6190.0, "support", direction=direction, stop=6185.0, target=6200.0)],
+        default_stop_points=6.0,
+        default_target_points=8.0,
         contracts=1,
     )
 
@@ -86,8 +93,8 @@ def _session(
         broker,
         plan_source or (lambda: _plan()),
         notifier=notifier,
-        date="2026-06-12",
-        underlyings=["QQQ"],
+        date="2026-07-12",
+        underlyings=["/MES"],
         fills_path=tmp_path / "fills.jsonl",
         summary_path=tmp_path / "summary.json",
         signals_path=tmp_path / "signals.jsonl",
@@ -97,7 +104,7 @@ def _session(
 
 
 def test_build_session_wires_tape_and_quote_consumers(tmp_path: Path) -> None:
-    feed, broker = FakeFeed(), PaperBroker()
+    feed, broker = FakeFeed(), PaperBroker(multiplier=5)
     session = _session(feed, broker, tmp_path)
 
     # both drive_paper_fills + watch_setups register on every channel: trade and
@@ -111,36 +118,37 @@ def test_build_session_wires_tape_and_quote_consumers(tmp_path: Path) -> None:
 
 
 def test_confirmed_tag_auto_places_a_bracket(tmp_path: Path) -> None:
-    feed, broker = FakeFeed(), PaperBroker()
-    _session(feed, broker, tmp_path, plan_source=lambda: _plan("both", "QQQ_C"))
+    feed, broker = FakeFeed(), PaperBroker(multiplier=5)
+    _session(feed, broker, tmp_path, plan_source=lambda: _plan("both", "long"))
 
-    feed.emit_trade(Trade("QQQ_C", 4.00))  # seed the option price
-    feed.emit_timesale(_buy_ts("QQQ", 719.41))  # confirmed support tag -> auto-bracket
+    # the tape print both seeds the broker's last price AND fires the detector (drive_paper_fills
+    # is wired before the detector), so the entry is always priced — no separate seed needed
+    feed.emit_timesale(_buy_ts("/MES", 6190.0))  # confirmed support tag -> auto-bracket
 
-    assert broker.net_position("QQQ_C") == 1  # entry filled, OCO children resting
+    assert broker.net_position("/MES") == 1  # entry filled, OCO children resting
 
 
 def test_confirmed_tag_logs_a_signal_row(tmp_path: Path) -> None:
-    feed, broker = FakeFeed(), PaperBroker()
-    session = _session(feed, broker, tmp_path, plan_source=lambda: _plan("both", "QQQ_C"))
+    feed, broker = FakeFeed(), PaperBroker(multiplier=5)
+    session = _session(feed, broker, tmp_path, plan_source=lambda: _plan("both", "long"))
 
-    feed.emit_trade(Trade("QQQ_C", 4.00))  # seed the option price
-    feed.emit_timesale(_buy_ts("QQQ", 719.41))  # confirmed support tag -> fire + telemetry
+    feed.emit_timesale(_buy_ts("/MES", 6190.0))  # confirmed support tag -> fire + telemetry
 
     assert session.signals.n_fires == 1
     rows = [json.loads(line) for line in session.signals.path.read_text().splitlines()]
     assert len(rows) == 1
-    assert rows[0]["symbol"] == "QQQ" and rows[0]["contract"] == "QQQ_C"
+    assert rows[0]["symbol"] == "/MES" and rows[0]["contract"] == "/MES"  # traded instrument
     assert rows[0]["confirming"] == "buy" and rows[0]["mode"] == "fade"
 
 
 def test_signal_row_joins_to_bracket_fills_on_bracket_id(tmp_path: Path) -> None:
-    feed, broker = FakeFeed(), PaperBroker()
-    session = _session(feed, broker, tmp_path, plan_source=lambda: _plan("both", "QQQ_C"))
+    feed, broker = FakeFeed(), PaperBroker(multiplier=5)
+    session = _session(feed, broker, tmp_path, plan_source=lambda: _plan("both", "long"))
 
-    feed.emit_trade(Trade("QQQ_C", 4.00))  # seed the option price
-    feed.emit_timesale(_buy_ts("QQQ", 719.41))  # confirmed tag -> bracket + signal row
-    feed.emit_trade(Trade("QQQ_C", 3.10))  # crosses the stop -> close, loss realized
+    feed.emit_timesale(
+        _buy_ts("/MES", 6190.0)
+    )  # confirmed tag -> bracket (entry 6190) + signal row
+    feed.emit_trade(Trade("/MES", 6184.0))  # crosses the stop (6185) -> close, loss realized
 
     signal = json.loads(session.signals.path.read_text().splitlines()[0])
     fills = [json.loads(line) for line in session.persister.fills_path.read_text().splitlines()]
@@ -152,14 +160,14 @@ def test_signal_row_joins_to_bracket_fills_on_bracket_id(tmp_path: Path) -> None
     assert close["bracket_id"] == signal["bracket_id"]
     # ...so the fire's features join to the realized win/loss label recorded on the close
     assert entry["realized_delta"] == 0.0
-    assert close["realized_delta"] == pytest.approx((3.10 - 4.00) * 100)  # -90 loss label
+    assert close["realized_delta"] == pytest.approx((6184.0 - 6190.0) * 5)  # -30 loss label
 
 
 def test_alert_only_fire_records_null_bracket_id(tmp_path: Path) -> None:
-    feed, broker = FakeFeed(), PaperBroker()
-    session = _session(feed, broker, tmp_path, plan_source=lambda: _plan("both", contract=None))
+    feed, broker = FakeFeed(), PaperBroker(multiplier=5)
+    session = _session(feed, broker, tmp_path, plan_source=lambda: _plan("both", direction=None))
 
-    feed.emit_timesale(_buy_ts("QQQ", 719.41))  # confirmed tag, but no contract -> no fill
+    feed.emit_timesale(_buy_ts("/MES", 6190.0))  # confirmed tag, but no direction -> no fill
 
     signal = json.loads(session.signals.path.read_text().splitlines()[0])
     assert (
@@ -168,64 +176,74 @@ def test_alert_only_fire_records_null_bracket_id(tmp_path: Path) -> None:
 
 
 def test_bracket_stop_fill_flattens_and_realizes(tmp_path: Path) -> None:
-    feed, broker = FakeFeed(), PaperBroker()
-    _session(feed, broker, tmp_path, plan_source=lambda: _plan("both", "QQQ_C"))
+    feed, broker = FakeFeed(), PaperBroker(multiplier=5)
+    _session(feed, broker, tmp_path, plan_source=lambda: _plan("both", "long"))
 
-    feed.emit_trade(Trade("QQQ_C", 4.00))  # entry ref
-    feed.emit_timesale(_buy_ts("QQQ", 719.41))  # bracket: stop 3.20, target 4.80
-    feed.emit_trade(Trade("QQQ_C", 3.10))  # crosses the stop -> flat
+    feed.emit_timesale(_buy_ts("/MES", 6190.0))  # bracket: entry 6190, stop 6185, target 6200
+    feed.emit_trade(Trade("/MES", 6184.0))  # crosses the stop -> flat
 
-    assert broker.net_position("QQQ_C") == 0
-    assert broker.realized_pnl() == pytest.approx((3.10 - 4.00) * 100)  # -90
+    assert broker.net_position("/MES") == 0
+    assert broker.realized_pnl() == pytest.approx((6184.0 - 6190.0) * 5)  # -30
 
 
 def test_break_mode_tag_with_clean_quote_places_bracket(tmp_path: Path) -> None:
-    feed, broker = FakeFeed(), PaperBroker()
+    feed, broker = FakeFeed(), PaperBroker(multiplier=5)
     plan = SessionPlan(
-        date="2026-06-12",
-        symbol="QQQ",
+        date="2026-07-12",
+        symbol="/MES",
         regime="breakout-trend",
         lean="both",
-        levels=[Level(723.10, "resistance", 723.70, contract="QQQ260612C00723000", mode="break")],
-        default_stop_pct=0.20,
-        target_pct=0.20,
+        levels=[
+            Level(6230.0, "resistance", mode="break", direction="long", stop=6224.0, target=6238.0)
+        ],
+        default_stop_points=6.0,
+        default_target_points=8.0,
         contracts=1,
     )
     _session(feed, broker, tmp_path, plan_source=lambda: plan)
 
-    feed.emit_trade(Trade("QQQ260612C00723000", 2.00))  # seed option price
-    feed.emit_quote(Quote("QQQ260612C00723000", bid=1.98, ask=2.00))  # clean, penny-wide
-    feed.emit_timesale(_buy_ts("QQQ", 723.00))  # below the level -> arm the break (no fire yet)
-    feed.emit_timesale(_buy_ts("QQQ", 723.30))  # cross the level with follow-through buy tape
+    feed.emit_quote(Quote("/MES", bid=6229.75, ask=6230.0))  # clean, one-tick book
+    feed.emit_timesale(_buy_ts("/MES", 6228.0))  # below the level -> arm the break (no fire yet)
+    feed.emit_timesale(_buy_ts("/MES", 6231.0))  # cross the level with follow-through buy tape
 
-    assert broker.net_position("QQQ260612C00723000") == 1
+    assert broker.net_position("/MES") == 1
 
 
-def test_tag_with_no_option_price_soft_warns(tmp_path: Path) -> None:
-    feed, broker, notes = FakeFeed(), PaperBroker(), []
-    _session(feed, broker, tmp_path, plan_source=lambda: _plan("both", "QQQ_C"), notes=notes)
+def test_executor_soft_warns_when_broker_has_no_price(tmp_path: Path) -> None:
+    # the defensive branch: a proposal on a symbol the broker has never seen a price for
+    # cannot fill, so it soft-warns and returns None rather than raising
+    del tmp_path
+    broker, notes = PaperBroker(multiplier=5), []
+    execute = make_executor(broker, Notifier(bell=False, write=notes.append))
 
-    feed.emit_timesale(_buy_ts("QQQ", 719.41))  # confirmed tag, but the option never printed
+    result = execute(TradeProposal("/MES", Side.BUY, 1, stop_price=6185.0, target_price=6200.0))
 
-    assert broker.net_position("QQQ_C") == 0
+    assert result is None
+    assert broker.net_position("/MES") == 0
     assert any("no price" in n for n in notes)
 
 
 def test_alert_only_level_places_no_bracket(tmp_path: Path) -> None:
-    feed, broker = FakeFeed(), PaperBroker()
-    _session(feed, broker, tmp_path, plan_source=lambda: _plan("both", contract=None))
+    feed, broker = FakeFeed(), PaperBroker(multiplier=5)
+    _session(feed, broker, tmp_path, plan_source=lambda: _plan("both", direction=None))
 
-    feed.emit_timesale(_buy_ts("QQQ", 719.41))  # confirmed tag, but the level names no contract
+    feed.emit_timesale(_buy_ts("/MES", 6190.0))  # confirmed tag, but the level names no direction
 
     assert broker.positions() == []  # nothing traded
 
 
-def test_collect_symbols_folds_in_contracts() -> None:
-    assert collect_symbols(_plan("both", "QQQ_C"), ["QQQ"]) == ["QQQ", "QQQ_C"]
-    assert collect_symbols(None, ["QQQ", "SPY"]) == ["QQQ", "SPY"]
-    assert collect_symbols(_plan("both", contract=None), ["QQQ"]) == ["QQQ"]
+def test_collect_symbols_includes_plan_symbol() -> None:
+    assert collect_symbols(_plan("both"), ["/MES"]) == ["/MES"]  # plan symbol already present
+    assert collect_symbols(None, ["/MES", "/ES"]) == ["/MES", "/ES"]
+    # if --symbols omits the plan symbol, it's appended so the daemon still subscribes it
+    assert collect_symbols(_plan("both"), ["/ES"]) == ["/ES", "/MES"]
+
+
+def test_plan_key_sanitizes_streamer_symbol() -> None:
+    assert _plan_key("/MESU25:XCME") == "MESU25"
+    assert _plan_key("/MES") == "MES"
 
 
 def test_parse_demo_setup_defaults_and_full() -> None:
-    assert _parse_demo_setup("QQQ_C") == ("QQQ_C", 1, 2.00)
-    assert _parse_demo_setup("QQQ_C:3:4.5") == ("QQQ_C", 3, 4.5)
+    assert _parse_demo_setup("/MES") == ("/MES", 1, 6300.00)
+    assert _parse_demo_setup("/MES:3:6305.0") == ("/MES", 3, 6305.0)

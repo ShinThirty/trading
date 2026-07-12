@@ -24,14 +24,16 @@ Live promotion pins a passing cohort by git tag (``scalper-vX.Y.Z``); the live
 runner deploys from the tag while paper keeps running the workspace head, and
 the stamp is what keeps the two track records attributable.
 
-History note: the current behavior cohort (``0.3``) began 2026-06-23 with the
-verdict modes + re-fire cooldown. The 2026-06-29 shadow-telemetry ship was
-observer-only, so it stayed in ``0.3``. This versioning change is itself
-observer-only → ``0.3.1``, so stamped sessions pool with the backfilled
-2026-06-23+ history rather than opening an artificial new cohort.
+History note: the ``0.3`` cohort began 2026-06-23 with the verdict modes + re-fire
+cooldown (the 2026-06-29 shadow-telemetry ship was observer-only, so it stayed
+``0.3.1``). The ``0.4`` cohort begins 2026-07-12 with the **futures migration**: the
+detector now trades /MES with an absolute-price, direction-aware bracket and
+~10×-rescaled point geometry — a wholesale change to what/when/how it trades, so it
+opens a fresh cohort. The prior QQQ-options track record stays attributable to
+``0.3`` and never pools with /MES results.
 """
 
-__version__ = "0.3.1"
+__version__ = "0.4.0"
 
 
 def cohort_of(version: str) -> str:
