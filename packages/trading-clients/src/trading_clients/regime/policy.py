@@ -6,8 +6,18 @@ _MONTH_ORDER = {
     m: i
     for i, m in enumerate(
         [
-            "january", "february", "march", "april", "may", "june",
-            "july", "august", "september", "october", "november", "december",
+            "january",
+            "february",
+            "march",
+            "april",
+            "may",
+            "june",
+            "july",
+            "august",
+            "september",
+            "october",
+            "november",
+            "december",
         ],
         start=1,
     )

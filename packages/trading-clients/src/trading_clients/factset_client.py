@@ -116,9 +116,7 @@ class FactsetClient:
             # so ERP / bear-regime reads don't go blind for a week. The number
             # moves slowly week-to-week; forward_pe_as_of records the source date.
             if parsed.forward_pe is None:
-                prior = await self._walk_back(
-                    resolved - timedelta(days=1), require_forward_pe=True
-                )
+                prior = await self._walk_back(resolved - timedelta(days=1), require_forward_pe=True)
                 if prior is not None:
                     src, src_date = prior
                     parsed.forward_pe = src.forward_pe
