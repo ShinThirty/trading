@@ -1,9 +1,8 @@
 """The two ports the scalper talks to: market data in, broker orders out.
 
 Both are Protocols, so the discipline core stays broker- and feed-agnostic:
-``PaperBroker`` (and later ``WebullBroker``) satisfy ``BrokerExecution``;
-``TradierFeed`` satisfies ``MarketDataFeed``. Nothing in the core imports a
-concrete client.
+``PaperBroker`` satisfies ``BrokerExecution``; ``DxLinkFeed`` satisfies
+``MarketDataFeed``. Nothing in the core imports a concrete client.
 
 The feed payload types (``Quote`` / ``Trade`` / ``TimeSale``) are provider-neutral
 value types defined in ``trading_clients.market_stream`` — produced by any feed,
