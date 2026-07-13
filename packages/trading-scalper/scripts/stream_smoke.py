@@ -17,7 +17,7 @@ import httpx
 from trading_clients.config import load_config
 from trading_clients.dxlink_stream_client import DxLinkStreamClient
 from trading_clients.tastytrade_client import TastyTradeClient
-from trading_scalper.instruments import front_month
+from trading_scalper.instruments import front_month, instrument_for
 
 
 async def _consume(
@@ -68,14 +68,17 @@ async def run(symbols: list[str], seconds: float, max_events: int) -> None:
     print(f"\n{total} events in {elapsed:.1f}s — {counts or 'NONE'}")
     if total == 0:
         print(
-            "No events. The SPX cash index is quiet outside RTH; /MES trades ~23h — "
+            "No events. The cash index is quiet outside RTH; /MES trades ~23h — "
             "check the symbols + token if the futures session is open."
         )
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--symbols", nargs="+", default=[front_month("/MES", date.today()), "SPX"])
+    _mes = instrument_for("/MES")
+    ap.add_argument(
+        "--symbols", nargs="+", default=[front_month("/MES", date.today()), _mes.reference]
+    )
     ap.add_argument("--seconds", type=float, default=20.0)
     ap.add_argument("--max-events", type=int, default=15)
     args = ap.parse_args()

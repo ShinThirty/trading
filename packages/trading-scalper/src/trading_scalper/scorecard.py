@@ -1,10 +1,11 @@
-"""Grade the paper detector's track record — per behavior cohort, per verdict mode.
+"""Grade the paper detector's track record — per behavior cohort × instrument × mode.
 
 The daemon writes a joinable dataset (``persist.py``): every fire lands a features
 row in ``{date}-signals.jsonl`` and every fill a row in ``{date}.jsonl``, joined on
 ``bracket_id`` with the close's ``realized_delta`` as the win/loss label. This module
 turns that into a scorecard that answers the only question that matters before going
-live: **has a given verdict mode, in the CURRENT bot version, earned promotion?**
+live: **has a given verdict mode, on a given instrument, in the CURRENT bot version,
+earned promotion?**
 
 Why cohorts. A change to the detector's trading logic makes earlier trades evidence
 about a bot that no longer exists, so pooling all history would let a since-replaced
@@ -14,6 +15,17 @@ version's good days buy a promotion. Trades are grouped by **behavior cohort**
 date from ``_RETRO_COHORTS`` (git evidence in the comments there). Cohort resolution
 lives here in code, not in the cache — so re-tuning the retro map or the gate never
 invalidates a cached extraction.
+
+Why the instrument dimension. Since the detector generalized past /MES (per-instrument
+``Geometry`` + cash-index ``reference``), the same version runs different price maps on
+/MES vs /MNQ — so their fills must NOT pool: one instrument's record can't buy the
+other's promotion. Trades additionally group by instrument **root** (``root_of`` →
+``/MES``), taken from the traded symbol on the fill; keying on the root (not the dated
+contract) keeps a quarterly roll from splitting a cohort. The gate is per (root, mode),
+so promotion (git-tag → live) is granular — /MES clearing a mode never green-lights
+/MNQ. (A per-instrument *geometry* re-tune must reset only its own root's cohort; that
+needs a geometry-generation stamp, deferred until a second instrument's cohort exists —
+today all roots share one generation, so root + version suffice.)
 
 The go-live gate (``Gate``) is evaluated on the CURRENT cohort only; older cohorts
 render as history. A pooled all-history line is shown as a floor ("has this ever
@@ -46,11 +58,12 @@ from pathlib import Path
 
 from trading_clients.table_helpers import list_table
 
+from trading_scalper.instruments import root_of
 from trading_scalper.version import __version__, cohort_of
 
 PAPER_ROOT = Path.home() / ".trading" / "scalp" / "paper"
 CACHE_NAME = "scorecard-cache.json"
-SCHEMA_VERSION = 1  # bump to discard + rebuild the cache when the extraction format changes
+SCHEMA_VERSION = 2  # bump to discard + rebuild the cache when the extraction format changes
 
 # One-sided 95% normal quantile — the multiplier on the standard error for the
 # lower confidence bound on expectancy (mean - Z * s/sqrt(n)).
@@ -78,9 +91,11 @@ _RETRO_COHORTS: list[tuple[date, str]] = [
 class ClosedTrade:
     """One closed paper bracket: its win/loss label plus what's needed to bucket it.
 
-    ``version`` is the raw stamp off the fire row (``None`` for a pre-stamp session);
-    the cohort is resolved from it at read time by ``resolve_cohort`` so cached rows
-    survive a change to cohort policy.
+    ``version`` and ``symbol`` are the raw stamps off the log rows; the cohort and the
+    instrument *root* are resolved from them at read time (``resolve_cohort`` /
+    ``resolve_root``) so cached rows survive a change to grouping policy. ``symbol`` is
+    the dated streamer symbol that traded (``/MESU26:XCME``); it resolves to a root
+    (``/MES``) for grouping — the roll doesn't split the cohort.
     """
 
     session: str  # YYYY-MM-DD (the log file's date key)
@@ -89,6 +104,7 @@ class ClosedTrade:
     mode: str  # break | fade | reversal | retest | "?"
     version: str | None  # raw stamp, or None if the session predates versioning
     pnl: float
+    symbol: str | None = None  # traded streamer symbol; None on a pre-symbol-dimension row
 
     def as_cache_row(self) -> dict[str, object]:
         return {
@@ -97,7 +113,13 @@ class ClosedTrade:
             "mode": self.mode,
             "version": self.version,
             "pnl": self.pnl,
+            "symbol": self.symbol,
         }
+
+
+def resolve_root(symbol: str | None) -> str:
+    """Instrument root for a trade: its symbol's root, or ``"?"`` when unstamped."""
+    return root_of(symbol) if symbol else "?"
 
 
 def resolve_cohort(session: str, version: str | None) -> str:
@@ -147,17 +169,22 @@ def extract_session(root: Path, session: str) -> list[ClosedTrade]:
     A closed trade is a bracket with at least one SELL fill (the exit); its P&L is the
     sum of ``realized_delta`` over the bracket's fills (0 on the BUY open, the close's
     dollars on the SELL exit) — so a $0 scratch exit counts as a closed trade, not an
-    open. Mode + version come from the fire's signals row, joined on ``bracket_id``; a
-    bracket with no matching fire row is labeled mode ``"?"`` rather than dropped.
+    open. Mode + version + symbol come from the fire's signals row, joined on
+    ``bracket_id``; a bracket with no matching fire row is labeled mode ``"?"`` and root
+    ``"?"`` rather than dropped. The signals ``symbol`` is the fire's *instrument* — the
+    underlying in the options era (``QQQ``), the future in the futures era
+    (``/MESU26:XCME``) — which resolves to a clean root; the fills ``symbol`` is the
+    literal OCC contract, which would shatter the options cohorts per strike, so it's
+    deliberately not the grouping source.
     """
     fills = _read_jsonl(root / f"{session}.jsonl")
     signals = _read_jsonl(root / f"{session}-signals.jsonl")
 
-    meta: dict[str, tuple[str, str | None]] = {}
+    meta: dict[str, tuple[str, str | None, str | None]] = {}
     for row in signals:
         bid = row.get("bracket_id")
         if bid is not None and bid not in meta:
-            meta[bid] = (row.get("mode", "?"), row.get("version"))
+            meta[bid] = (row.get("mode", "?"), row.get("version"), row.get("symbol"))
 
     pnl: dict[str, float] = defaultdict(float)
     closed: set[str] = set()
@@ -175,7 +202,7 @@ def extract_session(root: Path, session: str) -> list[ClosedTrade]:
 
     trades = []
     for bid in closed:
-        mode, version = meta.get(bid, ("?", None))
+        mode, version, symbol = meta.get(bid, ("?", None, None))
         trades.append(
             ClosedTrade(
                 session=session,
@@ -184,6 +211,7 @@ def extract_session(root: Path, session: str) -> list[ClosedTrade]:
                 mode=mode,
                 version=version,
                 pnl=round(pnl[bid], 2),
+                symbol=symbol,
             )
         )
     trades.sort(key=lambda t: t.ts)
@@ -232,6 +260,7 @@ def _load_cache(path: Path) -> dict[str, list[ClosedTrade]]:
                 mode=r["mode"],
                 version=r.get("version"),
                 pnl=r["pnl"],
+                symbol=r.get("symbol"),
             )
             for r in rows
         ]
@@ -294,6 +323,7 @@ def load_closed_trades(
 @dataclass(frozen=True)
 class ModeStats:
     cohort: str
+    root: str  # instrument root (/MES, /MNQ, …); "ALL" for the pooled floor
     mode: str
     n: int
     sessions: int
@@ -306,7 +336,7 @@ class ModeStats:
     concentration: float | None  # best session's share of gross wins; None if no wins
 
 
-def _stats_for(cohort: str, mode: str, trades: list[ClosedTrade]) -> ModeStats:
+def _stats_for(cohort: str, root: str, mode: str, trades: list[ClosedTrade]) -> ModeStats:
     pnls = [t.pnl for t in trades]
     n = len(pnls)
     wins = [p for p in pnls if p > 0]
@@ -341,6 +371,7 @@ def _stats_for(cohort: str, mode: str, trades: list[ClosedTrade]) -> ModeStats:
 
     return ModeStats(
         cohort=cohort,
+        root=root,
         mode=mode,
         n=n,
         sessions=len({t.session for t in trades}),
@@ -355,16 +386,20 @@ def _stats_for(cohort: str, mode: str, trades: list[ClosedTrade]) -> ModeStats:
 
 
 def compute_stats(trades: Iterable[ClosedTrade]) -> list[ModeStats]:
-    """Per-(cohort, mode) stats, cohorts ascending then modes in display order."""
-    groups: dict[tuple[str, str], list[ClosedTrade]] = defaultdict(list)
+    """Per-(cohort, root, mode) stats: cohorts ascending, then root, then display order.
+
+    Keying on the instrument *root* (not the dated symbol) keeps a quarterly roll from
+    splitting a cohort, and keeps /MES and /MNQ evidence in separate buckets so one
+    instrument's record can't buy the other's promotion."""
+    groups: dict[tuple[str, str, str], list[ClosedTrade]] = defaultdict(list)
     for t in trades:
-        groups[(resolve_cohort(t.session, t.version), t.mode)].append(t)
+        groups[(resolve_cohort(t.session, t.version), resolve_root(t.symbol), t.mode)].append(t)
 
     def mode_rank(mode: str) -> int:
         return _MODE_ORDER.index(mode) if mode in _MODE_ORDER else len(_MODE_ORDER)
 
-    stats = [_stats_for(cohort, mode, ts) for (cohort, mode), ts in groups.items()]
-    stats.sort(key=lambda s: (s.cohort, mode_rank(s.mode)))
+    stats = [_stats_for(cohort, root, mode, ts) for (cohort, root, mode), ts in groups.items()]
+    stats.sort(key=lambda s: (s.cohort, s.root, mode_rank(s.mode)))
     return stats
 
 
@@ -413,12 +448,13 @@ def _fmt_opt(x: float | None, spec: str = "+.2f") -> str:
 
 
 def render_table(stats: list[ModeStats]) -> str:
-    """Markdown table, one row per (cohort, mode)."""
+    """Markdown table, one row per (cohort, root, mode)."""
     if not stats:
         return "(no closed paper trades on record)"
     rows = [
         {
             "cohort": s.cohort,
+            "root": s.root,
             "mode": s.mode,
             "n": s.n,
             "sess": s.sessions,
@@ -434,6 +470,7 @@ def render_table(stats: list[ModeStats]) -> str:
     ]
     cols = [
         "cohort",
+        "root",
         "mode",
         "n",
         "sess",
@@ -449,7 +486,10 @@ def render_table(stats: list[ModeStats]) -> str:
 
 
 def render_gate(stats: list[ModeStats], gate: Gate, cohort: str) -> str:
-    """Per-mode PASS / failure-reason block for the current cohort only."""
+    """Per-(root, mode) PASS / failure-reason block for the current cohort only.
+
+    Each instrument root is gated independently — promotion (git-tag → live) is per
+    (root, mode), so /MES clearing a mode never green-lights /MNQ and vice versa."""
     current = [s for s in stats if s.cohort == cohort]
     lines = [
         f"Go-live gate — current cohort {cohort} "
@@ -462,7 +502,7 @@ def render_gate(stats: list[ModeStats], gate: Gate, cohort: str) -> str:
     for s in current:
         reasons = gate.evaluate(s)
         verdict = "PASS ✅" if not reasons else "hold — " + "; ".join(reasons)
-        lines.append(f"  {s.mode:9s} {verdict}")
+        lines.append(f"  {s.root:6s} {s.mode:9s} {verdict}")
     return "\n".join(lines)
 
 
@@ -472,7 +512,9 @@ def render_scorecard(trades: list[ClosedTrade], gate: Gate | None = None) -> str
     stats = compute_stats(trades)
     pooled = ""
     if trades:
-        overall = _stats_for("ALL", "pooled", sorted(trades, key=lambda t: (t.session, t.ts)))
+        overall = _stats_for(
+            "ALL", "ALL", "pooled", sorted(trades, key=lambda t: (t.session, t.ts))
+        )
         pooled = (
             f"\nPooled floor (all cohorts, not a promotion basis): "
             f"n={overall.n}, win {overall.win_rate:.0%}, total {overall.total:+.0f}, "
@@ -509,15 +551,15 @@ def write_chart(trades: list[ClosedTrade], path: Path) -> None:
         sys.exit("No closed trades to chart.")
 
     fig, ax = plt.subplots(figsize=(11, 6))
-    by_mode: dict[str, list[tuple[int, float]]] = defaultdict(list)
+    by_series: dict[str, list[tuple[int, float]]] = defaultdict(list)  # "{root} {mode}" curve
     running: dict[str, float] = defaultdict(float)
     for i, t in enumerate(ordered):
-        running[t.mode] += t.pnl
-        by_mode[t.mode].append((i, running[t.mode]))
-    for mode in _MODE_ORDER:
-        if mode in by_mode:
-            xs, ys = zip(*by_mode[mode], strict=True)
-            ax.plot(xs, ys, marker=".", label=mode)
+        key = f"{resolve_root(t.symbol)} {t.mode}"
+        running[key] += t.pnl
+        by_series[key].append((i, running[key]))
+    for key in sorted(by_series):
+        xs, ys = zip(*by_series[key], strict=True)
+        ax.plot(xs, ys, marker=".", label=key)
 
     prev = None
     for i, t in enumerate(ordered):
@@ -551,7 +593,7 @@ def write_chart(trades: list[ClosedTrade], path: Path) -> None:
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
-        description="Grade the scalper's paper track record by version cohort + verdict mode."
+        description="Grade the scalper's paper track record by version cohort × instrument × mode."
     )
     parser.add_argument(
         "--root", type=Path, default=PAPER_ROOT, help=f"paper log directory (default: {PAPER_ROOT})"

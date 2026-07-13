@@ -13,6 +13,7 @@ from trading_scalper.cli import (
     build_session,
     collect_symbols,
     make_executor,
+    make_gated_executor,
 )
 from trading_scalper.detector import SetupDetector, watch_setups
 from trading_scalper.domain import (
@@ -37,10 +38,14 @@ from trading_scalper.persist import (
     summarize_fills,
 )
 from trading_scalper.plan import Level, PlanStore, SessionPlan, default_plan_path, load_session_plan
+from trading_scalper.policy import DENY_ALL, GateDecision, GatePolicy
 from trading_scalper.ports import BrokerExecution, MarketDataFeed
 
 __all__ = [
+    "DENY_ALL",
     "BrokerExecution",
+    "GateDecision",
+    "GatePolicy",
     "Ledger",
     "Level",
     "MarketDataFeed",
@@ -73,6 +78,7 @@ __all__ = [
     "drive_paper_fills",
     "load_session_plan",
     "make_executor",
+    "make_gated_executor",
     "summarize_fills",
     "watch_setups",
 ]

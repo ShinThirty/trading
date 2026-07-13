@@ -16,9 +16,9 @@ Two artifacts under ``~/.trading/scalp/paper/``:
   underlying (the *live read*). Lean, because the full histogram is rebuildable from
   the tape.
 
-Observers are per **underlying** symbol — the option contracts on the feed (which drive
-the paper fills) are ignored here; VAP is a property of the *underlying's* price
-structure, so feeding it option prints would be a category error.
+Observers are keyed to the subscribed symbol(s) — the traded future(s). Any print for a
+symbol we didn't subscribe is ignored here; VAP is a property of the instrument's own
+price structure.
 """
 
 import asyncio
@@ -80,7 +80,7 @@ class ShadowRecorder:
 
     def on_timesale(self, ts: TimeSale) -> None:
         if ts.symbol not in self.profiles:
-            return  # an option contract, or an unsubscribed symbol — VAP is underlying-only
+            return  # an unsubscribed symbol — VAP is built only for the traded instrument(s)
         self.profiles[ts.symbol].add(ts.price, ts.size)
         self.rates[ts.symbol].add(ts.size, ts.ms)
         self._last_price[ts.symbol] = ts.price

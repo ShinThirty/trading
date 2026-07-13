@@ -22,7 +22,7 @@ order-event stream; it never places an order.
 A third artifact, ``{date}-signals.jsonl``, is written by ``SignalLog`` — one row
 per *detector fire* (the B4 velocity/absorption telemetry), independent of fills:
 a fire is logged even when it produces no paper fill (an alert-only level, or a
-confirmed setup whose option spread was too wide to model). The metadata is about
+confirmed setup whose futures spread was too wide to model). The metadata is about
 the *setup at fire time*, not an eventual fill, so it isn't gated on a FILLED event.
 
 The two logs are joinable: a fire that places a bracket stamps the bracket's

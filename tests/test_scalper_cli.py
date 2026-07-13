@@ -19,12 +19,15 @@ from trading_scalper.cli import (
     build_session,
     collect_symbols,
     make_executor,
+    make_gated_executor,
 )
 from trading_scalper.domain import Side, TradeProposal
 from trading_scalper.notify import Notifier
 from trading_scalper.paper import PaperBroker
 from trading_scalper.persist import PaperPersister
 from trading_scalper.plan import Level, SessionPlan
+from trading_scalper.policy import GatePolicy
+from trading_scalper.version import __version__
 
 
 def _buy_ts(symbol: str, price: float) -> TimeSale:
@@ -245,6 +248,76 @@ def test_executor_soft_warns_when_broker_has_no_price(tmp_path: Path) -> None:
     assert result is None
     assert broker.net_position("/MES") == 0
     assert any("no price" in n for n in notes)
+
+
+# ── the live gate (make_gated_executor): a fan-out, paper always + live when approved ──
+
+
+def _gate_fixture() -> tuple[PaperBroker, list[str], Notifier]:
+    broker = PaperBroker(multiplier=5)
+    broker.trade("/MES", 6190.0)  # seed a price so the paper market entry can fill
+    notes: list[str] = []
+    return broker, notes, Notifier(bell=False, write=notes.append)
+
+
+def _fade_proposal() -> TradeProposal:
+    return TradeProposal("/MES", Side.BUY, 1, stop_price=6185.0, target_price=6200.0, mode="fade")
+
+
+def test_gated_executor_fans_out_to_live_when_approved() -> None:
+    # an approved (root, mode) at the running version fills BOTH paper and live
+    broker, _notes, notifier = _gate_fixture()
+    live_calls: list[TradeProposal] = []
+    policy = GatePolicy(version=__version__, approved=frozenset({("/MES", "fade")}))
+    execute = make_gated_executor(
+        make_executor(broker, notifier), notifier, policy=policy, live_exec=live_calls.append
+    )
+
+    entry_id = execute(_fade_proposal())
+
+    assert broker.net_position("/MES") == 1  # paper filled
+    assert len(live_calls) == 1  # AND routed to live in parallel
+    assert entry_id is not None  # returns the paper bracket id (the scorecard join key)
+
+
+def test_gated_executor_denies_unapproved_mode_paper_only() -> None:
+    # break is not on the list, so it fills paper but never touches the live executor
+    broker, _notes, notifier = _gate_fixture()
+    live_calls: list[TradeProposal] = []
+    policy = GatePolicy(version=__version__, approved=frozenset({("/MES", "fade")}))
+    execute = make_gated_executor(
+        make_executor(broker, notifier), notifier, policy=policy, live_exec=live_calls.append
+    )
+
+    execute(
+        TradeProposal("/MES", Side.BUY, 1, stop_price=6185.0, target_price=6200.0, mode="break")
+    )
+
+    assert broker.net_position("/MES") == 1  # paper still fills every fire
+    assert live_calls == []  # unapproved mode never routes live
+
+
+def test_gated_executor_default_deny_all_is_paper_only() -> None:
+    # no policy/live wired (the production default) → transparent gate, paper-only
+    broker, _notes, notifier = _gate_fixture()
+    execute = make_gated_executor(make_executor(broker, notifier), notifier)
+
+    entry_id = execute(_fade_proposal())
+
+    assert broker.net_position("/MES") == 1
+    assert entry_id is not None
+
+
+def test_gated_executor_shadow_annotates_when_no_live_broker() -> None:
+    # approved but no live_exec wired → dry-run shadow annotation, still paper-only
+    broker, notes, notifier = _gate_fixture()
+    policy = GatePolicy(version=__version__, approved=frozenset({("/MES", "fade")}))
+    execute = make_gated_executor(make_executor(broker, notifier), notifier, policy=policy)
+
+    execute(_fade_proposal())
+
+    assert broker.net_position("/MES") == 1
+    assert any("LIVE-eligible" in n for n in notes)
 
 
 def test_alert_only_level_places_no_bracket(tmp_path: Path) -> None:

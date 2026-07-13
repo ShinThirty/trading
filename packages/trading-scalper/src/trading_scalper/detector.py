@@ -61,7 +61,7 @@ cross *holds* or *fails* — via a per-wall :class:`~trading_scalper.breakout.Br
   to the wall and resumes**; the patient continuation entry.
 
 A wall is two ``Level`` rows at one price+side (a ``reversal`` row + a ``retest`` row, each
-naming its own option); both feed one tracker and the rendered verdict fires the matching
+carrying its own direction); both feed one tracker and the rendered verdict fires the matching
 row. Unlike ``fade``/``break``, these are gated on **geometry + lean only, never tape** — the
 snap-back *timing* is the signal, and tape absorption was verified (n=61, 2026-06-18) not to
 separate winners from losers on this feed. Tape stays the soft annotation in the message.
@@ -91,6 +91,7 @@ from trading_clients.market_stream import Quote, TimeSale, Trade
 
 from trading_scalper.breakout import BreakoutTracker, Verdict
 from trading_scalper.domain import FireRecord, OrderId, Side, TradeProposal
+from trading_scalper.instruments import Geometry
 from trading_scalper.plan import Level, SessionPlan
 from trading_scalper.ports import MarketDataFeed
 
@@ -122,54 +123,52 @@ class SetupDetector:
         notify: Callable[[str], None],
         propose: Callable[[TradeProposal], OrderId | None] | None = None,
         *,
-        # ── geometry, in index points — scaled ~10× from the QQQ-era defaults for the
-        # /ES-family price magnitude (~6250 vs QQQ ~600); recalibrate against recorded
-        # /MES tape as 6/23 did for QQQ (a fresh version cohort insulates the history).
-        tolerance: float = 1.0,
-        rearm_margin: float = 0.5,
-        break_margin: float = 0.5,
+        # Price-distance bands scale with the traded instrument, so they arrive as one
+        # per-instrument value — the CLI passes the traded symbol's set (see
+        # ``instruments.Geometry``); the default here is the S&P set for tests/demo that
+        # don't wire an instrument. Everything else below is instrument-INDEPENDENT: the
+        # time windows (seconds) and structural gates (spread %, buffer cap) don't rescale
+        # with price magnitude, so they stay flat kwargs and are NOT part of Geometry.
+        geometry: Geometry = Geometry(),
         spread_max_pct: float = 0.10,
-        flip_margin: float = 1.0,
         record: Callable[[FireRecord], None] | None = None,
         window_s: float = 5.0,
         window_max: int = 256,
         gap_s: float = 90.0,
         cooldown_s: float = 300.0,
-        min_break_excursion: float = 7.5,
-        follow_through_margin: float = 20.0,
         confirm_s: float = 150.0,
         failure_window_s: float = 120.0,
-        reentry_margin: float = 1.0,
-        retest_proximity: float = 2.0,
         retest_window_s: float = 360.0,
     ) -> None:
         self._plan_source = plan_source
         self._notify = notify
         self._propose = propose
-        self._tolerance = tolerance
-        self._rearm_margin = rearm_margin
-        self._break_margin = break_margin
+        # denormalize the bands this class reads directly (fade/break geometry + flip)
+        self._tolerance = geometry.tolerance
+        self._rearm_margin = geometry.rearm_margin
+        self._break_margin = geometry.break_margin
         self._spread_max_pct = spread_max_pct
-        self._flip_margin = flip_margin
+        self._flip_margin = geometry.flip_margin
         self._record = record
         self._window_s = window_s
         self._window_max = window_max
         self._gap_ms = int(gap_s * 1000)  # inter-print gap that means the stream was suspended
         self._cooldown_ms = int(cooldown_s * 1000)  # min spacing between re-fires of one level
-        # verdict-mode (reversal/retest) tunables — calibrated off the 6/18+6/22 QQQ 740 tape
+        # each wall's BreakoutTracker gets the instrument's geometry bands + the
+        # instrument-independent time windows (reversal/retest verdicts).
         self._breakout_kw = {
-            "break_margin": break_margin,
-            "min_break_excursion": min_break_excursion,
-            "follow_through_margin": follow_through_margin,
+            "break_margin": geometry.break_margin,
+            "min_break_excursion": geometry.min_break_excursion,
+            "follow_through_margin": geometry.follow_through_margin,
+            "reentry_margin": geometry.reentry_margin,
+            "retest_proximity": geometry.retest_proximity,
             "confirm_s": confirm_s,
             "failure_window_s": failure_window_s,
-            "reentry_margin": reentry_margin,
-            "retest_proximity": retest_proximity,
             "retest_window_s": retest_window_s,
         }
         self._tape_side: dict[str, str] = {}
         self._tape: dict[str, deque[_Tick]] = {}  # symbol -> trailing-window prints (B4 telemetry)
-        self._quotes: dict[str, Quote] = {}  # symbol -> latest top-of-book (underlying + options)
+        self._quotes: dict[str, Quote] = {}  # symbol -> latest top-of-book (the traded future)
         self._active: set[Level] = set()  # levels currently fired (re-arm on leaving the zone)
         self._armed: set[Level] = set()  # break levels that have witnessed their setup side
         self._trackers: dict[_WallKey, BreakoutTracker] = {}  # one verdict machine per wall
@@ -389,7 +388,7 @@ class SetupDetector:
         confirming: str,
         ms: int | None,
     ) -> None:
-        """Prompt the human; propose the bracket if there's a contract with a tradeable spread.
+        """Prompt the human; propose the bracket if the future has a tradeable spread.
 
         Prompts and proposes first so the bracket's ``bracket_id`` (the placed
         entry-order id, or ``None`` for an alert-only / spread-suppressed fire) can
@@ -458,6 +457,7 @@ class SetupDetector:
                 stop_price=stop_price,
                 target_price=target_price,
                 reason=message,
+                mode=level.mode,  # the live gate allow-lists by (root, mode); carry it to the seam
             )
         )
 
@@ -486,9 +486,9 @@ class SetupDetector:
             )
         return stop, target
 
-    def _spread_ok(self, contract: str) -> bool:
-        """Spread gate (proposal only): True unless the option's quoted spread is too wide."""
-        q = self._quotes.get(contract)
+    def _spread_ok(self, symbol: str) -> bool:
+        """Spread gate (proposal only): True unless the future's quoted spread is too wide."""
+        q = self._quotes.get(symbol)
         if q is None or q.bid is None or q.ask is None or q.ask <= 0:
             return True  # no quote to judge — best-effort, don't block
         if q.bid > q.ask:

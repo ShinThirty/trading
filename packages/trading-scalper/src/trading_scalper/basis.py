@@ -1,11 +1,13 @@
-"""Shadow-mode recorder for the live future↔reference (SPX) carry basis.
+"""Shadow-mode recorder for the live future↔cash-index carry basis.
 
-The /MES level map is built from **SPX** gamma walls (cash-index points), then shifted
-into /MES price by the carry basis — ``basis = future_price − SPX`` — which is pure
-cost-of-carry (financing − dividends), converging to 0 at expiry and resetting at the
-quarterly roll. `/scalp` prep measures it once to write the map; this records it *live*
-all session so a later call — bake a per-session offset vs. track basis live in the
-detector's geometry — rests on recorded evidence, not a guess.
+The futures level map is built from **cash-index** gamma walls (index points — SPX for
+/MES, NDX for /MNQ; the reference symbol is the traded instrument's, see
+``instruments.py``), then shifted into futures price by the carry basis —
+``basis = future_price − index`` — which is pure cost-of-carry (financing − dividends),
+converging to 0 at expiry and resetting at the quarterly roll. `/scalp` prep measures it
+once to write the map; this records it *live* all session so a later call — bake a
+per-session offset vs. track basis live in the detector's geometry — rests on recorded
+evidence, not a guess.
 
 **Read by nothing in the decision path** — same record-never-act posture as
 ``ShadowRecorder`` / the B4 ``SignalLog``. One artifact under ``~/.trading/scalp/paper/``:
@@ -13,11 +15,12 @@ detector's geometry — rests on recorded evidence, not a guess.
 - ``{date}-basis.jsonl`` — a periodic ``{future_price, reference_level, basis}`` snapshot.
 
 Prices: the **future** is taken from the quote mid (falling back to the last trade); the
-**reference index** from the last trade — the computed SPX level prints as a Trade during
-RTH — falling back to the quote mid. A snapshot is skipped until both sides have a price.
+**reference index** from the last trade — the computed cash-index level prints as a Trade
+during RTH — falling back to the quote mid. A snapshot is skipped until both sides have a
+price.
 
-**Only RTH rows are meaningful.** The SPX cash index computes only while its components
-trade (~09:30–16:00 ET); overnight and on Globex reopens the future is live but SPX is
+**Only RTH rows are meaningful.** A cash index computes only while its components trade
+(~09:30–16:00 ET); overnight and on Globex reopens the future is live but the index is
 frozen at the prior cash close, so a basis snapshot then is carry *plus* the future's
 off-hours drift, not clean carry. Rows are stamped ``ts`` (UTC) so the analysis filters
 to the RTH window; the recorder deliberately doesn't gate on a clock (it stays a dumb,

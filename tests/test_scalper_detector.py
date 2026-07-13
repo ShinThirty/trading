@@ -14,6 +14,7 @@ import pytest
 from trading_clients.market_stream import Quote, TimeSale, Trade
 from trading_scalper.detector import SetupDetector
 from trading_scalper.domain import Side
+from trading_scalper.instruments import Geometry
 from trading_scalper.notify import Notifier
 from trading_scalper.plan import Level, SessionPlan
 
@@ -42,7 +43,9 @@ def _plan(lean: str = "long-only") -> SessionPlan:
 
 
 def _detector(lean: str, notes: list[str]) -> SetupDetector:
-    return SetupDetector(lambda: _plan(lean), notes.append, tolerance=1.0, rearm_margin=0.5)
+    return SetupDetector(
+        lambda: _plan(lean), notes.append, geometry=Geometry(tolerance=1.0, rearm_margin=0.5)
+    )
 
 
 # ── fade geometry + tape confirmation ───────────────────────
@@ -141,7 +144,9 @@ def _break_plan(lean: str = "both") -> SessionPlan:
 def test_break_fires_only_after_cross_and_follow_through() -> None:
     notes: list[str] = []
     proposals: list = []
-    det = SetupDetector(lambda: _break_plan(), notes.append, proposals.append, break_margin=0.5)
+    det = SetupDetector(
+        lambda: _break_plan(), notes.append, proposals.append, geometry=Geometry(break_margin=0.5)
+    )
     det.on_timesale(_buy_ts("/MES", 6228.0))  # below the level -> arm (witnessed the setup side)
     det.on_timesale(_buy_ts("/MES", 6230.3))  # a poke, not past the margin -> no fire
     assert notes == []
@@ -152,7 +157,7 @@ def test_break_fires_only_after_cross_and_follow_through() -> None:
 
 def test_break_silent_without_follow_through_tape() -> None:
     notes: list[str] = []
-    det = SetupDetector(lambda: _break_plan(), notes.append, break_margin=0.5)
+    det = SetupDetector(lambda: _break_plan(), notes.append, geometry=Geometry(break_margin=0.5))
     det.on_timesale(_sell_ts("/MES", 6228.0))  # below -> arm (arming is tape-agnostic)
     det.on_timesale(_sell_ts("/MES", 6232.0))  # crossed + armed, but sellers -> no follow-through
     assert notes == []
@@ -160,7 +165,9 @@ def test_break_silent_without_follow_through_tape() -> None:
 
 def test_break_long_fires_under_long_only_despite_resistance_side() -> None:
     notes: list[str] = []
-    det = SetupDetector(lambda: _break_plan("long-only"), notes.append, break_margin=0.5)
+    det = SetupDetector(
+        lambda: _break_plan("long-only"), notes.append, geometry=Geometry(break_margin=0.5)
+    )
     det.on_timesale(_buy_ts("/MES", 6228.0))  # below the level -> arm
     det.on_timesale(_buy_ts("/MES", 6232.0))  # a breakout long — long-only permits it
     assert len(notes) == 1
@@ -186,14 +193,14 @@ def test_break_cold_start_above_level_does_not_fire() -> None:
     # daemon comes up with price already extended past the break level — never having
     # seen the setup side, it must not chase the top (the 2026-06-15 wake-into-top loss)
     notes: list[str] = []
-    det = SetupDetector(lambda: _break_plan(), notes.append, break_margin=0.5)
+    det = SetupDetector(lambda: _break_plan(), notes.append, geometry=Geometry(break_margin=0.5))
     det.on_timesale(_buy_ts("/MES", 6232.0))  # first-ever tick already broken out -> no fire
     assert notes == []
 
 
 def test_break_fires_once_setup_side_is_witnessed() -> None:
     notes: list[str] = []
-    det = SetupDetector(lambda: _break_plan(), notes.append, break_margin=0.5)
+    det = SetupDetector(lambda: _break_plan(), notes.append, geometry=Geometry(break_margin=0.5))
     det.on_timesale(_buy_ts("/MES", 6232.0))  # extended -> still unarmed, no fire
     det.on_timesale(_buy_ts("/MES", 6228.0))  # price returns below -> arm
     assert notes == []
@@ -204,7 +211,9 @@ def test_break_fires_once_setup_side_is_witnessed() -> None:
 def test_break_support_breakdown_arms_from_above() -> None:
     # symmetry: a support-breakdown short (confirming = sell) arms from *above* support
     notes: list[str] = []
-    det = SetupDetector(lambda: _put_break_plan(), notes.append, break_margin=0.5)
+    det = SetupDetector(
+        lambda: _put_break_plan(), notes.append, geometry=Geometry(break_margin=0.5)
+    )
     det.on_timesale(_sell_ts("/MES", 6188.0))  # already below, never seen above -> no fire
     assert notes == []
     det.on_timesale(_sell_ts("/MES", 6192.0))  # above support -> arm
@@ -227,7 +236,9 @@ def _sts(symbol: str, price: float, ms: int) -> TimeSale:
 
 def test_stream_gap_unarms_break_so_wake_into_extended_does_not_fire() -> None:
     notes: list[str] = []
-    det = SetupDetector(lambda: _break_plan(), notes.append, break_margin=0.5, gap_s=90.0)
+    det = SetupDetector(
+        lambda: _break_plan(), notes.append, geometry=Geometry(break_margin=0.5), gap_s=90.0
+    )
     det.on_timesale(_bts("/MES", 6228.0, ms=1_000_000))  # below -> arm (pre-sleep)
     det.on_timesale(_bts("/MES", 6265.0, ms=1_120_000))  # 120s gap, woke extended -> no break fire
     assert not any("broke" in n for n in notes)  # the wake-into-top fire is suppressed
@@ -236,7 +247,9 @@ def test_stream_gap_unarms_break_so_wake_into_extended_does_not_fire() -> None:
 
 def test_small_gap_keeps_arming_and_break_still_fires() -> None:
     notes: list[str] = []
-    det = SetupDetector(lambda: _break_plan(), notes.append, break_margin=0.5, gap_s=90.0)
+    det = SetupDetector(
+        lambda: _break_plan(), notes.append, geometry=Geometry(break_margin=0.5), gap_s=90.0
+    )
     det.on_timesale(_bts("/MES", 6228.0, ms=1_000_000))  # below -> arm
     det.on_timesale(_bts("/MES", 6231.0, ms=1_005_000))  # 5s later, no gap, still armed -> fire
     assert any("broke" in n for n in notes)
@@ -245,7 +258,9 @@ def test_small_gap_keeps_arming_and_break_still_fires() -> None:
 
 def test_gap_with_nothing_armed_is_silent() -> None:
     notes: list[str] = []
-    det = SetupDetector(lambda: _break_plan(), notes.append, break_margin=0.5, gap_s=90.0)
+    det = SetupDetector(
+        lambda: _break_plan(), notes.append, geometry=Geometry(break_margin=0.5), gap_s=90.0
+    )
     det.on_timesale(_bts("/MES", 6265.0, ms=1_000_000))  # extended, never armed
     det.on_timesale(_bts("/MES", 6266.0, ms=1_120_000))  # 120s gap, but nothing to drop -> silent
     assert notes == []
@@ -255,7 +270,9 @@ def test_stream_gap_unarms_breakdown_so_wake_into_extended_does_not_fire() -> No
     # the downside mirror: a support-breakdown short armed from above must also re-witness
     # its setup side after a sleep, not fire on waking far below the level
     notes: list[str] = []
-    det = SetupDetector(lambda: _put_break_plan(), notes.append, break_margin=0.5, gap_s=90.0)
+    det = SetupDetector(
+        lambda: _put_break_plan(), notes.append, geometry=Geometry(break_margin=0.5), gap_s=90.0
+    )
     det.on_timesale(_sts("/MES", 6192.0, ms=1_000_000))  # above support -> arm (pre-sleep)
     det.on_timesale(_sts("/MES", 6150.0, ms=1_120_000))  # 120s gap, woke far below -> no fire
     assert not any("broke" in n for n in notes)
@@ -292,6 +309,7 @@ def test_tradeable_level_emits_a_proposal() -> None:
     assert p.quantity == 2
     assert p.stop_price == 6185.0 and p.target_price == 6202.0  # explicit level prices
     assert p.reason == notes[0]  # the proposal carries the alert text
+    assert p.mode == "fade"  # and the verdict mode, the live-gate allow-list key
 
 
 def test_derived_bracket_prices_from_default_points() -> None:
@@ -398,7 +416,7 @@ def _flip_plan(flip: float | None = 6195.0) -> SessionPlan:
 
 
 def _flip_detector(notes: list[str], flip: float | None = 6195.0) -> SetupDetector:
-    return SetupDetector(lambda: _flip_plan(flip), notes.append, flip_margin=1.0)
+    return SetupDetector(lambda: _flip_plan(flip), notes.append, geometry=Geometry(flip_margin=1.0))
 
 
 def test_flip_first_tick_only_records_side() -> None:
@@ -470,7 +488,12 @@ def _ts(symbol: str, price: float, *, size: int, side: str, ms: int) -> TimeSale
 
 
 def _recording_detector(records: list, lean: str = "long-only") -> SetupDetector:
-    return SetupDetector(lambda: _plan(lean), lambda _m: None, record=records.append, tolerance=1.0)
+    return SetupDetector(
+        lambda: _plan(lean),
+        lambda _m: None,
+        record=records.append,
+        geometry=Geometry(tolerance=1.0),
+    )
 
 
 def test_fire_records_velocity_and_confirming_size() -> None:
@@ -530,15 +553,18 @@ def test_record_sink_is_optional() -> None:
 
 _W = 6250.0  # a verdict wall
 
-# small, fast-resolving verdict tunables so the geometry (not the calibrated defaults) is tested
-_VKW = dict(
+# small, fast-resolving verdict tunables so the geometry (not the calibrated defaults) is tested.
+# Split the way the detector now takes them: price-distance bands as a Geometry, time windows flat.
+_VGEO = Geometry(
     break_margin=1.0,
     min_break_excursion=1.0,
     follow_through_margin=10.0,
-    confirm_s=10.0,
-    failure_window_s=60.0,
     reentry_margin=1.0,
     retest_proximity=2.0,
+)
+_VKW = dict(
+    confirm_s=10.0,
+    failure_window_s=60.0,
     retest_window_s=60.0,
 )
 
@@ -562,7 +588,9 @@ def _verdict_plan(lean: str = "both", *, reversal: bool = True, retest: bool = T
 
 
 def _verdict_detector(notes: list, proposals: list, lean: str = "both") -> SetupDetector:
-    return SetupDetector(lambda: _verdict_plan(lean), notes.append, proposals.append, **_VKW)
+    return SetupDetector(
+        lambda: _verdict_plan(lean), notes.append, proposals.append, geometry=_VGEO, **_VKW
+    )
 
 
 def test_reversal_verdict_fires_short_on_snapback_despite_buy_tape() -> None:
@@ -604,7 +632,9 @@ def test_reversal_short_suppressed_under_long_only_lean() -> None:
 def test_go_with_silent_when_no_retest_row_on_the_wall() -> None:
     notes: list[str] = []
     proposals: list = []
-    det = SetupDetector(lambda: _verdict_plan(retest=False), notes.append, proposals.append, **_VKW)
+    det = SetupDetector(
+        lambda: _verdict_plan(retest=False), notes.append, proposals.append, geometry=_VGEO, **_VKW
+    )
     det.on_timesale(_bts("/MES", 6247.0, ms=0))
     det.on_timesale(_bts("/MES", 6252.0, ms=1000))
     det.on_timesale(_bts("/MES", 6252.5, ms=12_000))  # CONFIRMED
@@ -626,7 +656,9 @@ def test_stream_gap_resets_breakout_tracker_mid_attempt() -> None:
 
 def test_reversal_fire_records_telemetry_with_mode() -> None:
     records: list = []
-    det = SetupDetector(lambda: _verdict_plan(), lambda _m: None, record=records.append, **_VKW)
+    det = SetupDetector(
+        lambda: _verdict_plan(), lambda _m: None, record=records.append, geometry=_VGEO, **_VKW
+    )
     det.on_timesale(_bts("/MES", 6247.0, ms=0))
     det.on_timesale(_bts("/MES", 6252.0, ms=1000))
     det.on_timesale(_bts("/MES", 6248.5, ms=2000))
@@ -643,7 +675,10 @@ def test_cooldown_blocks_rapid_refire_of_same_level() -> None:
     # cooldown_s has passed (the 2026-06-18 fade machine-gun, capped)
     notes: list[str] = []
     det = SetupDetector(
-        lambda: _plan("both"), notes.append, cooldown_s=10.0, tolerance=1.0, rearm_margin=0.5
+        lambda: _plan("both"),
+        notes.append,
+        cooldown_s=10.0,
+        geometry=Geometry(tolerance=1.0, rearm_margin=0.5),
     )
     det.on_timesale(_bts("/MES", 6190.5, ms=0))  # tag + confirm -> fire (cooldown stamped at 0)
     assert len(notes) == 1
@@ -661,7 +696,10 @@ def test_cooldown_is_per_level_not_global() -> None:
     # one level cooling must not silence a different level — the cap is per setup, not global
     notes: list[str] = []
     det = SetupDetector(
-        lambda: _plan("both"), notes.append, cooldown_s=300.0, tolerance=1.0, rearm_margin=0.5
+        lambda: _plan("both"),
+        notes.append,
+        cooldown_s=300.0,
+        geometry=Geometry(tolerance=1.0, rearm_margin=0.5),
     )
     det.on_timesale(_bts("/MES", 6190.5, ms=0))  # support fade fires
     det.on_timesale(_sts("/MES", 6230.0, ms=1000))  # resistance fade — different level -> fires
@@ -672,7 +710,10 @@ def test_cooldown_is_noop_without_timestamps() -> None:
     # a ms-less feed has no time base, so the cooldown degrades to a no-op (re-fires on re-entry)
     notes: list[str] = []
     det = SetupDetector(
-        lambda: _plan("both"), notes.append, cooldown_s=300.0, tolerance=1.0, rearm_margin=0.5
+        lambda: _plan("both"),
+        notes.append,
+        cooldown_s=300.0,
+        geometry=Geometry(tolerance=1.0, rearm_margin=0.5),
     )
     det.on_timesale(_buy_ts("/MES", 6190.5))  # ms-less fire
     det.on_timesale(_buy_ts("/MES", 6192.0))  # leave the band -> re-arm
@@ -686,7 +727,12 @@ def test_cooldown_caps_oscillating_wall_reversal() -> None:
     notes: list[str] = []
     proposals: list = []
     det = SetupDetector(
-        lambda: _verdict_plan("both"), notes.append, proposals.append, cooldown_s=60.0, **_VKW
+        lambda: _verdict_plan("both"),
+        notes.append,
+        proposals.append,
+        cooldown_s=60.0,
+        geometry=_VGEO,
+        **_VKW,
     )
     det.on_timesale(_bts("/MES", 6247.0, ms=0))  # inside -> arm
     det.on_timesale(_bts("/MES", 6252.0, ms=1000))  # cross out
@@ -706,8 +752,7 @@ def test_stream_gap_clears_refire_cooldown() -> None:
         notes.append,
         cooldown_s=300.0,
         gap_s=90.0,
-        tolerance=1.0,
-        rearm_margin=0.5,
+        geometry=Geometry(tolerance=1.0, rearm_margin=0.5),
     )
     det.on_timesale(_bts("/MES", 6190.5, ms=1_000_000))  # support fade fires (cooldown stamped)
     det.on_timesale(_bts("/MES", 6190.5, ms=1_200_000))  # 200s gap -> cooldown dropped -> re-fires

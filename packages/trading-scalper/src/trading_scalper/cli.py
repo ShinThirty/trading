@@ -34,7 +34,7 @@ from trading_scalper.basis import BasisRecorder, default_basis_path
 from trading_scalper.detector import SetupDetector, watch_setups
 from trading_scalper.domain import OrderId, Side, TradeProposal
 from trading_scalper.feed import DxLinkFeed, drive_paper_fills
-from trading_scalper.instruments import Instrument, front_month, instrument_for
+from trading_scalper.instruments import Geometry, Instrument, front_month, instrument_for
 from trading_scalper.notify import Notifier
 from trading_scalper.paper import PaperBroker, round_to_tick
 from trading_scalper.persist import (
@@ -45,8 +45,10 @@ from trading_scalper.persist import (
     default_summary_path,
 )
 from trading_scalper.plan import PlanStore, SessionPlan, default_plan_path
+from trading_scalper.policy import DENY_ALL, GatePolicy
 from trading_scalper.ports import MarketDataFeed
 from trading_scalper.shadow import ShadowRecorder, default_shadow_path, default_tape_path
+from trading_scalper.version import __version__
 
 
 @dataclass(slots=True)
@@ -60,7 +62,7 @@ class ScalpSession:
     persister: PaperPersister
     signals: SignalLog
     shadow: ShadowRecorder
-    basis: BasisRecorder | None  # SPX↔future carry-basis shadow; None when no reference symbol
+    basis: BasisRecorder | None  # cash-index↔future carry-basis shadow; None when no reference
 
 
 def make_executor(
@@ -89,6 +91,43 @@ def make_executor(
     return execute
 
 
+def make_gated_executor(
+    paper_exec: Callable[[TradeProposal], OrderId | None],
+    notifier: Notifier,
+    *,
+    policy: GatePolicy = DENY_ALL,
+    live_exec: Callable[[TradeProposal], OrderId | None] | None = None,
+) -> Callable[[TradeProposal], OrderId | None]:
+    """Wrap the paper executor with the live gate — a **fan-out**, never an either/or.
+
+    Every proposal fills in paper, unconditionally: the track record never pauses, even
+    for a ``(root, mode)`` that has gone live, so paper-vs-live slippage stays
+    comparable and the scorecard keeps grading the same continuous series. A proposal
+    the ``policy`` approves for its ``(root, mode)`` at the running ``__version__``
+    **additionally** routes to ``live_exec`` when one is wired — real money and paper
+    from the same fire. Until a live broker exists (``live_exec is None``) an approved
+    fire only annotates ("would route live"), so the gate can be dry-run on live paper
+    tape as a shadow before a cent is at risk ([[feedback_shadow_then_live]]).
+
+    Returns the **paper** bracket id — the join key the scorecard already grades on — so
+    the paper track record is unaffected by the gate. A live fill keeps its own id in its
+    own (future) ledger; segregating the two fill streams is part of the live-broker
+    increment, not this seam.
+    """
+
+    def execute(p: TradeProposal) -> OrderId | None:
+        entry_id = paper_exec(p)  # paper always — the continuous, gradeable track record
+        decision = policy.evaluate_symbol(p.symbol, p.mode, __version__)
+        if decision.approved:
+            if live_exec is not None:
+                live_exec(p)  # real fill, in parallel; paper id above stays the join key
+            else:
+                notifier.notify(f"(gate) LIVE-eligible: {p.symbol} [{p.mode}] — {decision.reason}")
+        return entry_id
+
+    return execute
+
+
 def collect_symbols(plan: SessionPlan | None, underlyings: list[str]) -> list[str]:
     """The subscribe list: the watched/traded symbols, plus the plan's symbol if distinct.
 
@@ -107,6 +146,9 @@ def build_session(
     plan_source: Callable[[], SessionPlan | None],
     *,
     notifier: Notifier | None = None,
+    geometry: Geometry = Geometry(),
+    policy: GatePolicy = DENY_ALL,
+    live_exec: Callable[[TradeProposal], OrderId | None] | None = None,
     date: str,
     underlyings: list[str] | None = None,
     fills_path: Path | None = None,
@@ -125,6 +167,17 @@ def build_session(
     only feed the offline ``--demo-setup`` path. The detector's ``record`` sink lands
     the B4 telemetry in a per-fire ``SignalLog`` alongside the fills/summary.
 
+    ``geometry`` is the traded instrument's price-distance band-set (``instruments.py``);
+    ``_run`` passes ``inst.geometry`` so the detector's bands match the symbol's price
+    magnitude, exactly as ``point_value``/``tick`` are threaded into the ``PaperBroker``.
+    The default is the S&P set, for tests/demo that don't wire a specific instrument.
+
+    ``policy`` + ``live_exec`` are the live gate (``policy.py``): the paper broker fills
+    every fire, and an approved ``(root, mode)`` at this ``__version__`` *additionally*
+    routes to ``live_exec``. Defaults (``DENY_ALL`` + ``None``) keep the session paper-only
+    and the gate transparent; the live-broker increment wires a real executor + a manifest
+    policy here.
+
     A ``ShadowRecorder`` is also wired onto the tape — pure telemetry, gating nothing
     (see ``shadow.py``). It tracks the ``underlyings`` only. When ``reference_symbol`` is
     given (e.g. ``SPX``), a ``BasisRecorder`` records the live future↔reference carry
@@ -134,7 +187,16 @@ def build_session(
     notifier = notifier or Notifier()
     signals = SignalLog(signals_path or default_signals_path(date))
     detector = SetupDetector(
-        plan_source, notifier.notify, make_executor(broker, notifier), record=signals.record
+        plan_source,
+        notifier.notify,
+        # the live gate wraps the paper executor: paper fills every fire; an approved
+        # (root, mode) at this __version__ *additionally* routes to live_exec. Default
+        # DENY_ALL + live_exec=None → paper-only, the gate transparent (see policy.py).
+        make_gated_executor(
+            make_executor(broker, notifier), notifier, policy=policy, live_exec=live_exec
+        ),
+        geometry=geometry,  # the traded instrument's price-distance bands (see instruments.py)
+        record=signals.record,
     )
     persister = PaperPersister(
         broker,
@@ -206,8 +268,7 @@ def _print_banner(
     print("=" * 64)
     print("trading-scalper — PAPER entry-detector (no live orders)")
     print(
-        f"date: {date}   symbol: {' '.join(symbols)}   "
-        f"(${inst.point_value}/pt, {inst.tick:g} tick)"
+        f"date: {date}   symbol: {' '.join(symbols)}   (${inst.point_value}/pt, {inst.tick:g} tick)"
     )
     if plan is not None:
         print(f"plan: {path}")
@@ -259,9 +320,10 @@ def _run_demo(broker: PaperBroker, session: ScalpSession, notifier: Notifier, ar
 async def _run_basis(tt_cfg, future_symbol: str, reference_symbol: str) -> None:
     """`--basis`: print the current future↔reference carry basis and exit (prep helper).
 
-    `/scalp` prep adds this basis to each SPX gamma wall to get its /MES level. Reads
-    only — never writes the shadow artifact. Meaningful during RTH only (SPX must be
-    live); off-hours the future has drifted against a stale cash index.
+    `/scalp` prep adds this basis to each cash-index gamma wall to get its futures
+    level. Reads only — never writes the shadow artifact. Meaningful during RTH only
+    (the cash index must be live); off-hours the future has drifted against a stale
+    cash index.
     """
     tasty = TastyTradeClient(tt_cfg)
     feed = DxLinkFeed(DxLinkStreamClient(tasty.get_quote_token))
@@ -285,7 +347,10 @@ async def _run_basis(tt_cfg, future_symbol: str, reference_symbol: str) -> None:
         f"{future_symbol} {row['future_price']:g}  −  {reference_symbol} "
         f"{row['reference_level']:g}  =  basis {row['basis']:+.2f}"
     )
-    print("→ add basis to each SPX wall for its /MES level (RTH only — SPX must be live)")
+    print(
+        f"→ add basis to each {reference_symbol} wall for its {future_symbol} level "
+        f"(RTH only — {reference_symbol} must be live)"
+    )
 
 
 async def _demo_token() -> tuple[str, str]:
@@ -307,7 +372,7 @@ async def _run(args: argparse.Namespace) -> None:
         if cfg.tastytrade is None:
             raise SystemExit("--basis needs a [tastytrade] section in ~/.tradingrc (DXLink feed).")
         fut = primary if ":" in primary else front_month(primary, date.fromisoformat(args.date))
-        await _run_basis(cfg.tastytrade, fut, args.reference or "SPX")
+        await _run_basis(cfg.tastytrade, fut, args.reference or inst.reference)
         return
 
     if args.demo_setup:
@@ -317,6 +382,7 @@ async def _run(args: argparse.Namespace) -> None:
             broker,
             plan_store.current,
             notifier=notifier,
+            geometry=inst.geometry,
             date=args.date,
             underlyings=args.symbols,
         )
@@ -331,12 +397,14 @@ async def _run(args: argparse.Namespace) -> None:
     tasty = TastyTradeClient(cfg.tastytrade)
     stream = DxLinkStreamClient(tasty.get_quote_token)
     feed = DxLinkFeed(stream)
-    reference = args.reference or None  # "" disables the SPX basis shadow
+    # default: the traded instrument's cash index (SPX for /MES, NDX for /MNQ); "" disables
+    reference = inst.reference if args.reference is None else (args.reference or None)
     session = build_session(
         feed,
         broker,
         plan_store.current,
         notifier=notifier,
+        geometry=inst.geometry,
         date=args.date,
         underlyings=args.symbols,
         reference_symbol=reference,
@@ -345,7 +413,7 @@ async def _run(args: argparse.Namespace) -> None:
     _print_banner(plan, plan_path, args.symbols, args.date, inst)
     symbols = collect_symbols(plan, args.symbols)
     if reference and reference not in symbols:
-        symbols.append(reference)  # stream the SPX reference for the carry-basis shadow
+        symbols.append(reference)  # stream the cash-index reference for the carry-basis shadow
     print(f"streaming: {' '.join(symbols)}")
     await feed.subscribe(symbols)
     tasks = [feed.run(), session.persister.run(), session.shadow.run()]
@@ -394,8 +462,9 @@ def main() -> None:
     )
     ap.add_argument(
         "--reference",
-        default="SPX",
-        help="cash-index reference streamed for the carry-basis shadow (empty to disable)",
+        default=None,
+        help="cash-index reference for the carry-basis shadow "
+        "(default: the instrument's — SPX for /MES, NDX for /MNQ; empty string to disable)",
     )
     ap.add_argument("--date", default=date.today().isoformat(), help="plan date YYYY-MM-DD")
     ap.add_argument(
@@ -417,7 +486,7 @@ def main() -> None:
     ap.add_argument(
         "--basis",
         action="store_true",
-        help="print the current front-month↔reference (SPX) carry basis and exit (prep helper)",
+        help="print the current front-month↔cash-index carry basis and exit (prep helper)",
     )
     ap.add_argument(
         "--demo-setup",

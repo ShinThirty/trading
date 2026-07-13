@@ -1,7 +1,7 @@
 [project]
 name = "trading-scalper"
 version = "0.3.1"
-description = "Local paper entry-detector for intraday SPY/QQQ options scalps"
+description = "Local paper entry-detector for intraday index-futures (/MES) scalps"
 requires-python = ">=3.13"
 dependencies = [
     "trading-clients[streaming]",

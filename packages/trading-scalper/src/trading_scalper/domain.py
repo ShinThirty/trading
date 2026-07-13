@@ -91,6 +91,13 @@ class TradeProposal:
     side at **absolute** prices resolved upstream from the session plan: ``stop_price``
     (the bail level) and ``target_price`` (the take-profit). ``reason`` is the human-
     readable alert text that triggered it.
+
+    ``mode`` is the verdict mode that blessed the entry (``fade`` / ``break`` /
+    ``reversal`` / ``retest``) — the same value carried on the ``FireRecord``. The paper
+    broker ignores it, but the **live gate** (``policy.py``) allow-lists by
+    ``(instrument-root, mode)``, so the proposal must carry its mode to that seam: a
+    promoted ``/MES fade`` must be distinguishable from an un-promoted ``/MES break`` at
+    the moment of execution.
     """
 
     symbol: str  # the futures symbol to trade (e.g. "/MES")
@@ -99,6 +106,7 @@ class TradeProposal:
     stop_price: float
     target_price: float
     reason: str = ""
+    mode: str = ""  # verdict mode (fade/break/reversal/retest) — the live-gate allow-list key
 
 
 @dataclass(frozen=True, slots=True)

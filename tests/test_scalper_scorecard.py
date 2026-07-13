@@ -28,12 +28,19 @@ def _write(path: Path, rows: list[dict], *, gz: bool = False) -> None:
         path.write_text(body)
 
 
-def _fill(bracket: str, side: str, delta: float | None, *, ts: str = "2026-06-23T15:00:00+00:00"):
+def _fill(
+    bracket: str,
+    side: str,
+    delta: float | None,
+    *,
+    ts: str = "2026-06-23T15:00:00+00:00",
+    symbol: str = "QQQ260623C00520000",
+):
     return {
         "ts": ts,
         "order_id": bracket,
         "bracket_id": bracket,
-        "symbol": "QQQ260623C00520000",
+        "symbol": symbol,
         "side": side,
         "qty": 1,
         "fill_price": 2.0,
@@ -97,6 +104,7 @@ def test_extraction_sums_multi_fill_pnl(tmp_path: Path) -> None:
     _session(tmp_path, "2026-06-23", fills, [_signal("b1", "retest", "0.3.1")])
     (trade,) = extract_session(tmp_path, "2026-06-23")
     assert trade.pnl == 45.0
+    assert trade.symbol == "QQQ"  # instrument (underlying/future) from the signals row, not the OCC
 
 
 def test_extraction_reads_gzipped_logs(tmp_path: Path) -> None:
@@ -149,12 +157,27 @@ def test_compute_stats_groups_by_cohort_and_mode() -> None:
     assert set(stats) == {("0.2", "break"), ("0.3", "break"), ("0.3", "fade")}
 
 
+def test_compute_stats_splits_by_instrument_root_and_is_roll_proof() -> None:
+    # same cohort + mode, different instruments → separate buckets (one can't buy the
+    # other's promotion); two /MES contract months pool (a quarterly roll never splits).
+    trades = [
+        ClosedTrade("2026-07-14", "t", "b1", "fade", "0.4.0", 20.0, symbol="/MESU26:XCME"),
+        ClosedTrade("2026-07-14", "t", "b2", "fade", "0.4.0", 10.0, symbol="/MESZ26:XCME"),  # roll
+        ClosedTrade("2026-07-14", "t", "b3", "fade", "0.4.0", -5.0, symbol="/MNQU26:XCME"),
+    ]
+    stats = {(s.cohort, s.root, s.mode): s for s in compute_stats(trades)}
+    assert set(stats) == {("0.4", "/MES", "fade"), ("0.4", "/MNQ", "fade")}
+    assert stats[("0.4", "/MES", "fade")].n == 2  # U26 + Z26 pool — the roll doesn't reset
+    assert stats[("0.4", "/MNQ", "fade")].n == 1  # /MNQ graded on its own record
+
+
 # ── gate ─────────────────────────────────────────────────────────────────────
 
 
 def _stats(**kw):
     base = dict(
         cohort="0.3",
+        root="/MES",
         mode="break",
         n=60,
         sessions=12,

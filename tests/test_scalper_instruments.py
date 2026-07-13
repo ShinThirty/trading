@@ -13,10 +13,20 @@ def test_micro_and_full_es_economics() -> None:
     assert es.point_value == 50 and es.tick == 0.25
 
 
+def test_reference_index_is_instrument_correlated() -> None:
+    # the cash-index reference (gamma walls + carry basis) pairs by index, not by size
+    assert instrument_for("/MES").reference == "SPX"
+    assert instrument_for("/ES").reference == "SPX"
+    assert instrument_for("/MNQ").reference == "NDX"
+    assert instrument_for("/NQ").reference == "NDX"
+
+
 def test_dated_contract_resolves_to_root() -> None:
     inst = instrument_for("/MESU25:XCME")  # a specific contract month from the feed
     assert inst.point_value == 5 and inst.tick == 0.25
     assert inst.symbol == "/MESU25:XCME"  # keeps the concrete symbol, borrows the economics
+    assert inst.reference == "SPX"  # and the cash-index reference (S&P → SPX)
+    assert inst.geometry == instrument_for("/MES").geometry  # and the S&P geometry set
 
 
 def test_micro_root_not_shadowed_by_es() -> None:
