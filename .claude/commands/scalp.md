@@ -1,252 +1,213 @@
 ---
-description: Intraday index-futures scalp workflow (/MES default) — pre-session prep (regime + daily bias + level map + discipline checklist) and post-session review grading the trading-scalper daemon's PAPER tracker + the shadow VAP/volume-rate observer. Prep draws gamma walls from the traded future's cash index (SPX for /MES, NDX for /MNQ; no ETF), shifts them to the future by the live carry basis, and writes the daemon's session-plan YAML (levels + per-level direction). Paper-only — no real futures account yet, so review grades the bot, not real fills. Built to enforce discipline, not to generate more setups.
+description: Intraday index-futures scalp workflow (/MES default). Prep — regime + daily bias + level map + discipline checklist; writes the trading-scalper daemon's session-plan YAML (gamma walls from the traded future's cash index, SPX for /MES / NDX for /MNQ, shifted to the future by the live carry basis; per-level direction). Review — grade the daemon's PAPER tracker + shadow observers. Check — thin live snapshot. Paper-only.
 arguments:
   - name: mode
     description: Sub-mode — omit for default (pre-session prep); or `review` (post-session PAPER-tracker grading) / `check` (thin live snapshot)
     required: false
 ---
 
-Intraday index-futures scalp workflow, mode **$ARGUMENTS.mode** (default: pre-session prep). The traded instrument defaults to **/MES** (Micro E-mini S&P 500, the paper daemon's default); the gamma walls come from the traded future's **cash index** (`get_gamma_profile <reference>` — the true dealer-gamma driver, no ETF tracking noise), already in index points, and are shifted to futures prices by the **live carry basis** (`future − index`, ≈ +50 in RTH for /MES), fetched with `trading-scalper --basis`. No ETF, no ×10.
-
-**The reference cash index is the traded future's, not a constant** — **SPX** for the S&P complex (/MES, /ES), **NDX** for the Nasdaq complex (/MNQ, /NQ). It's defined per-instrument in `instruments.py` (`Instrument.reference`), so the daemon and `--basis` resolve it automatically from `--symbols`; don't hardcode SPX. Everything below uses **SPX** as the worked example because /MES is the default — swap in NDX (and Nasdaq-scale prices ~29800) verbatim when prepping /MNQ.
-
-## Role and guardrails — read first
-
-This skill supports **intraday /MES index-futures scalping**. Its purpose is to **enforce discipline**, not to manufacture setups. The lesson that created it (see memory `project-qqq-scalping`): the *reads* are usually fine — good losses come from no stops, chasing, and trading the middle. So this skill leans on the side of *fewer, cleaner trades*, and every mode ends in a discipline artifact, not a trade signal.
-
-Four guardrails apply to every mode:
-
-1. **Discipline over analysis.** Pre-session output ALWAYS ends with the discipline checklist. More setups ≠ better. If the day has no clean edge, the correct output is "no-trade conditions — sit out." Even paper: a sloppy level map pollutes the track record the go-live gate reads, so bias toward fewer, cleaner edges.
-2. **Data limits — be honest about them.** `get_technical_indicators` is **daily-only** (no intraday bars from any tool). **Daily signals draw the map and set the lean — they never pull the trigger.** Levels (SMA20/50, Bollinger bands, prior H/L/C), the range envelope (ATR), and the day-type prior (ADX/±DI) are the *right* use; the momentum/participation oscillators (RSI, MACD, **OBV**) describe a **multi-week state** and must never be read as same-session timing or participation. The real scalper's edge — Level 2 / order flow / tape speed — is **not in this toolset**; it's on a live futures chart. This skill is **prep + paper-review + lagging context**, NOT the live execution surface.
-3. **Analyze the cash index, trade the future.** The gamma walls come from the traded future's **cash index** (`get_gamma_profile <reference>` — SPX for /MES, NDX for /MNQ) — the deepest, cleanest dealer-gamma pool and the true driver of the index the future tracks; **ETFs (SPY/QQQ) are out** (their index gap is dividend/tracking noise, not clean carry). The walls come back in index points; shift them to the future by the **live carry basis** (`future − index`, pure cost-of-carry, ≈ +50 in RTH for /MES) from `trading-scalper --basis`. **Not ×10.** Never pull futures quotes/chains/gamma from the equity tools — they won't resolve; the daemon streams the future itself. The daemon watches + paper-trades the future off the basis-shifted levels.
-4. **Paper-only — no real click.** The daemon auto-executes every confirmed setup in an in-memory broker; there is **no real futures account yet**, so nothing here green-lights a real trade. Produce the map, the levels, the rules; the daemon builds the track record. Do not encourage more trading; bias toward "wait."
+Intraday index-futures scalp workflow, mode **$ARGUMENTS.mode** (default: pre-session prep). Traded instrument defaults to **/MES**.
 
 Parse `$ARGUMENTS.mode`: empty → `prep` (default). Valid: `prep`, `review`, `check`.
 
----
+## Rules (every mode)
 
-## Live layer — the discretionary read (reference only)
-
-> **Post-migration note (2026-07-12):** this section describes the **equities** live-execution surface (Webull Premium, SPY/QQQ options) from before the futures migration. The **/MES paper daemon needs none of it** — it auto-executes off the level map, and there is no real futures account to trade. It's **retained as tape-reading education** for a future live-futures surface (a DOM/tape on a futures platform would replace the Nasdaq-specific NOII panel). Skip to **Mode `prep`** for the actual workflow.
-
-`/scalp prep` draws the **map and the lean**. The **live trigger** was never in this toolset — it's on your screen, across four panels. Read all four **only when price is at a pre-mapped edge** (Step 3); mid-range they're noise.
-
-**1. Level 2 order book (depth curve + ladder) — "bounce or break at this level?"**
-- The book is *resting intentions*, not trades — and displayed size is a **promise, not a commitment** (it can be pulled). Never trust a wall just because it's big. Lit Nasdaq depth only: hidden/iceberg/dark size isn't shown.
-- At a mapped edge, the wall does one of three things:
-  - **Refreshes** when hit (size reloads) → real absorption → **bounce / fade holds**.
-  - **Eaten** — shrinks *with prints going off on the tape* → real demand → **break, go-with**.
-  - **Pulled** — vanishes *with no prints* → spoof → **break, but hollow — be careful**.
-- Eaten vs pulled is the whole read, and L2 alone can't tell them apart → confirm on the tape.
-- **When it's too fast:** widen the price **grouping** (collapses the flicker into fewer fatter levels), watch the **depth curve** (moves slower than the rows), or switch your primary read to the tape.
-
-**2. Time & Sales — the tape — "is the move real?"**
-- Executed prints (reality) vs L2's intentions. The **lie-detector** for the book.
-- **Filter to size** (e.g. ≥100) — kill the 1–50-lot router spray; read only prints that matter.
-- **Color = aggressor:** green = buyer lifted the offer; red = seller hit the bid; neutral = mid/hidden. Read the *balance of color*, not just that trades happened. (The side tag is an inference from price-vs-quote — shaky when the quote's moving fast.)
-- **Sweeps:** a burst of same-instant prints across several prices = **one** aggressive order, not many traders — don't overcount.
-- **Speed:** accelerating prints = momentum; *unreadably* fast = the burst itself → **not your entry, wait for the pullback** where it slows enough to read.
-
-**3. NOII (Net Order Imbalance Indicator) — auction lean — open & close windows only**
-- Live only in the cross windows: **~9:28–9:30 (Opening Cross)** and **~3:50–4:00 (Closing Cross)** — i.e. inside your two trade windows.
-- **Imbalance Side** = which side has unpaired MOC/LOC interest. **Near / Far** indicative prices *above* Reference = the cross is leaning **up**; *below* = leaning **down**. Low **Price Variance** (<1%) = stable, trustworthy indication.
-- Use as a **directional lean into the print** (persistent buy imbalance + rising indicatives = MOC buying pinning up into 4:00).
-- **Caveat:** it can flip in the final seconds as offsetting orders land. A *lean*, not a lock.
-
-**4. Vol Analysis (volume-at-price) — the level-map input**
-- Volume traded *at each price*, split buy/sell. **High-volume nodes (HVNs) are S/R magnets** — a stronger level than a round number, because real size changed hands there. Feed them into the Step 3 map.
-- The **buy/sell split** shows who controlled each shelf (heavy sell node = where sellers capitulated; heavy buy node = where buyers absorbed — e.g. a closing-cross buy print).
-- **Purely descriptive** — it confirms where levels *are*, it does not predict the next move.
-
-**The handoff:** prep hands you the edges; **L2 + tape confirm bounce-vs-break at the edge**, **NOII gives the auction lean** in the open/close windows, **Vol Analysis sharpens where the edges are**. The stop and the edge-discipline still do the real work — these confirm a trade at a pre-mapped level, they never manufacture one.
+- **Reference cash index** = SPX for /MES, /ES; NDX for /MNQ, /NQ. Auto-resolved from `--symbols` (`Instrument.reference`); don't hardcode. Examples below use SPX/`/MES`; swap NDX + Nasdaq-scale prices for /MNQ.
+- **Gamma walls come from the cash index** (`get_gamma_profile <reference>`), in index points → shift to futures price by the **live carry basis** (`future − index`, ≈ +50 RTH for /MES) from `trading-scalper --basis`. Never pull futures quotes/chains/gamma from equity tools.
+- **Daily tools only** — no intraday bars from any MCP tool. Daily signals draw the map + set the lean; they never trigger. Intraday tape (VWAP + structure) lives on the live chart / daemon.
+- **Paper-only** — daemon auto-executes into an in-memory broker; no real futures account. Nothing here green-lights a live trade.
+- **Prep always ends with the discipline checklist.** No clean edge → output "no-trade, sit out." Bias toward fewer, cleaner edges.
 
 ---
 
-## Mode `prep` — pre-session setup (the Step A sheet)
+## Mode `prep` — pre-session setup
 
-Run this before the open (or early in the session). One command that produces the day's map + the rules, and writes the `trading-scalper` daemon's session-plan file so the daemon watches (and paper-trades) the same edges.
+Run before the open (or early in session). Produces the day's map + rules and writes the daemon's session-plan YAML.
 
-**Step 0 — clock + macro-event gate.** Call `get_market_clock`. If pre-market, VWAP/timesales have no current-session data → build levels from the **prior** session (note it). If open, use live data.
+**Step 0 — clock + macro-event gate.** Call `get_market_clock`. Pre-market → build levels from the prior session (note it). Open → live data.
 
-Then call **`get_upcoming_economic_releases(days_ahead=1)`** and check for a release dated *today*. The gamma map (Step 1) is built off OCC-settled OI that is **one session stale and cannot be refreshed intraday** — so an event that breaks the map mid-session voids the whole plan, and a daemon left on a stale `mode` will fade a level that's actually breaking (the 2026-06-17 FOMC lesson: an all-day fade map was blessed across a 2:00 PM statement; the pin broke down post-presser and the morning map was void by 3:00). But **not every macro event matters to an intraday scalp** — gate on *when* it lands and *whether it can flip the regime*, not on mere presence. The tool returns Date + Category only (no time), so map each release to its **conventional ET release time** (fixed by the issuing agency) and classify:
+Call `get_upcoming_economic_releases(days_ahead=1)`; find releases dated *today*. The gamma map is one session stale and can't refresh intraday. Map each release to its conventional ET release time and classify:
 
 | Class | Releases (conventional ET time) | Treatment |
 |---|---|---|
-| **1 — Pre-market (8:30)** | CPI, NFP, PCE/Personal Income & Outlays, GDP, PPI, Retail Sales, Durable Goods, Housing Starts/Permits, Jobless Claims, Trade | Already in price by 9:30 — sets the day's *tone*, doesn't whipsaw mid-session. **Not** a no-trade window. Run prep *after* the 8:30 print so the map reflects it; note elevated open IV + that the opening range *is* the reaction. |
-| **2 — RTH morning (10:00)** | ISM Mfg/Services, JOLTS, New/Existing Home Sales, Consumer Confidence, Michigan sentiment | Lands inside the 9:30–10:30 window; tier-2, rarely flips a gamma regime. Soft caution only: let the first 30–45 min set the opening range before fading. No blank. |
-| **3 — RTH regime event (2:00)** | **FOMC decision, FOMC minutes, Fed Chair presser** | Breaks the map mid-session *and* can flip the GEX regime sign. **Cap the plan to the pre-2:00 morning window**, pre-write `lean: no-trade` from ~1:45 ET through the close, and re-map next session after OI re-settles. This is the only class that gets the stand-down blank. |
+| **1 — Pre-market (8:30)** | CPI, NFP, PCE/Personal Income & Outlays, GDP, PPI, Retail Sales, Durable Goods, Housing Starts/Permits, Jobless Claims, Trade | In price by 9:30. Run prep *after* the 8:30 print. Not a no-trade window; note elevated open IV, opening range = the reaction. |
+| **2 — RTH morning (10:00)** | ISM Mfg/Services, JOLTS, New/Existing Home Sales, Consumer Confidence, Michigan sentiment | Lands in the 9:30–10:30 window; rarely flips a regime. Let the first 30–45 min set the opening range before fading. |
+| **3 — RTH regime event (2:00)** | FOMC decision, FOMC minutes, Fed Chair presser | Breaks the map mid-session, can flip the GEX sign. Cap the plan to the pre-2:00 morning window, pre-write `lean: no-trade` from ~1:45 ET to close, re-map next session. |
 
-Only a **Class-3** event present today forces the `lean: no-trade` cap (note it loudly in the plan + the Step 7 checklist). A **Class-1** event is a *sequencing* instruction (don't prep before 8:30; the map is unreliable until the print lands). A **Class-2** event is a one-line caution on the opening range. If today's releases are all low-tier pre-market (e.g. a lone Initial Jobless Claims), it's a **normal scalp day** — don't over-fire the gate. If a Class-3 event has *already* released earlier today (mid-session re-run), treat the existing map as stale and default the plan to `lean: no-trade` until the next session's prep.
+- Class-3 today → force `lean: no-trade` cap (note in plan + Step 7 checklist).
+- Class-1 → sequencing only (don't prep before 8:30).
+- Class-2 → one-line caution on the opening range.
+- All low-tier pre-market (e.g. lone Jobless Claims) → normal scalp day.
+- Class-3 already released earlier today (mid-session re-run) → treat the map as stale, default `lean: no-trade` until next prep.
 
-**Step 1 — regime + the gamma map (the day-type filter).** Call **`get_gamma_profile <reference>`** (default aggregate mode; `SPX` for /MES, `NDX` for /MNQ) — the GEX read on the **cash index** (the deepest, cleanest dealer-gamma pool; **its walls come back in index points — shift each by the live carry basis (`trading-scalper --basis`, ≈ +50 in RTH for /MES) to its futures price when you write the Step 6 plan**). One call now divides the sources correctly: the **regime sign + zero-gamma flip come from the front (0-1DTE) expiration** (the intraday-honest read), while the **call wall / put wall come from the ≤7-DTE aggregate**. Take the **`Regime` row as the day-type label** (it's the front-exp sign — *don't* re-derive a regime from anything else) and the **walls as your edges:** across the next few expirations the persistent high-OI round strikes surface the *structural* magnets — stable through the session and far enough from spot to be fadeable — whereas on the 0DTE expiration gamma collapses onto ATM, so its "walls" sit on spot, migrate all session, and can't be pre-mapped. **If a `⚠ Regime Conflict` row appears** (the ≤7-DTE aggregate sign disagrees with the front-exp sign — the 6/16 mislabel that blessed an all-day fade map the bot bled on), trust the front-exp label and treat the day as conflicted: lean toward a `fragile-pin`/`breakout-trend` posture and the verdict modes, or stand down. The `Zero-Gamma Flip` row is the front-exp flip — carry it straight into Step 6's tripwire (no second call needed). Then (S&P complex only) call `get_dix_gex` as the **SPX-wide sanity prior** (EOD, one day stale): GEX sign + **1-month percentile** for the fragility read, plus DIX accumulation/distribution as background. *SqueezeMetrics DIX/GEX is computed on S&P-500 components, so it's a /MES-only prior — skip it for /MNQ (no clean Nasdaq equivalent).* Translate to a scalp playbook:
-- **Positive GEX** → dealers suppress vol. Range/mean-revert day: **fade the walls** back toward the flip/VWAP (`regime: pin`). Call wall caps, put wall supports. (Step 6 sets the per-wall resolution.)
-- **Positive GEX but low SqueezeMetrics percentile (≤~10) / small total GEX** → suppression is *thinning*. Still a pin, but **fragile** — a volume break can round-trip the fade. Flag it (`regime: fragile-pin`); it's the trap, and the **conflicted wall the verdict modes (`reversal`/`retest`) are built for** (Step 6).
-- **Negative GEX** → dealers amplify. Trend/momentum day: **trade the wall break** (`regime: breakout-trend`), never fade — via `break` for a clean runaway or `reversal`/`retest` for a false-break-prone wall (Step 6). The zero-gamma flip is the line that, once crossed, confirms the trending regime.
-- DIX divergence is background, not a same-day trigger.
+**Step 1 — regime + gamma map.** Call `get_gamma_profile <reference>` (aggregate mode; SPX for /MES, NDX for /MNQ). Sources divide inside the one call:
+- **Regime sign + `Zero-Gamma Flip`** ← front (0-1DTE) expiration. Take the `Regime` row as the day-type label; carry `Zero-Gamma Flip` to Step 6.
+- **Call wall / put wall** ← ≤7-DTE aggregate.
+- **`⚠ Regime Conflict` row present** (aggregate sign ≠ front-exp sign) → trust front-exp, treat the day as conflicted (fragile-pin / breakout posture + verdict modes, or stand down).
 
-**Step 2 — daily bias (a weak prior, not a verdict).** Call `get_technical_indicators` (daily). Use it for **levels + day-type only**: **ADX** (>25 = real trend, <20 = chop/no-trend) and **+DI/-DI** set whether it's even a trend day and which way; price vs **SMA20/SMA50** + Bollinger bands are *levels* feeding Step 3; **ATR** is the range envelope for Step 5. **RSI / MACD / OBV here are multi-week state — they color the lean and the fragility check, never an intraday entry.** Output one line: "which direction am I *allowed* to scalp, and is it even a trend day." **State the override rule:** the intraday tape (VWAP + structure) overrules this daily bias for a same-day scalp — on a conflict, the tape wins; the daily read just sets the lean.
+Then (S&P complex only) call `get_dix_gex`: GEX sign + 1-month percentile (fragility), DIX accumulation/distribution as background. Skip for /MNQ.
 
-**Step 3 — level map.** Call `get_quote <reference>` (prev close, day H/L) + `get_timesales <reference>` (prior/current session, 15min) for the static pivots (SPX for /MES, NDX for /MNQ), expressed in **cash-index points then basis-shifted to the future** like the walls. Map and state as **price points**:
-- Prior-day high / low / close (the primary pivots).
-- Round numbers inside the range (these are the same on the futures scale — SPX 7600 is /MES 7600).
-- Key MAs from Step 2 (SMA50, SMA20), lower/upper Bollinger band.
-- Overnight / pre-market range; opening-range high/low; **VWAP** — these are **/MES-native intraday** reads, not a prep-time MCP pull (SPX-index intraday data via Tradier is thin, and the future is what trades overnight). The daemon computes /MES VWAP off its own tape; treat these as read off the live /MES chart, not scaled from SPX.
+Playbook:
+- **Positive GEX** → `regime: pin`. Fade walls back to flip/VWAP. Call wall caps, put wall supports.
+- **Positive GEX + low percentile (≤~10) / small total GEX** → `regime: fragile-pin`. Fade can round-trip; the wall for the verdict modes (`reversal`/`retest`).
+- **Negative GEX** → `regime: breakout-trend`. Trade the break, never fade. Zero-gamma flip = the trend-confirm line.
 
-For deeper structural S/R, defer to `/ta <reference>` (`/ta SPX` for /MES, `/ta NDX` for /MNQ) rather than re-deriving — reuse, don't duplicate.
+**Step 2 — daily bias.** Call `get_technical_indicators` (daily). Use: ADX (>25 trend, <20 chop) + ±DI (trend-day + direction); SMA20/SMA50 + Bollinger bands = levels for Step 3; ATR = range envelope for Step 5. RSI / MACD / OBV = multi-week color only, never intraday timing. Output one line: allowed scalp direction + is it a trend day. Tape overrules this daily bias on a conflict.
 
-**Step 4 — fragility check.** Flag anything that weakens the bias: daily OBV divergence (from Step 2), DIX accumulation-into-weakness, price sitting on a major level (bounce/break risk). If fragile → shrink size, shorten leash. **Caveat — daily OBV is a ~20-day signal:** it speaks to the *multi-week* structure (distribution vs accumulation), NOT whether a specific session's move had buyers. To judge participation of *today's / the prior session's* move, use **session volume vs avg + volume on the breakout/close bars** (`get_quote` + `get_timesales`), not daily OBV. Never read a 20-day divergence as "today's rally was hollow" — right signal, wrong altitude.
+**Step 3 — level map.** Call `get_quote <reference>` (prev close, day H/L) + `get_timesales <reference>` (prior/current session, 15min). Express in cash-index points, then basis-shift to the future. Map as prices:
+- Prior-day high / low / close.
+- Round numbers inside the range (same on both scales — SPX 7600 = /MES 7600 in points; still add basis to the *wall* prices from Step 1).
+- Key MAs (SMA50, SMA20), lower/upper Bollinger band.
+- Overnight/pre-market range, opening-range H/L, VWAP — /MES-native (daemon computes off its own tape; read off the live chart, not scaled from SPX).
 
-**Step 5 — the plan.** Output the day's structure tightly:
-- **The edges:** support edge ↔ resistance edge (the range you fade inside, or the breakout level you go with).
-- **Rank edges by confluence:** a Step-1 gamma wall (outer, structural) sitting on a Step-3 technical (prior-day H/L, VWAP, round number) is the highest-confidence edge — trade those first. A wall with no technical nearby is softer (OI-staleness-sensitive); a technical with no gamma behind it can slice through. Gamma supplies the *outer* edges; technicals supply the *inner* levels.
-- **Regime playbook:** pin = fade edges to VWAP; breakout = go-with on the pullback-hold, or stand aside (never fade a volume breakout).
-- **Invalidation:** the price that flips the regime (range edge breaking on volume = pin over).
-- **Expected range / sizing input:** ATR(14) from Step 2 as % of price → the realistic intraday range; size targets/stops as fractions of it.
+For deeper S/R defer to `/ta <reference>` (`/ta SPX` for /MES).
 
-**Step 6 — write the daemon's session plan (`~/.trading/scalp/{date}-{key}.yaml`).**
+**Step 4 — fragility check.** Flag: daily OBV divergence (Step 2), DIX accumulation-into-weakness, price sitting on a major level. Fragile → shrink size, shorten leash. Daily OBV is a ~20-day signal — for *today's* participation use session volume vs avg + breakout/close-bar volume (`get_quote` + `get_timesales`), not OBV.
 
-The `trading-scalper` paper daemon (see `docs/scalper-automation.md`) watches these same edges off the live **futures** tape and **paper-trades** them — auto-placing a direction-aware bracket in an in-memory broker so the detector builds a reviewable track record. The plan file **is** the handoff: prep draws the map (cash-index walls, shifted to the future by the carry basis), the daemon watches the future. Emit it now.
+**Step 5 — the plan.** Output tightly:
+- **Edges:** support edge ↔ resistance edge.
+- **Rank by confluence:** gamma wall (outer, structural) on a technical (prior-day H/L, VWAP, round number) = highest confidence, trade first. Wall with no technical = softer; technical with no gamma = can slice through.
+- **Regime playbook:** pin = fade edges to VWAP; breakout = go-with on the pullback-hold or stand aside (never fade a volume breakout).
+- **Invalidation:** the price that flips the regime.
+- **Expected range:** ATR(14) as % of price; size targets/stops as fractions of it.
 
-1. **Pick the resolution(s) per wall, then assign a direction to each.** The walls from Step 1 are the edges; *which resolution(s) you trade* at each edge is decided here — by the regime sign **and the wall's character**. A wall has three physical resolutions (touch-and-reject, cross-and-fail, cross-and-hold); the four modes express them. **The daemon never picks a mode — it executes whatever you write here, and can't recompute GEX intraday — so this is the only place the verdict modes get deployed. Don't default trend days to bare `break`; route to the tree:**
+**Step 6 — write the daemon's session plan** (`~/.trading/scalp/{date}-{key}.yaml`).
+
+1. **Pick resolution(s) per wall, then a direction for each** — by regime sign + wall character:
 
    | Regime (Step 1) | Wall character | Emit at the wall |
    |---|---|---|
-   | **+GEX pin** (healthy GEX) | clean magnet | **`fade`** only (mean-revert to the flip/VWAP). |
-   | **+GEX fragile-pin** (thin GEX / low percentile) | may round-trip the fade | **`fade`** + **`reversal`** + **`retest`** — *the* conflicted wall: fades if it holds, snaps back if it pokes-and-fails, goes with it if it breaks-and-holds. |
-   | **−GEX trend** | clean accelerant, price approaching with momentum from afar | **`break`** (catch the runaway) — or **`retest`** to enter patient and skip false breaks (accepts missing a runaway that never pulls back). |
-   | **−GEX trend** | conflicted: price wedged near / oscillating around the wall (the 6/22 type) | **`reversal`** + **`retest`**, drop `break` (a bare break round-trips here). |
+   | **+GEX pin** (healthy GEX) | clean magnet | **`fade`** only (mean-revert to flip/VWAP). |
+   | **+GEX fragile-pin** (thin GEX / low percentile) | may round-trip the fade | **`fade`** + **`reversal`** + **`retest`**. |
+   | **−GEX trend** | clean accelerant, momentum from afar | **`break`** — or **`retest`** to enter patient and skip false breaks. |
+   | **−GEX trend** | conflicted: price wedged near / oscillating the wall | **`reversal`** + **`retest`**, drop `break`. |
 
-   **Mode → trade direction** (the detector reads `direction` straight from the level — no contract):
-   - **`fade`** (mean-revert at the wall): put wall (support) → **long**, call wall (resistance) → **short**.
-   - **`break`** (fire on the cross, *with* it): resistance → **long** (up-break), support → **short** (down-break).
-   - **`retest`** (confirmed break, pull-back-and-resume — patient continuation): **same as `break`** — resistance → long, support → short.
-   - **`reversal`** (failed break, snap-back — *opposite* the attempt): **same as `fade`** — resistance → short (failed up-break, back down), support → long (failed down-break, back up).
+   **Mode → trade direction** (detector reads `direction` straight from the level):
+   - **`fade`** (mean-revert): put wall (support) → **long**, call wall (resistance) → **short**.
+   - **`break`** (fire on the cross, with it): resistance → **long** (up-break), support → **short** (down-break).
+   - **`retest`** (confirmed break, pull-back-and-resume): same as `break` — resistance → long, support → short.
+   - **`reversal`** (failed break, snap-back, opposite the attempt): same as `fade` — resistance → short, support → long.
 
-   **`side` = the break direction** (consistent across `break`/`reversal`/`retest`): `resistance` = an up-break, arm from below; `support` = a down-break, arm from above — so a downside breakdown of an *upper* wall is written `side: support`. For a `fade`, `side` is just the wall type. **Express a verdict wall as up to two rows at one price+side** — a `reversal` row + a `retest` row, each naming its own `direction`; one state machine per wall drives both and fires whichever resolves (use either alone or both).
+   **`side` = the break direction** (across `break`/`reversal`/`retest`): `resistance` = up-break, arm from below; `support` = down-break, arm from above — a downside breakdown of an upper wall is written `side: support`. For `fade`, `side` = the wall type. Express a verdict wall as up to two rows at one price+side (a `reversal` row + a `retest` row, each with its own `direction`); one state machine per wall drives both.
 
-   **Fire geometry + gating:** `fade` fires on a touch-and-reject within the band; `break` on a cross + follow-through; `reversal`/`retest` on the state machine's verdict (confirmation, not the bare cross). **`fade`/`break` also require tape confirmation** (a long wants buyers lifting offers, a short sellers hitting bids); **`reversal`/`retest` are geometry + lean only — NOT tape-gated** (the snap-back *timing* is the signal). `lean` gates trade *direction*: `long-only` permits any long (including a breakout long at a resistance wall), `short-only` any short, `both` either, `no-trade` none. Attach a `direction` **only** to the walls/resolutions the lean permits; leave the rest alert-only.
+   **Fire geometry + gating:** `fade` = touch-and-reject in the band; `break` = cross + follow-through; `reversal`/`retest` = the state machine's verdict. `fade`/`break` also require **tape confirmation** (long wants buyers lifting offers, short wants sellers hitting bids). `reversal`/`retest` are **geometry + lean only, NOT tape-gated**. `lean` gates trade direction: `long-only` permits any long, `short-only` any short, `both` either, `no-trade` none. Attach `direction` only to walls the lean permits; leave the rest alert-only.
 
-   **No contract to pick — the future *is* the instrument.** Add the live carry basis to each **cash-index** gamma wall to get its futures price (e.g. SPX 7600 + basis 50 → /MES 7650) and set the level `price` to the futures value; fetch the basis with `trading-scalper --basis` (RTH only — the cash index must be live). There is no expiry / strike / OCC step — that whole options layer is gone. Optionally set explicit `stop`/`target` futures prices per level; otherwise the plan's `default_stop_points` / `default_target_points` derive them from the level.
+   **Basis-shift each wall:** futures price = cash-index wall + live basis (SPX 7600 + basis 50 → /MES 7650); fetch with `trading-scalper --basis` (RTH only). Set level `price` to the futures value. Optionally set explicit `stop`/`target` futures prices; else `default_stop_points` / `default_target_points` derive them.
 
-2. **Write the file** (Write tool) to `~/.trading/scalp/{date}-{key}.yaml` — `{date}` = the session date `YYYY-MM-DD`, `{key}` = the plan `symbol` without the leading `/` and the `:XCME` suffix (e.g. `/MESU26:XCME` → `MESU26`; the daemon derives the same key from `--symbols`). Shape:
+2. **Write the file** (Write tool) to `~/.trading/scalp/{date}-{key}.yaml` — `{date}` = session date `YYYY-MM-DD`, `{key}` = plan `symbol` without the leading `/` and the `:XCME` suffix (`/MESU26:XCME` → `MESU26`). Shape:
 
 ```yaml
 date: 2026-07-12               # session date — MUST match the daemon's run date or it won't load
-symbol: /MESU26:XCME           # the current /MES front-month dxFeed streamer symbol (what dxFeed echoes as eventSymbol)
-regime: pin                    # pin | fragile-pin | breakout-trend  (from Step 1 GEX sign)
+symbol: /MESU26:XCME           # /MES front-month dxFeed streamer symbol
+regime: pin                    # pin | fragile-pin | breakout-trend  (Step 1 GEX sign)
 lean: both                     # long-only | short-only | both | no-trade  (Step 1 + Step 2)
 contracts: 1                   # qty per setup
 default_stop_points: 6         # child stop = level ∓ pts (below a long / above a short); each pt = $5
 default_target_points: 8       # child take-profit = level ± pts
-zero_gamma: 7625.0             # the gamma flip (SPX flip 7575 + basis 50) — bidirectional tripwire; alerts on a cross, no trade
-levels:                        # the gamma walls (SPX wall + basis); each names the trade DIRECTION if it tags
-  # POSITIVE GEX → fade: put wall (support) → long, call wall (resistance) → short
+zero_gamma: 7625.0             # gamma flip (SPX flip 7575 + basis 50) — bidirectional tripwire; alerts on a cross, no trade
+levels:                        # gamma walls (SPX wall + basis); each names the trade DIRECTION if it tags
   - {price: 7600.0, side: support,    mode: fade, direction: long,  stop: 7595.0, target: 7612.0}
   - {price: 7675.0, side: resistance, mode: fade, direction: short, stop: 7680.0, target: 7663.0}
-session_caps:                  # recorded for your discipline (see caveat) — not daemon-enforced
+session_caps:                  # recorded for discipline — not daemon-enforced
   max_trades: 3
   daily_stop_usd: 150
-notes: "Clean +GEX pin (SPX walls + ~50 basis). Fade the walls back to the 7625 zero-gamma flip; a break of 7625 on volume = regime flipped to trend — the tripwire pings, re-run /scalp prep (a fragile-pin or trend wall would instead carry reversal/retest rows, see below)."
+notes: "Clean +GEX pin. Fade the walls to the 7625 zero-gamma flip; a break of 7625 on volume = regime flipped — tripwire pings, re-run /scalp prep."
 ```
 
-**Verdict-wall shape** — a fragile-pin or −GEX conflicted wall, expressed as the two resolution rows at one price (the snap-back + the continuation). This example is an up-break of a resistance wall; for the 6/22-style *downside* breakdown, write `side: support` and flip the directions (reversal → long, retest → short):
+**Verdict-wall shape** — fragile-pin or −GEX conflicted wall, two resolution rows at one price. Up-break of a resistance wall shown; for a downside breakdown write `side: support` and flip directions (reversal → long, retest → short):
 ```yaml
   - {price: 7650.0, side: resistance, mode: reversal, direction: short, stop: 7655.0}
   - {price: 7650.0, side: resistance, mode: retest,   direction: long,  stop: 7644.0}
 ```
 
-**Verdict-mode calibration + caveats** (full log: memory `project-scalper-verdict-calibration`): timers/margins were **calibrated 2026-06-23** off the 6/18 (chop) + 6/22 (740 breakdown) tape. The 6/22 win replayed as a **`retest` GO_WITH** (confirmed breakdown → retest-fail → resume down), so the GO_WITH path is well-fit; the **`reversal` path is still lightly evidenced** (no clean fast-false-break in-window) — treat reversal fires especially as a *prompt to look*, not an auto-blessed bracket (the paper book records either way). **Don't arm verdict rows on a clean +GEX pin** — they belong on fragile-pin / trend / conflicted walls per the tree above; a clean pin is a `fade`/stand-aside day.
+3. **Caveats to state after writing:**
+   - **Bracket is absolute /MES points, not a premium %.** `default_stop_points`/`default_target_points` default 6 pt / 8 pt (stop below a long / above a short); explicit level `stop`/`target` wins. Each point = $5; daemon rounds children to the 0.25 tick. `level.stop` is load-bearing.
+   - **Cash-index wall + carry basis → the future.** Every `price`, `stop`, `target`, `zero_gamma` is a futures price. A wall left at cash-index scale tags ~50 pts early. Re-check the basis each session.
+   - **`mode` + tape gate the fire** (`fade`/`break`); `reversal`/`retest` are geometry + lean only. A confirmed setup on a crossed/locked book skips the paper fill (alerts only). No bare-touch heads-up.
+   - **`session_caps` recorded, not enforced** — honor them yourself.
+   - **Subscribe symbol fixed at launch** — a new front-month / symbol change mid-session needs a restart (levels/lean/direction hot-reload).
+   - **Graceful degrade:** a level with no `direction` is alert-only; no file = daemon silent.
+   - **`zero_gamma` always set** — use the `Zero-Gamma Flip` from Step 1. Bidirectional tripwire; on a cross the daemon alerts "re-run /scalp prep" (it never recomputes GEX).
+   - **Run it:** `uv run --package trading-scalper trading-scalper --symbols /MESU26:XCME`. Needs `[tastytrade]` in `~/.tradingrc` + a funded customer account for CME data. Streams the cash-index reference (auto-resolved; override `--reference`, disable `--reference ''`) and records the live carry basis (`{date}-basis.jsonl`, RTH only) + shadow volume telemetry (`{date}-tape.jsonl`, `{date}-shadow.jsonl`).
 
-**Always set `zero_gamma`** — a dedicated **bidirectional tripwire**, not a tradeable level: the daemon fires a *non-trading* "regime may be inverting — re-run `/scalp prep`" alert when the underlying crosses it either way. It's the cheap guard against the worst loss mode — a stale regime label feeding each level's `mode`, so the bot fades a level that's actually breaking. The daemon **never recomputes GEX** (the stream has no OI/greeks), so the flip stays this static number; on a cross, *you* re-pull the map. **Use the `Zero-Gamma Flip` from Step 1's output** — `get_gamma_profile`'s aggregate mode already sources the flip from the front (0-1DTE) expiration (the ≤7-DTE aggregate smears it — on real QQQ the aggregate flip came back degenerate above spot while the front expiration gave the clean near-spot pin ~720), so no second call is needed. The sources divide cleanly inside the one call: **front-exp → regime + flip; aggregate → walls** (and a `⚠ Regime Conflict` row when the two signs disagree).
+**No-trade day:** still write the file with `lean: no-trade` + reference levels but **no `direction` fields** — daemon prints the banner and stays silent.
 
-3. **State these caveats after writing — they are easy to get wrong:**
-   - **The bracket is in absolute /MES points/prices, not a premium %.** `default_stop_points` / `default_target_points` default to **6 pt / 8 pt** offsets from the level (stop below a long / above a short; target the mirror); an explicit `stop`/`target` price on a level wins. On /MES **each point = $5** (a 6-pt stop risks $30/contract), and the daemon rounds every child to the 0.25 tick. `level.stop` is now **load-bearing** — the real paper stop, not alert-text.
-   - **Cash-index wall + carry basis → the future.** Every level `price`, `stop`, `target`, and `zero_gamma` is a futures price (~7600 for /MES), i.e. the cash-index gamma wall + the live basis (`trading-scalper --basis`). A wall left at cash-index scale tags ~50 pts early (for /MES) — the futures tape trades above cash by the carry. Re-check the basis each session (it decays into expiry and jumps at the quarterly roll).
-   - **`mode` + tape gate the fire** (`fade`/`break` only). `fade` fires on a touch-and-reject within the band; `break` fires only after price crosses the wall with follow-through. Both also need the **tape to confirm** (a long needs buyers lifting offers; a short needs sellers hitting bids). **`reversal`/`retest` are the exception — geometry + lean only, NOT tape-gated.** A confirmed setup on a crossed/locked book skips the paper fill (alerts only). There is **no bare-touch heads-up**: an unconfirmed tag stays silent.
-   - **`session_caps` are recorded, not enforced.** The paper daemon has no discipline engine; max-trades / daily-stop live in the file for *your* record (and the Step 7 checklist) — honor them yourself.
-   - **The subscribe symbol is fixed at launch.** The daemon subscribes to `symbol` at startup; a new front-month contract (or a symbol change) mid-session needs a restart (levels/lean/direction still hot-reload for alerting).
-   - **Graceful degrade:** a level with no `direction` is alert-only; no file at all = the daemon stays silent.
-   - **Run it:** `uv run --package trading-scalper trading-scalper --symbols /MESU26:XCME` (the plan's `symbol`). Needs `[tastytrade]` in `~/.tradingrc` (DXLink feed) + a funded customer account for CME data. It also streams the **cash-index reference** (auto-resolved from the symbol — SPX for /MES, NDX for /MNQ; override with `--reference`) and records the **live carry basis** (`{date}-basis.jsonl`, shadow — gating nothing; valid RTH only, when the cash index is live) plus shadow volume telemetry (`{date}-tape.jsonl` raw futures tape + `{date}-shadow.jsonl` POC/value-area + volume-rate snapshots). Disable the basis with `--reference ''`. After the close, `/scalp review` grades the daemon's paper record (`{date}.jsonl` + `{date}-signals.jsonl` + `{date}-summary.json`) and the shadow observers.
-
-**No-trade day:** still write the file with `lean: no-trade` and your reference levels but **no `direction` fields** — the daemon prints the banner and stays silent (never prompts, never paper-trades).
-
-**Step 7 — the discipline checklist (ALWAYS print this last, verbatim-style):**
+**Step 7 — discipline checklist (ALWAYS print last):**
 
 > **Before blessing every level in the plan:**
-> - [ ] Name the **level + target + stop** (all /MES prices). Can't name all three → it's not a level, leave it alert-only.
-> - [ ] **Hard stop is real** (points × $5 = the risk; e.g. 6 pt = −$30/contract). No negotiation, no "it'll come back."
-> - [ ] The edge is a **named confluence** (gamma wall on a technical), not the middle of the range.
-> - [ ] The mode is **not a chase** — `retest`/`reversal` over bare `break` where the wall is conflicted.
+> - [ ] Name the **level + target + stop** (all /MES prices). Can't name all three → alert-only.
+> - [ ] **Hard stop is real** (points × $5 = risk; 6 pt = −$30/contract). No negotiation.
+> - [ ] The edge is a **named confluence** (gamma wall on a technical), not the middle.
+> - [ ] The mode is **not a chase** — `retest`/`reversal` over bare `break` on a conflicted wall.
 > - [ ] `contracts` is **A+-only size**; a marginal edge is 1 lot or alert-only.
-> - [ ] The regime is one the day actually supports (don't arm verdict rows on a clean pin).
+> - [ ] The regime supports it (no verdict rows on a clean pin).
 >
-> **Session caps:** max __ trades, daily stop −$__ (ask the user to set both if not already fixed). These are the `session_caps` values in the Step 6 daemon plan — the daemon records them, but they're your discipline reference (it doesn't enforce them, and paper P&L isn't real money — the point is the *habit*).
+> **Session caps:** max __ trades, daily stop −$__ (ask the user to set both if unset). These are `session_caps` — recorded, not enforced; the point is the habit.
 
 ---
 
-## Mode `review` — post-session trade grading
+## Mode `review` — post-session grading
 
-The feedback loop on the **paper detector** — the bot's own track record. There's no real futures account yet, so review grades the daemon, not your fills (when you open one, add a real-fills grade back here). Run after the close (or when the user says "done").
+Grades the paper detector (no real account yet). Run after the close.
 
-**Step 1 — grade the paper detector (the tracker).** The daemon keeps its track record under `~/.trading/scalp/paper/` — it paper-trades every confirmed fire. Grade it; this is what builds the verdict-mode calibration evidence (`project-scalper-verdict-calibration`) and the go-live gate sample.
-- Read the three joinable artifacts: `{date}-summary.json` (realized P&L + `n_fills`, recomputed restart-safe from the log), `{date}-signals.jsonl` (one row per **fire** — `mode` / `side` / `level` / `confirming` / `bracket_id` + the recorded B4 telemetry), and `{date}.jsonl` (one row per **fill** — each carries `bracket_id` + `realized_delta`, the win/loss label on the close).
-- **Join fires → outcomes on `bracket_id`** (a fire's `bracket_id` = the entry-order id shared by its bracket's fills; `null` = an alert-only / spread-suppressed fire that placed no paper trade). The key is recorded — no fragile symbol+timestamp reconstruction.
-- **Grade by mode.** Tally fade / break / reversal / retest fires and their paper win/loss + per-contract magnitude (each /MES point = $5). The verdict modes are what to watch: GO_WITH/`retest` is well-fit, **`reversal` is still thin** — note *every* new reversal/retest sample and append it to `project-scalper-verdict-calibration` (the calibration log needs in-window failed-break samples). **The 0.4 (futures) cohort starts fresh** — the QQQ-era counts don't carry into it.
-- **Machine-gun check.** Fires-per-level — the per-level cooldown should keep this low. A level with many fires = the cooldown isn't biting, or the regime gate should have sat the day out; flag it. (The detector's geometry *constants* — tolerance/margins — were rescaled ~10× from the QQQ base for the /MES point magnitude and are still recalibrating; this is separate from the level map, which is now cash-index walls + carry basis, not ×10. Watch for a band that's now mis-scaled — and note the bands are **per-instrument** now (`Geometry` in `instruments.py`: `_SP500_GEOMETRY` for /MES, `_NASDAQ_GEOMETRY` for /MNQ), so a mis-scale is fixed on the instrument that owns it — see the tuning section below.)
-- **Cross-session cohort status — run the scorecard, don't hand-tally.** The by-mode counts above are the *single-session* read (what fired today, cooldown check, new verdict sample). For where the *accumulated* record stands against the go-live gate, run `uv run --package trading-scalper trading-scalper-scorecard` — the authoritative per-(version cohort × instrument root × mode) tally (n / win rate / expectancy + 95% LB / profit factor / max DD / session concentration) plus the per-(root, mode) current-cohort gate verdict (`project-scalper-golive-gate`); each instrument is graded and promoted on its own record. Prefer it over recomputing from the JSONLs. **Cadence — don't reprint the full table every session:** the gate needs n≥50 per cohort, so one session barely moves it. Surface just the **one-line current-cohort gate status** each review (keeps the finish line visible); pull the full table + `--chart` deliberately — right after a version bump (confirm the cohort reset) or as a mode climbs toward n=50. Going live is a periodic decision — pull the full read at a deliberate checkpoint, not every session.
+**Step 1 — grade the paper detector.** Read three joinable artifacts under `~/.trading/scalp/paper/`: `{date}-summary.json` (realized P&L + `n_fills`), `{date}-signals.jsonl` (one row per **fire** — `mode`/`side`/`level`/`confirming`/`bracket_id` + B4 telemetry), `{date}.jsonl` (one row per **fill** — `bracket_id` + `realized_delta`).
+- **Join fires → outcomes on `bracket_id`** (`null` = alert-only / spread-suppressed fire).
+- **Grade by mode.** Tally fade/break/reversal/retest fires + paper win/loss + per-contract magnitude ($5/pt). Append every new `reversal`/`retest` sample to `project-scalper-verdict-calibration`. The 0.4 (futures) cohort starts fresh.
+- **Machine-gun check.** Fires-per-level; many fires = cooldown not biting or the regime should have sat out — flag it. Bands are per-instrument (`Geometry` in `instruments.py`); a mis-scale is fixed on the owning instrument (see tuning section).
+- **Cohort status — run the scorecard, don't hand-tally.** `uv run --package trading-scalper trading-scalper-scorecard` — per-(version cohort × instrument root × mode) tally (n / win rate / expectancy + 95% LB / profit factor / max DD / session concentration) + the per-(root, mode) gate verdict. **Cadence:** surface the one-line current-cohort gate status each review; pull the full table + `--chart` deliberately (right after a version bump, or as a mode climbs toward n=50).
 
-**Step 2 — grade the shadow observer (VAP + volume-rate) — SHADOW, evidence-only.** The shadow recorder (`feedback_shadow_then_live`) writes `{date}-tape.jsonl` (raw /MES tape) + `{date}-shadow.jsonl` (POC / value-area + volume-rate snapshots). It **gates nothing** — this step only accumulates the evidence to settle whether the break-side VAP read predicts a runner (`project-scalper-improvements` open #1). It must NOT change how the trades above were graded.
-- **The decision artifact is a contingency table.** For each wall cross this session: was the break side a **void** or an **HVN** (`VolumeProfile.break_side_read`, or rebuilt from `{date}-tape.jsonl`), and did price then **run** or **oscillate**? Reconstruct from the plan's walls (`{date}-{key}.yaml`) + the raw tape — find each cross, classify the break side, label ran-vs-oscillated from the subsequent path. Add this session's row(s) to the void→ran / hvn→oscillated table in `project-scalper-improvements` open #1.
-- **Volume-rate (lower priority).** At each cross/fire, was the move on expanding or contracting volume (`ratio` >1 / <1)? Note whether expansion lined up with the paper winners — but this is the **confidence/size modulator** idea, **never a fire gate** (B4 died gating on tape; 6/29's retest won against an 8:1 sell tape).
-- **Stay shadow until it separates.** n is tiny — one session is one or two rows; don't over-conclude from a single day, and do not wire the read into the plan or the daemon. The promotion bar is the table separating across multiple conflicted-box sessions (`feedback_shadow_then_live`).
+**Step 2 — grade the shadow observer (VAP + volume-rate) — SHADOW, gates nothing.** The recorder writes `{date}-tape.jsonl` (raw tape) + `{date}-shadow.jsonl` (POC/value-area + volume-rate). This step only accumulates evidence (`project-scalper-improvements` open #1); it must NOT change Step 1's grades.
+- **Contingency table.** For each wall cross: break side = **void** or **HVN** (`VolumeProfile.break_side_read` or rebuilt from tape), and did price **run** or **oscillate**? Add the row(s) to the void→ran / hvn→oscillated table in `project-scalper-improvements` open #1.
+- **Volume-rate.** At each cross/fire, expanding or contracting volume (`ratio` >1 / <1)? Note whether expansion lined up with winners — modulator idea, never a fire gate.
+- **Stay shadow.** n is tiny; don't over-conclude or wire it in.
 
-**Step 3 — basis drift (the cash-index↔future carry) — SHADOW, evidence-only.** The basis recorder (`basis.py`, `feedback_shadow_then_live`) writes `{date}-basis.jsonl` — periodic `{future_price, reference_level, basis}` snapshots. It **gates nothing**; this step accumulates the data that settles the **static-offset vs live-cash-space (index-trigger)** decision (`project-scalper-wall-source`).
-- **Read RTH rows only.** The cash index freezes off-hours, so a row whose `reference_level` is *unchanged* from the prior row is a live-future − frozen-index reading — drop it. The valid rows are the contiguous stretch where `reference_level` is **moving** (≈ 13:30–20:00 UTC in EDT / 14:30–21:00 in EST; the moving-`reference_level` test is the robust filter, DST-proof).
-- **Report the RTH basis range:** min / max / mean and the **intraday drift** (max − min), one line — "today RTH basis = X.X ± , drift Z.Z pt." That drift *is* the cost of a per-session baked offset: ≪ a scalp's few points → the shipped futures-trigger + static-shift keeps ~all its value (and its tape gate + 23h + futures lead), so leave it; several points → the index-trigger / live-cash-space option gets attractive (revisit, possibly `reversal`/`retest`-in-index-space only, since those don't need the tape).
-- **Sanity vs carry:** basis should be a smooth, mildly-decaying positive number (financing − dividends), ~0 near expiry, **jumping up at the quarterly roll**. A mid-session discontinuity = a roll (symbol changed) or an off-hours row that slipped the filter — flag it, don't average across it.
-- **Stay shadow.** Don't wire the measured basis into prep or the detector yet; it's a multi-session read.
+**Step 3 — basis drift — SHADOW, gates nothing.** `basis.py` writes `{date}-basis.jsonl` (`{future_price, reference_level, basis}` snapshots). Accumulates the static-offset vs live-cash-space decision (`project-scalper-wall-source`).
+- **RTH rows only.** Drop rows whose `reference_level` is unchanged from the prior row (frozen off-hours index). Valid = the contiguous moving-`reference_level` stretch.
+- **Report the RTH basis range:** min / max / mean + intraday drift (max − min), one line. Drift ≪ a scalp's few points → keep the static shift; several points → the index-trigger option gets attractive (revisit).
+- **Sanity vs carry:** smooth mildly-decaying positive, ~0 near expiry, jumps up at the quarterly roll. A mid-session discontinuity = a roll or an off-hours row that slipped the filter — flag, don't average across it.
+- **Stay shadow.**
 
 ---
 
 ## Tuning the detector — recalibrate a cohort's geometry (periodic, deliberate)
 
-The detector ships with **first-cut** constants (the /MES set was scaled ~10× off the QQQ tape; `_NASDAQ_GEOMETRY` is an uncalibrated ×4 placeholder). The **review record** is what earns a change — this is a **cross-session, cohort-level** action, NOT a per-session knob-twiddle. Do it when the review's single-session diagnostics (machine-gun check, false-break / missed-retest notes) show a **systematic** band problem across enough samples, or when a mode is climbing toward the go-live gate with a visibly mis-scaled band.
+Cross-session, cohort-level — NOT a per-session knob. Do it when review diagnostics (machine-gun, false-break / missed-retest) show a **systematic** band problem across enough samples, or a mode climbing the gate with a visibly mis-scaled band.
 
-**1. Two homes, split by whether the knob scales with the instrument** (the `Geometry` split, `project-scalper-wall-source`):
-- **Price-distance bands** (`tolerance`, `break_margin`, `min_break_excursion`, `follow_through_margin`, `reentry_margin`, `retest_proximity`, `flip_margin`, `rearm_margin`) → **`instruments.py`**, on the traded instrument's `Geometry`: `_SP500_GEOMETRY` (/MES, /ES) or `_NASDAQ_GEOMETRY` (/MNQ, /NQ). Fix the mis-scale on the instrument that owns it — a /MES tune must not touch the Nasdaq bands. **`_NASDAQ_GEOMETRY` is the first real calibration target the moment a /MNQ cohort exists** (it's a price-ratio guess today).
-- **Time windows** (`cooldown_s`, `confirm_s`, `failure_window_s`, `retest_window_s`, `gap_s`, `window_s`) → **`detector.py` / `breakout.py`** defaults. These do NOT scale with the instrument, so a change here applies across instruments — weigh it against every cohort, not just the one you're staring at.
+**1. Two homes:**
+- **Price-distance bands** (`tolerance`, `break_margin`, `min_break_excursion`, `follow_through_margin`, `reentry_margin`, `retest_proximity`, `flip_margin`, `rearm_margin`) → `instruments.py`, on the instrument's `Geometry` (`_SP500_GEOMETRY` for /MES,/ES; `_NASDAQ_GEOMETRY` for /MNQ,/NQ). Fix on the owning instrument only.
+- **Time windows** (`cooldown_s`, `confirm_s`, `failure_window_s`, `retest_window_s`, `gap_s`, `window_s`) → `detector.py` / `breakout.py` defaults. These apply across instruments — weigh against every cohort.
 
-**2. Symptom → knob** (read from the review's by-mode tally + machine-gun check):
+**2. Symptom → knob:**
 
 | Review symptom | Likely knob | Direction |
 |---|---|---|
-| Machine-gun: many fires per level on a pin | `tolerance` (band too wide) / `cooldown_s` (too short) | narrow / lengthen |
+| Machine-gun: many fires per level on a pin | `tolerance` / `cooldown_s` | narrow / lengthen |
 | `break` fires then round-trips (false breaks graded losses) | `break_margin` / `min_break_excursion` | widen |
-| `retest` never fires though the break-and-pullback happened | `retest_window_s` (too short) / `retest_proximity` (too tight) | lengthen / widen |
-| `reversal` fires on what became a real trend (should have held) | `failure_window_s` (too long) | shorten |
-| Flip tripwire chatters on noise at the line | `flip_margin` | widen |
+| `retest` never fires though break-and-pullback happened | `retest_window_s` / `retest_proximity` | lengthen / widen |
+| `reversal` fires on what became a real trend | `failure_window_s` | shorten |
+| Flip tripwire chatters on noise | `flip_margin` | widen |
 
-**3. THE discipline — spawn a fresh cohort for what changed, and only that.** The scorecard grades **per (version cohort × instrument root × mode)** (`project-scalper-golive-gate`); the go-live gate and the git-tag promotion are per (root, mode), so /MES clearing a mode never green-lights /MNQ. A tunable change **must** start a clean cohort for the affected instrument(s) so the gate never averages pre- and post-tune fills — but scope the reset to what actually changed:
-   - **Shared-logic change** (`detector.py` / `breakout.py` / time windows / bracket / arming) → bump `version.py` `__version__`. Correct that this resets **all** roots — you changed code that drives every instrument, so all must re-prove.
-   - **One instrument's geometry** (`instruments.py` `_SP500_GEOMETRY` / `_NASDAQ_GEOMETRY`) → should reset **only that root**. The clean mechanism is a per-instrument geometry *generation* stamped on the fire (deferred — not built, since only /MES has a live cohort today). **Until it exists:** tuning the *only* instrument with data (/MES now) can just bump the global version — there's no other cohort to protect. Once a second instrument (/MNQ) has a live cohort, build the geometry-generation stamp *before* tuning either one, so a /MNQ recalibration doesn't wipe /MES's evidence.
+**3. Discipline — spawn a fresh cohort for what changed:**
+- **Shared-logic change** (`detector.py` / `breakout.py` / time windows / bracket / arming) → bump `version.py` `__version__`. Resets **all** roots.
+- **One instrument's geometry** (`instruments.py`) → should reset only that root. The per-instrument geometry-generation stamp is deferred; until it exists, tuning the only instrument with data (/MES) can bump the global version. Once /MNQ has a live cohort, build the stamp *before* tuning either.
 
-   Corollary either way: **tune in a batch, not knob-by-knob** — every reset restarts the climb to n≥50 / ≥10 sessions for the affected root. Log the change + rationale in `project-scalper-verdict-calibration` (the calibration log; the 6/23 QQQ pass is the precedent), then re-run `trading-scalper-scorecard` to confirm the reset.
+Corollary: **tune in a batch, not knob-by-knob** — every reset restarts the climb to n≥50 / ≥10 sessions. Log the change + rationale in `project-scalper-verdict-calibration`, then re-run the scorecard to confirm the reset.
 
-**Never tune to a single session, and never tune when the *market* was what changed** — a regime the map mishandled is a prep problem (wrong `mode`), not a geometry problem. Geometry moves only on a pattern the *paper record* shows repeatedly.
+**Never tune to a single session, and never when the *market* changed** — a regime the map mishandled is a prep problem (wrong `mode`), not geometry. Geometry moves only on a pattern the paper record shows repeatedly.
 
 ---
 
 ## Mode `check` — thin live snapshot (use sparingly)
 
-A quick "where are we" relative to the prep map. **This is lagging context — the live chart + the daemon's own prompts are the real-time surface. Do not use this to chase.**
+Lagging context — the live chart + daemon prompts are the real-time surface. Do not chase.
 
-Get the live **futures** price directly with `trading-scalper --basis` — it prints the front-month price (the actual tradeable number, no proxy) and the current carry basis. Add `get_quote <reference>` (SPX for /MES, NDX for /MNQ) for cash context. Compare the futures price straight against the level map. For /MES VWAP / intraday structure, read the running daemon's shadow snapshot (`~/.trading/scalp/paper/{date}-shadow.jsonl`, latest POC/value-area) or the live /MES chart — there's no MCP intraday feed for the future. Output 3 lines max:
-- **Price vs VWAP** (side + slope, from the daemon shadow / chart) and distance to the nearest mapped edge.
-- **Recent volume** behavior (expanding into a move = real; fading = suspect).
-- **One verdict:** *"at an edge — here's the setup (level/target/stop)"* OR *"middle of range — no trade"* OR *"trigger fired: [what]."*
+Call `trading-scalper --basis` (prints the front-month futures price + current carry basis). Add `get_quote <reference>` for cash context. Compare the futures price against the level map. For /MES VWAP / structure read the daemon's shadow snapshot (`~/.trading/scalp/paper/{date}-shadow.jsonl`, latest POC/value-area) or the live chart. Output 3 lines max:
+- **Price vs VWAP** (side + slope) + distance to the nearest mapped edge.
+- **Recent volume** (expanding into a move = real; fading = suspect).
+- **One verdict:** "at an edge — setup (level/target/stop)" OR "middle of range — no trade" OR "trigger fired: [what]."
 
-Never expand `check` into a trade recommendation beyond naming the setup at an edge. If price is mid-range, the only correct answer is "no trade, wait."
+Mid-range → the only answer is "no trade, wait."
 
 ---
 
-*v1. If scalping matures across sessions, extract the framework + regime playbook into `docs/scalping-playbook.md` and reference it here (the way `/ta` references its playbooks), rather than growing this file.*
+*v1. If scalping matures across sessions, extract the framework + regime playbook into `docs/scalping-playbook.md` and reference it here.*
