@@ -42,9 +42,6 @@ class NormalizedPosition:
     strike: float = 0.0
     expiration: str | None = None
     strategy: str = ""
-    # Tradier-only: signed total cost basis (positive even for shorts) so the
-    # fetch layer can compute sign-correct P&L; other providers leave it 0.0.
-    cost_basis: float = 0.0
 
 
 @dataclass

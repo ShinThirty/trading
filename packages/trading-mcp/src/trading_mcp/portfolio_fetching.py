@@ -99,8 +99,10 @@ async def _enrich_tradier_positions(
     """Tradier positions carry no price — fill last/value/pnl from one batched
     quote and return the account's day P&L (Σ quote change × signed qty × mult).
 
-    Short P&L is sign-aware: Tradier reports cost_basis positive even for shorts,
-    so pnl = sign(qty)·(|last·qty·mult| − cost_basis), not value − cost_basis.
+    Short P&L is sign-aware: pnl = sign(qty)·(|last·qty·mult| − total_cost),
+    where total_cost = cost·|qty|·mult. `cost` is the per-unit magnitude of
+    Tradier's signed cost_basis (negative credit for shorts), so this is
+    correct for longs and shorts alike.
     """
     if not positions:
         return 0.0
@@ -121,13 +123,13 @@ async def _enrich_tradier_positions(
         qty = p.quantity
         mult = CONTRACT_MULTIPLIER if p.is_option else 1
         last = last_by.get(p.symbol, 0.0)
-        cost_basis = p.cost_basis
+        total_cost = p.cost * abs(qty) * mult
         sign = 1.0 if qty >= 0 else -1.0
-        pnl = sign * (last * abs(qty) * mult - cost_basis)
+        pnl = sign * (last * abs(qty) * mult - total_cost)
         p.last = last
         p.value = last * qty * mult
         p.pnl = pnl
-        p.pnl_pct = (pnl / abs(cost_basis) * 100) if cost_basis else 0.0
+        p.pnl_pct = (pnl / total_cost * 100) if total_cost else 0.0
         day_pnl += change_by.get(p.symbol, 0.0) * qty * mult
     return day_pnl
 

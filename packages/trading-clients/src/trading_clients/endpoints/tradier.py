@@ -546,8 +546,9 @@ class AccountPositionsResponse:
     def to_normalized(self) -> list[NormalizedPosition]:
         """Normalize for aggregation. Tradier positions carry no price, so
         last/value/pnl are left at 0.0 — the fetch layer fills them from a
-        batched quote. `cost` is per-unit; `cost_basis` keeps the signed total
-        for sign-correct P&L (Tradier reports cost_basis positive for shorts)."""
+        batched quote. Tradier reports cost_basis as a signed total (negative
+        credit for shorts); `cost` keeps its per-unit magnitude — positive for
+        shorts too, matching other brokers."""
         result: list[NormalizedPosition] = []
         for p in self.positions:
             symbol = p.get("symbol", "")
@@ -560,8 +561,7 @@ class AccountPositionsResponse:
                 symbol=symbol,
                 quantity=qty,
                 last=0.0,
-                cost=cost_basis / denom,
-                cost_basis=cost_basis,
+                cost=abs(cost_basis) / denom,
                 value=0.0,
                 pnl=0.0,
                 pnl_pct=0.0,
