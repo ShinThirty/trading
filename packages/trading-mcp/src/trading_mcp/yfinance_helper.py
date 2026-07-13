@@ -10,6 +10,7 @@ from trading_mcp.helpers import _cached
 _cache = TTLCache()
 _TTL_FUNDAMENTALS = 3600
 _TTL_SCREENER = 300
+_TTL_QUOTE = 60
 
 
 class _yfc:
@@ -135,6 +136,67 @@ class _yfc:
             return yf.Ticker(s).get_analyst_price_targets() or {}
 
         return await _cached(_cache, f"targets:{symbol}", _TTL_FUNDAMENTALS, _uncached, symbol)
+
+    @staticmethod
+    async def global_quote(symbol: str) -> dict:
+        """Latest daily bar + metadata for any Yahoo symbol, including foreign
+        listings ('000660.KS', '7203.T'). Returns {} when Yahoo has no data.
+        While the home market trades the last bar is Yahoo's ~15-20 min delayed
+        price; after its close it is the official close."""
+
+        def _uncached(s: str) -> dict:
+            tk = yf.Ticker(s)
+            hist = tk.history(period="10d", interval="1d", auto_adjust=False)
+            if hist is None or hist.empty:
+                return {}
+            bar = hist.iloc[-1]
+            out: dict = {
+                "symbol": s,
+                "date": hist.index[-1].strftime("%Y-%m-%d"),
+                "open": float(bar["Open"]),
+                "high": float(bar["High"]),
+                "low": float(bar["Low"]),
+                "close": float(bar["Close"]),
+                "volume": float(bar["Volume"]),
+            }
+            if len(hist) > 1:
+                out["prev_close"] = float(hist["Close"].iloc[-2])
+            try:
+                fi = tk.fast_info
+                out["currency"] = str(fi["currency"])
+                out["exchange"] = str(fi["exchange"])
+            except Exception:
+                pass  # metadata is best-effort; prices already set
+            return out
+
+        return await _cached(_cache, f"gquote:{symbol}", _TTL_QUOTE, _uncached, symbol)
+
+    @staticmethod
+    async def fx_rate(pair: str) -> dict:
+        """FX rate for a 6-letter pair ('USDKRW') via Yahoo '{pair}=X'.
+        Rate = quote-currency units per 1 base-currency unit. Returns {} when
+        Yahoo has no data; 'asof' is 'live' from fast_info or the daily bar
+        date on fallback."""
+
+        def _uncached(p: str) -> dict:
+            tk = yf.Ticker(f"{p}=X")
+            rate = 0.0
+            try:
+                rate = float(tk.fast_info["lastPrice"])
+            except Exception:
+                rate = 0.0
+            if rate > 0:
+                return {"pair": p, "rate": rate, "asof": "live"}
+            hist = tk.history(period="5d", interval="1d")
+            if hist is None or hist.empty:
+                return {}
+            return {
+                "pair": p,
+                "rate": float(hist["Close"].iloc[-1]),
+                "asof": hist.index[-1].strftime("%Y-%m-%d"),
+            }
+
+        return await _cached(_cache, f"fx:{pair}", _TTL_QUOTE, _uncached, pair)
 
     @staticmethod
     async def exchange_code(symbol: str) -> str | None:

@@ -77,6 +77,7 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │       ├── reddit_client.py         # Reddit JSON API (search, subreddit, post); httpx fetch + Playwright-minted loid cookie (anonymous .json is 403-blocked); takes PlaywrightHost
 │   │       ├── playwright_host.py       # Shared Chromium process (one Browser, many isolated Contexts) used by all Playwright-backed clients
 │   │       ├── sentiment_client.py      # Playwright-based scraper (CBOE p/c, AAII); takes PlaywrightHost
+│   │       ├── adr.py                   # ADR/ADS parity math: fair value + premium vs home listing (pure, no I/O)
 │   │       ├── bsm.py                   # Black-Scholes-Merton option pricing (pure math, no I/O)
 │   │       ├── btc_regime.py            # BTC macro regime classification (pure functions)
 │   │       ├── indicators.py            # Technical analysis indicators on OHLCV bars (pure functions)
@@ -136,7 +137,8 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │       └── tools/                   # Subdomain-organized tool modules
 │   │           ├── account.py           # Balances, positions, orders, activities, instruments, portfolio aggregates (Webull + Tradier + TastyTrade + SnapTrade read-only; per-broker get_<broker>_* tools)
 │   │           ├── orders.py            # Place/preview/replace/cancel orders, order history
-│   │           ├── quotes.py            # Stock/option quotes, history, intraday, technicals, clock
+│   │           ├── quotes.py            # Stock/option quotes, history, intraday, technicals, clock,
+│   │           │                        #   foreign-market quotes (Yahoo), FX rates, ADR parity gauge
 │   │           ├── options.py           # Chains, expected move, strategy/roll analysis,
 │   │           │                        #   IV metrics, comparators, projection grid, CC overlay
 │   │           ├── fundamentals.py      # Financials, profile, EPS estimates, ownership,
@@ -279,7 +281,7 @@ signature) handles button clicks (`mute:<seconds>:<dedup_key>`) and the
 | **EIA** | Weekly Petroleum Status Report — crude/product stocks, refinery utilization, retail gasoline. WPSR Wed 10:30 ET. Used during oil-price / inflation events; informs CPI energy, consumer demand destruction, Fed policy path. | API key (free, [register](https://www.eia.gov/opendata/register.php)) |
 | **TastyTrade** | IV rank/percentile, backtesting, watchlists, dividends; read-only account (accounts, balances, positions, orders) folded into the portfolio aggregation; **DXLink (dxFeed) futures streaming** — the scalper's /MES feed via `get_quote_token` + `dxlink_stream_client.py` (needs a funded customer account for CME data); **futures instrument metadata** (`/instruments/futures`) — the exchange's own `active-month` flag, dxFeed streamer symbol, `notional-multiplier` and `tick-size` per contract, which the scalper resolves against instead of guessing the roll from date math | OAuth2 refresh token |
 | **SnapTrade** | Read-only Fidelity/NetBenefits holdings (401k, BrokerageLinks, HSA, IRAs) via Akoya — the Fidelity source in the portfolio aggregation, replacing the retired CSV export. Standalone read tools at parity with the other brokers: `get_snaptrade_accounts` / `_balances` / `_positions` / `_activities` (transaction history — fills, dividends, option assignment/expiration — since SnapTrade exposes no order-status read). Brokerages connected in the SnapTrade dashboard; accounts included automatically when `[snaptrade]` is configured. | Personal API key (clientId + consumerKey; HMAC-SHA256 request signature) |
-| **Yahoo Finance** | Stock screener, institutional ownership | None (via yfinance) |
+| **Yahoo Finance** | Stock screener, institutional ownership; foreign-market quotes (`get_global_quote` — Korea/Japan/Taiwan/Europe, complements Tradier US + AKShare China), live FX rates (`get_fx_rate`), ADR/ADS parity gauge (`get_adr_premium`, e.g. SKHY vs Seoul 000660) | None (via yfinance) |
 | **Motley Fool** | Earnings call transcripts (scraped, primary source) | None |
 | **Morningstar** | Earnings call transcripts (Playwright fallback for tickers Fool misses — small caps, foreign issuers). URL is `/stocks/{xase\|xnys\|xnas}/{ticker}/earnings-transcript`; AWS WAF JS challenge requires headless-Chromium with `navigator.webdriver` mask. | None (Playwright) |
 | **SEC EDGAR** | All filings: tier-classified recent-filings index (10-Q/10-K/8-K/13D/Form 4/S-3/DEF 14A/etc.); cleaned section extraction (MD&A, risk factors, segments, cash-flow narrative, business overview); 10-K Item 1A risk-factor diff vs prior year; 8-K Ex 99.x exhibit fetch; pipeline-wide filings sweep | None (User-Agent only) |

@@ -1,13 +1,17 @@
-"""Equity and option quotes, history, intraday data, technical indicators, market clock."""
+"""Equity and option quotes, history, intraday data, technical indicators, market clock,
+plus Yahoo-sourced foreign-market quotes, FX rates, and ADR parity."""
 
 import asyncio
+from datetime import date
 
 from fastmcp import Context, FastMCP
 from trading_clients import indicators as ta
+from trading_clients.adr import compute_adr_parity
 from trading_clients.endpoints import tradier as t
-from trading_clients.table_helpers import fmt_number, kv_table, list_table
+from trading_clients.table_helpers import fmt_large, fmt_number, kv_table, list_table
 
 from trading_mcp.helpers import _tradier
+from trading_mcp.yfinance_helper import _yfc
 
 mcp = FastMCP("quotes-tools")
 
@@ -73,6 +77,140 @@ async def get_quote(ctx: Context, symbols: str, greeks: bool = False) -> str:
     Requires [tradier] section in ~/.tradingrc.
     """
     return (await _tradier(ctx).get(t.QUOTES, t.GetQuotesRequest(symbols, greeks))).to_output()
+
+
+@mcp.tool()
+async def get_global_quote(ctx: Context, symbols: str) -> str:
+    """Get quotes for foreign-listed tickers via Yahoo Finance — the complement to
+    get_quote (US markets, Tradier) and get_cn_quote (China A-shares) for markets
+    neither covers: Korea, Japan, Taiwan, Europe, etc.
+
+    Prices are the latest daily bar: ~15-20 min delayed while the home market
+    trades, the official close after it closes. Output includes the bar date —
+    check it when the home market's holiday calendar differs from the US one.
+
+    symbols: comma-separated Yahoo symbols with exchange suffix
+      (e.g. '000660.KS' Korea, '7203.T' Tokyo, '2330.TW' Taiwan, 'ASML.AS' Amsterdam).
+    """
+    syms = [s.strip() for s in symbols.split(",") if s.strip()]
+    if not syms:
+        return "(no symbols)"
+    results = await asyncio.gather(*(_yfc.global_quote(s) for s in syms))
+    rows: list[dict[str, str]] = []
+    for sym, q in zip(syms, results):
+        if not q:
+            rows.append({"Symbol": sym, "Close": "(no data)"})
+            continue
+        prev = q.get("prev_close")
+        chg = f"{(q['close'] - prev) / prev * 100:+.2f}%" if prev else ""
+        rows.append(
+            {
+                "Symbol": sym,
+                "Close": fmt_number(q["close"]),
+                "Chg%": chg,
+                "Prev Close": fmt_number(prev),
+                "Day Range": f"{fmt_number(q['low'])}-{fmt_number(q['high'])}",
+                "Volume": fmt_large(q["volume"]),
+                "Currency": q.get("currency", ""),
+                "Exchange": q.get("exchange", ""),
+                "Bar Date": q["date"],
+            }
+        )
+    return list_table(rows)
+
+
+@mcp.tool()
+async def get_fx_rate(ctx: Context, pair: str) -> str:
+    """Get a live FX rate via Yahoo Finance. Near-real-time (FX trades ~24h on
+    weekdays), unlike FRED's daily H.10 series (e.g. DEXKOUS) which publish with
+    a lag — use this for live conversions, FRED for history.
+
+    pair: 6-letter pair like 'USDKRW' or 'EURUSD' (rate = quote-currency units per
+      1 unit of base currency), or a bare 3-letter code like 'KRW' (read as USD<CCY>).
+    """
+    p = pair.strip().upper()
+    if len(p) == 3:
+        p = "USD" + p
+    if len(p) != 6 or not p.isalpha():
+        raise ValueError(f"pair must be a 3- or 6-letter currency code, got {pair!r}")
+    fx = await _yfc.fx_rate(p)
+    if not fx:
+        return f"(no FX data for {p[:3]}/{p[3:]})"
+    rate = fx["rate"]
+    return kv_table(
+        {
+            "Pair": f"{p[:3]}/{p[3:]}",
+            "Rate": fmt_number(rate, 4),
+            "Inverse": fmt_number(1 / rate, 6),
+            "As Of": fx["asof"],
+        }
+    )
+
+
+@mcp.tool()
+async def get_adr_premium(
+    ctx: Context,
+    adr_symbol: str,
+    ordinary_symbol: str,
+    ordinary_shares_per_adr: float,
+    home_currency: str,
+) -> str:
+    """Compute a US-listed ADR/ADS premium or discount vs FX-adjusted home-market
+    parity: fair value = ordinary close x ordinary_shares_per_adr / (home currency
+    per USD), compared against the live US quote. Use for cross-listed names where
+    the parity gap is a standing gauge (e.g. SKHY vs Seoul 000660).
+
+    adr_symbol: US ADR/ADS ticker (e.g. 'SKHY', 'TSM').
+    ordinary_symbol: home-market Yahoo symbol (e.g. '000660.KS', '2330.TW').
+    ordinary_shares_per_adr: deposit ratio as ordinary shares per one ADR — set in
+      the deposit agreement, NOT standardized, and amendable by the issuer
+      (SKHY: 0.1, i.e. 1 ADS = 1/10 common; TSM: 5.0). Verify against the
+      prospectus/F-6 before first use; a wrong ratio is a silent 10-100x error.
+    home_currency: ISO code the ordinary line trades in (e.g. 'KRW', 'TWD') —
+      cross-checked against Yahoo's reported trading currency.
+
+    Requires [tradier] section in ~/.tradingrc.
+    """
+    ccy = home_currency.strip().upper()
+    quote_resp, ordinary, fx = await asyncio.gather(
+        _tradier(ctx).get(t.QUOTES, t.GetQuotesRequest(adr_symbol, greeks=False)),
+        _yfc.global_quote(ordinary_symbol),
+        _yfc.fx_rate("USD" + ccy),
+    )
+    if not quote_resp.quotes:
+        return f"(no US quote for {adr_symbol})"
+    adr_last = float(quote_resp.quotes[0].get("last") or 0)
+    if adr_last <= 0:
+        return f"(no last price for {adr_symbol})"
+    if not ordinary:
+        return f"(no Yahoo data for {ordinary_symbol})"
+    if not fx:
+        return f"(no FX data for USD/{ccy})"
+
+    reported_ccy = str(ordinary.get("currency") or "")
+    if reported_ccy and reported_ccy.upper() != ccy:
+        raise ValueError(
+            f"{ordinary_symbol} trades in {reported_ccy}, not {ccy} — fix home_currency "
+            "(note: 'GBp' is pence — London lines need the /100 handled explicitly)"
+        )
+
+    parity = compute_adr_parity(
+        adr_symbol=adr_symbol.upper(),
+        ordinary_symbol=ordinary_symbol,
+        adr_price=adr_last,
+        ordinary_price=ordinary["close"],
+        ordinary_shares_per_adr=ordinary_shares_per_adr,
+        fx_rate=fx["rate"],
+        ordinary_bar_date=ordinary["date"],
+    )
+    out = parity.to_output()
+    bar_age = (date.today() - date.fromisoformat(ordinary["date"])).days
+    if bar_age > 4:
+        out += (
+            f"\n\n**WARNING:** ordinary close is {bar_age} days old (home-market holiday "
+            "or stale feed) — the premium may be misleading."
+        )
+    return out
 
 
 @mcp.tool()
