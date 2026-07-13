@@ -52,7 +52,7 @@ Playbook:
 - **Positive GEX + low percentile (≤~10) / small total GEX** → `regime: fragile-pin`. Fade can round-trip; the wall for the verdict modes (`reversal`/`retest`).
 - **Negative GEX** → `regime: breakout-trend`. Trade the break, never fade. Zero-gamma flip = the trend-confirm line.
 
-**Step 2 — daily bias.** Call `get_technical_indicators` (daily). Use: ADX (>25 trend, <20 chop) + ±DI (trend-day + direction); SMA20/SMA50 + Bollinger bands = levels for Step 3; ATR = range envelope for Step 5. RSI / MACD / OBV = multi-week color only, never intraday timing. Output one line: allowed scalp direction + is it a trend day. Tape overrules this daily bias on a conflict.
+**Step 2 — daily bias.** Call `get_technical_indicators` (daily). Use: ADX (>25 trend, <20 chop) + ±DI (trend-day + direction); SMA20/SMA50 + Bollinger bands = levels for Step 3; ATR(14) = range envelope for the Step-4 map-integrity test + Step 5. RSI / MACD / OBV = multi-week color only, never intraday timing. Output one line: allowed scalp direction + is it a trend day. Tape overrules this daily bias on a conflict.
 
 **Step 3 — level map.** Call `get_quote <reference>` (prev close, day H/L) + `get_timesales <reference>` (prior/current session, 15min). Express in cash-index points, then basis-shift to the future. Map as prices:
 - Prior-day high / low / close.
@@ -62,7 +62,19 @@ Playbook:
 
 For deeper S/R defer to `/ta <reference>` (`/ta SPX` for /MES).
 
-**Step 4 — fragility check.** Flag: daily OBV divergence (Step 2), DIX accumulation-into-weakness, price sitting on a major level. Fragile → shrink size, shorten leash. Daily OBV is a ~20-day signal — for *today's* participation use session volume vs avg + breakout/close-bar volume (`get_quote` + `get_timesales`), not OBV.
+**Step 4 — map integrity + fragility.** Both can override the Step-1 `regime` label and the plan's `lean`.
+
+**(a) Map integrity** — test the Step-1 anchors (call wall, put wall, zero-gamma flip) against spot and the Step-2 ATR(14) envelope. Run this *before* assigning any `direction`:
+
+| Test | Condition | Action |
+|---|---|---|
+| **Degenerate map** | The anchors collapse onto spot — wall-to-wall width < ~1× ATR(14), or the flip sits between the walls inside that width | **`lean: no-trade`**, every level alert-only (no `direction`). A few points of drift flips the regime. |
+| **Unbracketed** | Spot outside [put wall, call wall] | Downgrade `pin` → `fragile-pin`. The near wall is a `break`/verdict wall, never a `fade`. |
+| **Compression stack** | Degenerate map **and** a Class-1 or Class-3 event today (Step 0) | Hard `lean: no-trade` for the session; re-map after the print. |
+
+A degenerate map is a *prep* verdict, not a geometry problem — never widen bands to survive one.
+
+**(b) Fragility.** Flag: daily OBV divergence (Step 2), DIX accumulation-into-weakness, price sitting on a major level. Fragile → shrink size, shorten leash. Daily OBV is a ~20-day signal — for *today's* participation use session volume vs avg + breakout/close-bar volume (`get_quote` + `get_timesales`), not OBV.
 
 **Step 5 — the plan.** Output tightly:
 - **Edges:** support edge ↔ resistance edge.
@@ -89,6 +101,8 @@ For deeper S/R defer to `/ta <reference>` (`/ta SPX` for /MES).
    - **`reversal`** (failed break, snap-back, opposite the attempt): same as `fade` — resistance → short, support → long.
 
    **`side` = the break direction** (across `break`/`reversal`/`retest`): `resistance` = up-break, arm from below; `support` = down-break, arm from above — a downside breakdown of an upper wall is written `side: support`. For `fade`, `side` = the wall type. Express a verdict wall as up to two rows at one price+side (a `reversal` row + a `retest` row, each with its own `direction`); one state machine per wall drives both.
+
+   **Arming source — gamma walls only.** Attach a `direction` only to a level that *is* a Step-1 gamma wall (basis-shifted). Technical-only levels (prior-day H/L, round number, MA, morning low, opening-range extreme) ride **alert-only**. Carve-out: an A-quality static (stop cluster, high-confluence prior-day extreme) may carry a `reversal` + `retest` verdict pair — **max 2 per session, and never a `fade`**. Degenerate map (Step 4a) → no carve-out, nothing armed.
 
    **Fire geometry + gating:** `fade` = touch-and-reject in the band; `break` = cross + follow-through; `reversal`/`retest` = the state machine's verdict. `fade`/`break` also require **tape confirmation** (long wants buyers lifting offers, short wants sellers hitting bids). `reversal`/`retest` are **geometry + lean only, NOT tape-gated**. `lean` gates trade direction: `long-only` permits any long, `short-only` any short, `both` either, `no-trade` none. Attach `direction` only to walls the lean permits; leave the rest alert-only.
 
@@ -134,6 +148,11 @@ notes: "Clean +GEX pin. Fade the walls to the 7625 zero-gamma flip; a break of 7
 
 **Step 7 — discipline checklist (ALWAYS print last):**
 
+> **Before arming anything (session-level):**
+> - [ ] **Map is not degenerate** (Step 4a: walls bracket spot, wall-to-wall ≥ ~1× ATR). Degenerate → `lean: no-trade`, alert-only, stop here.
+> - [ ] Every armed `fade`/`break` sits on a **gamma wall**. Technical-only levels are alert-only (verdict-pair carve-out: A-quality statics, ≤2/session, never a `fade`).
+> - [ ] **Tripwire named** (`zero_gamma` + the Step-5 invalidation price). On a cross the plan is **void** — re-run prep; do not keep trading the old map.
+>
 > **Before blessing every level in the plan:**
 > - [ ] Name the **level + target + stop** (all /MES prices). Can't name all three → alert-only.
 > - [ ] **Hard stop is real** (points × $5 = risk; 6 pt = −$30/contract). No negotiation.
