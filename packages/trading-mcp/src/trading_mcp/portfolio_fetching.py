@@ -223,7 +223,7 @@ async def _fetch_tastytrade_accounts(ctx: Context) -> ProviderResult:
                 cash=cash,
                 market_value=nlv - cash,
                 day_pnl=0.0,  # TastyTrade balances expose no clean day P&L
-                unrealized_pnl=sum(p.get("pnl", 0.0) for p in positions),
+                unrealized_pnl=sum(p.pnl for p in positions),
                 positions=positions,
             )
         )
