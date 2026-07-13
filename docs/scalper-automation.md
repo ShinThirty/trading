@@ -5,9 +5,10 @@ setup, prompts you to enter, and paper-trades the same direction-aware bracket**
 — so the detector accumulates a reviewable track record before it is ever trusted
 with real capital.
 
-The traded instrument is **/MES (Micro E-mini S&P 500)** — $5/point, 0.25 tick,
-right-sized for paper/learning; the registry (`instruments.py`) also carries /ES
-($50/pt), /MNQ ($2/pt), and /NQ ($20/pt), a one-line swap away. Futures fit a
+The traded instrument is **/MES (Micro E-mini S&P 500)** — $5/point, 0.25 tick (the
+exchange's numbers, read at startup, not ours), right-sized for paper/learning;
+`--symbols /MNQ` (or /ES, /NQ) is a flag away, and the economics follow automatically.
+Futures fit a
 level-based index scalper the way 0DTE options never did: **linear $/point P&L, no
 theta bleed while you wait for a setup, free two-sided direction** (a real
 SELL-to-open short, not a long-put proxy), and one instrument that **is** the level
@@ -156,12 +157,29 @@ bracket, not a spam stream.
 
 1. **`DxLinkFeed` / `MarketDataFeed`** — wraps `DxLinkStreamClient` (streamer-token
    fetch + DXLink channel handshake + auto-reconnect) and subscribes to the traded
-   /MES front-month contract (picked by date via `instruments.front_month`, which
-   rolls ~8 days before the quarterly third-Friday expiry) **plus the SPX cash index**
-   for the carry-basis shadow; emits quote/trade/timesale. `drive_paper_fills` fans
-   every /MES print into the `PaperBroker` matching engine *and* the detector — one
-   symbol serves both roles (SPX feeds only the basis shadow).
-2. **`SetupDetector` + `Notifier`** — fires only a *confirmed* setup, gated on
+   /MES front-month contract **plus the SPX cash index** for the carry-basis shadow;
+   emits quote/trade/timesale. `drive_paper_fills` fans every /MES print into the
+   `PaperBroker` matching engine *and* the detector — one symbol serves both roles
+   (SPX feeds only the basis shadow).
+2. **`contract.resolve_contract`** — asks the exchange what we're trading *and what it's
+   worth*, before anything keys off the symbol. `GET /instruments/futures?product-code[]=MES`
+   returns every listed contract with its `active-month` flag, dxFeed `streamer-symbol`,
+   `notional-multiplier` and `tick-size`. All three economic facts — which month is live,
+   what a point pays, what a tick is — come from there and **are not typed into this repo**:
+   a bare root (`--symbols /MES`) becomes the real front month, and the `PaperBroker`'s
+   multiplier + tick are the venue's. A dated symbol is honored (the plan named it on
+   purpose) but *checked*: not the active month, or closing-only, and it says so. **A lookup
+   the exchange can't answer — no creds, no network, an unlisted symbol, nonsense economics
+   — raises `ContractError` and ends the run. There is no fallback.** The old date-math
+   front month (quarterly codes, rolling ~8 days before third-Friday expiry) and the
+   hardcoded `$5/pt` are deleted, not demoted, because both fail *silently*: a stale
+   contract still streams, still fires, still fills on a book nobody is trading, and a wrong
+   multiplier leaves every P&L number plausible and wrong. A guess you can't tell apart from
+   the truth is worse than no session. `instruments.py` keeps only what the exchange has no
+   opinion on — the detector's `Geometry` bands (our calibration) and the cash-index
+   `reference` (our level-source decision) — and adding a new root means answering just
+   those two questions.
+3. **`SetupDetector` + `Notifier`** — fires only a *confirmed* setup, gated on
    things already on the wire: **geometry** keyed to the level's `mode` (`fade` =
    touch-and-reject within the band, the +GEX trade; `break` =
    cross-the-wall-with-follow-through, the −GEX trade), **lean** (on the trade
@@ -188,16 +206,16 @@ bracket, not a spam stream.
    session and self-correct. The `reversal` (failed break → trade the snap-back) and
    `retest` (confirmed break → trade the pullback-and-resume) verdicts are driven by
    a per-wall `BreakoutTracker` (`breakout.py`).
-3. **`PaperBroker.place_bracket`** — opens at market in the proposed `direction` and
+4. **`PaperBroker.place_bracket`** — opens at market in the proposed `direction` and
    rests an OCO stop-loss + take-profit pair at the **absolute** stop/target prices
    (tick-snapped). For a long the children rest on the SELL side (stop below, target
    above); for a short they rest on the BUY side (stop above, target below). Position
    + realized P&L are computed by the `Ledger` cost-basis primitive (the single
    place the math lives), linear at $5/point for /MES.
-4. **`PaperPersister`** — subscribes to the broker's order events; appends each fill
+5. **`PaperPersister`** — subscribes to the broker's order events; appends each fill
    to `~/.trading/scalp/paper/{date}.jsonl` and rewrites a `{date}-summary.json`
    (realized P&L + open positions) on a timer and once on shutdown.
-5. **`SignalLog`** — the detector's `record` sink; appends one row per *confirmed
+6. **`SignalLog`** — the detector's `record` sink; appends one row per *confirmed
    fire* to `~/.trading/scalp/paper/{date}-signals.jsonl` carrying the **B4
    velocity/absorption telemetry** (trailing-window velocity in $/s, cumulative
    confirming vs contrary tape size, top-of-book imbalance) next to the setup
@@ -206,7 +224,7 @@ bracket, not a spam stream.
    paper run mines these against the realized win/loss to learn which metrics
    actually separate winners from losers *before* any of them is allowed to veto a
    setup.
-6. **Shadow observers (`ShadowRecorder`, `BasisRecorder`)** — pure telemetry wired
+7. **Shadow observers (`ShadowRecorder`, `BasisRecorder`)** — pure telemetry wired
    onto the tape, **read by nothing in the decision path** (`feedback_shadow_then_live`).
    `ShadowRecorder` captures the raw /MES tape + live volume-profile / volume-rate
    snapshots (`{date}-tape.jsonl` + `{date}-shadow.jsonl`) to settle the runaway-gap

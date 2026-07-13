@@ -68,7 +68,7 @@ class _Resting:
 class PaperBroker:
     """A ``BrokerExecution`` backed by an in-memory matching engine."""
 
-    def __init__(self, multiplier: int = 100, tick: float = 0.25) -> None:
+    def __init__(self, multiplier: float = 100, tick: float = 0.25) -> None:
         self._ids = count(1)
         self._ledger = Ledger(multiplier=multiplier)
         self._tick = tick

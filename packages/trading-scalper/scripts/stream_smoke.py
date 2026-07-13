@@ -11,13 +11,12 @@ fetch + DXLink channel handshake + COMPACT wire parsing end to end against the r
 import argparse
 import asyncio
 import time
-from datetime import date
 
 import httpx
 from trading_clients.config import load_config
 from trading_clients.dxlink_stream_client import DxLinkStreamClient
 from trading_clients.tastytrade_client import TastyTradeClient
-from trading_scalper.instruments import front_month, instrument_for
+from trading_scalper.contract import ContractError, resolve_contract
 
 
 async def _consume(
@@ -33,16 +32,24 @@ async def _consume(
             return
 
 
-async def run(symbols: list[str], seconds: float, max_events: int) -> None:
+async def run(symbols: list[str] | None, seconds: float, max_events: int) -> None:
     cfg = load_config()
     if cfg.tastytrade is None:
         raise SystemExit(
             "No [tastytrade] section in ~/.tradingrc (DXLink streams via Tastytrade OAuth)"
         )
 
+    tasty = TastyTradeClient(cfg.tastytrade)
+    if not symbols:  # default: the exchange's live /MES contract + its cash-index reference
+        try:
+            contract = await resolve_contract(tasty, "/MES")
+        except ContractError as exc:
+            await tasty.close()
+            raise SystemExit(f"contract: {exc}") from exc
+        symbols = [contract.symbol, contract.reference]
+
     print(f"symbols={symbols} window={seconds}s")
     print("connecting to Tastytrade DXLink (dxFeed)...")
-    tasty = TastyTradeClient(cfg.tastytrade)
     client = DxLinkStreamClient(tasty.get_quote_token)
     counts: dict[str, int] = {}
     start = time.monotonic()
@@ -75,9 +82,11 @@ async def run(symbols: list[str], seconds: float, max_events: int) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    _mes = instrument_for("/MES")
     ap.add_argument(
-        "--symbols", nargs="+", default=[front_month("/MES", date.today()), _mes.reference]
+        "--symbols",
+        nargs="+",
+        default=None,
+        help="default: the exchange's active-month /MES contract + SPX",
     )
     ap.add_argument("--seconds", type=float, default=20.0)
     ap.add_argument("--max-events", type=int, default=15)

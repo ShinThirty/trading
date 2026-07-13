@@ -219,9 +219,7 @@ class DxLinkStreamClient:
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, max_backoff)
 
-    async def _session(
-        self, ws: Any, token: str, symbols: list[str]
-    ) -> AsyncIterator[MarketEvent]:
+    async def _session(self, ws: Any, token: str, symbols: list[str]) -> AsyncIterator[MarketEvent]:
         """Drive one connection's DXLink handshake reactively, yielding FEED_DATA events.
 
         Each server frame advances the state machine with an **awaited** send (so the

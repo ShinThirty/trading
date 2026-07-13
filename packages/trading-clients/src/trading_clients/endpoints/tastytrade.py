@@ -577,3 +577,123 @@ ORDERS = Endpoint(
     response_model=AccountOrdersResponse,
     extract=lambda d: d.get("data", {}).get("items", d.get("items", [])),
 )
+
+
+# ═══════════════════════════════════════════════════════════════
+# Instruments — outright futures
+# ═══════════════════════════════════════════════════════════════
+
+
+@dataclass
+class FuturesRequest(ParamsRequest):
+    """Live outright futures for one product code (``MES``, ``ES``, ``MNQ``, …).
+
+    ``only-active-futures`` defaults true server-side; we pass it explicitly so the
+    contract set we reason over is unambiguous.
+    """
+
+    product_code: str
+
+    def to_params(self) -> dict[str, str]:
+        return {"product-code[]": self.product_code, "only-active-futures": "true"}
+
+
+@dataclass(frozen=True)
+class FutureContract:
+    """One outright futures contract, as the exchange describes it.
+
+    The fields a futures trading system would otherwise have to *guess*: which contract
+    month is actually the liquid one (``active_month``), what to stream it as
+    (``streamer_symbol``), what a point is worth (``notional_multiplier``), and the price
+    grid (``tick_size``). Also the tradeability flags — a contract can be live but
+    ``closing_only``, which no amount of date math would tell you.
+    """
+
+    symbol: str  # tastytrade symbology, e.g. /MESU6
+    streamer_symbol: str  # dxFeed symbology, e.g. /MESU26:XCME — what a feed subscribes
+    product_code: str  # MES
+    exchange: str
+    active_month: bool  # the front (liquid) contract
+    next_active_month: bool  # the one it rolls into
+    notional_multiplier: float  # $ per 1.0 index point per contract
+    tick_size: float  # minimum price increment
+    expiration_date: str
+    last_trade_date: str
+    stops_trading_at: str
+    roll_target_symbol: str  # "" when the exchange names no successor
+    is_tradeable: bool
+    is_closing_only: bool
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "FutureContract":
+        return cls(
+            symbol=d.get("symbol", ""),
+            streamer_symbol=d.get("streamer-symbol", ""),
+            product_code=d.get("product-code", ""),
+            exchange=d.get("exchange", ""),
+            active_month=bool(d.get("active-month", False)),
+            next_active_month=bool(d.get("next-active-month", False)),
+            notional_multiplier=to_float_zero(d.get("notional-multiplier")),
+            tick_size=to_float_zero(d.get("tick-size")),
+            expiration_date=d.get("expiration-date", ""),
+            last_trade_date=d.get("last-trade-date", ""),
+            stops_trading_at=d.get("stops-trading-at", ""),
+            roll_target_symbol=d.get("roll-target-symbol", ""),
+            is_tradeable=bool(d.get("is-tradeable", False)),
+            is_closing_only=bool(d.get("is-closing-only", False)),
+        )
+
+    @property
+    def streamable(self) -> bool:
+        """Safe to open a position in: tradeable and not restricted to closing orders."""
+        return self.is_tradeable and not self.is_closing_only
+
+
+@dataclass
+class FuturesResponse:
+    contracts: list[FutureContract]
+
+    @classmethod
+    def from_response(cls, data: list[dict]) -> "FuturesResponse":
+        return cls(contracts=[FutureContract.from_dict(d) for d in (data or [])])
+
+    def active_contract(self) -> FutureContract | None:
+        """The front-month contract to trade — the exchange's ``active-month``, not a guess.
+
+        Prefers a streamable active-month contract; a contract flagged active but
+        closing-only is not something to open into, so it loses to nothing at all
+        (the caller decides whether to fall back or refuse).
+        """
+        actives = [c for c in self.contracts if c.active_month and c.streamable]
+        return min(actives, key=lambda c: c.expiration_date) if actives else None
+
+    def by_streamer_symbol(self, streamer_symbol: str) -> FutureContract | None:
+        """Look a contract up by its dxFeed symbol (what a plan/feed names it)."""
+        return next((c for c in self.contracts if c.streamer_symbol == streamer_symbol), None)
+
+    def to_output(self) -> str:
+        if not self.contracts:
+            return "(no futures)"
+        rows = [
+            {
+                "Symbol": c.symbol,
+                "Streamer": c.streamer_symbol,
+                "Front": "yes" if c.active_month else "",
+                "$/pt": fmt_number(c.notional_multiplier),
+                "Tick": fmt_number(c.tick_size, 4),
+                "Expires": c.expiration_date,
+                "Last Trade": c.last_trade_date,
+                "Tradeable": "yes" if c.streamable else "no",
+                "Rolls To": c.roll_target_symbol,
+            }
+            for c in sorted(self.contracts, key=lambda c: c.expiration_date)
+        ]
+        return list_table(rows)
+
+
+FUTURES = Endpoint(
+    "/instruments/futures",
+    cache_ttl=3600,  # contract metadata is static intraday
+    response_model=FuturesResponse,
+    extract=lambda d: d.get("data", {}).get("items", d.get("items", [])),
+)

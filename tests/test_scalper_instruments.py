@@ -1,61 +1,42 @@
-"""Instrument registry — the point-value / tick lookup the CLI feeds the broker."""
+"""Instrument profiles — the two things about a futures root that are *ours*.
 
-from datetime import date
+Everything the exchange can state (which month is live, $/pt, tick) is deliberately
+absent from the registry and comes from ``contract.py`` — see ``test_scalper_contract``.
+What's left is calibration (``geometry``) and our level source (``reference``).
+"""
 
 import pytest
-from trading_scalper.instruments import front_month, instrument_for, third_friday
-
-
-def test_micro_and_full_es_economics() -> None:
-    mes = instrument_for("/MES")
-    assert mes.point_value == 5 and mes.tick == 0.25
-    es = instrument_for("/ES")
-    assert es.point_value == 50 and es.tick == 0.25
+from trading_scalper.instruments import profile_for, root_of
 
 
 def test_reference_index_is_instrument_correlated() -> None:
     # the cash-index reference (gamma walls + carry basis) pairs by index, not by size
-    assert instrument_for("/MES").reference == "SPX"
-    assert instrument_for("/ES").reference == "SPX"
-    assert instrument_for("/MNQ").reference == "NDX"
-    assert instrument_for("/NQ").reference == "NDX"
+    assert profile_for("/MES").reference == "SPX"
+    assert profile_for("/ES").reference == "SPX"
+    assert profile_for("/MNQ").reference == "NDX"
+    assert profile_for("/NQ").reference == "NDX"
 
 
-def test_dated_contract_resolves_to_root() -> None:
-    inst = instrument_for("/MESU25:XCME")  # a specific contract month from the feed
-    assert inst.point_value == 5 and inst.tick == 0.25
-    assert inst.symbol == "/MESU25:XCME"  # keeps the concrete symbol, borrows the economics
-    assert inst.reference == "SPX"  # and the cash-index reference (S&P → SPX)
-    assert inst.geometry == instrument_for("/MES").geometry  # and the S&P geometry set
+def test_geometry_pairs_by_index_not_by_contract_size() -> None:
+    # /MES and /ES are one price map; the Nasdaq complex is a different magnitude
+    assert profile_for("/MES").geometry is profile_for("/ES").geometry
+    assert profile_for("/MNQ").geometry is profile_for("/NQ").geometry
+    assert profile_for("/MNQ").geometry != profile_for("/MES").geometry
+
+
+def test_dated_contract_resolves_to_its_root_profile() -> None:
+    inst = profile_for("/MESU26:XCME")  # a specific contract month from the feed
+    assert inst is profile_for("/MES")
+    assert inst.reference == "SPX"
 
 
 def test_micro_root_not_shadowed_by_es() -> None:
-    # "/MESU25" must resolve to /MES ($5), never /ES ($50), despite sharing the ES complex
-    assert instrument_for("/MESU25:XCME").point_value == 5
+    # "/MNQU26" must resolve to /MNQ's Nasdaq bands, never /NQ's — and never /MES's
+    assert profile_for("/MNQU26:XCME").reference == "NDX"
+    assert root_of("/MESU26:XCME") == "/MES"
 
 
 def test_unknown_symbol_raises() -> None:
+    # a typo should fail loudly, not silently scalp with the wrong index's tolerances
     with pytest.raises(KeyError, match="unknown futures symbol"):
-        instrument_for("AAPL")
-
-
-def test_third_friday_known_expiries() -> None:
-    assert third_friday(2026, 9) == date(2026, 9, 18)  # Sep 2026 ES/MES expiry
-    assert third_friday(2026, 12) == date(2026, 12, 18)  # Dec 2026 expiry
-
-
-def test_front_month_current_is_september() -> None:
-    # mid-July 2026 is well before the Sep 10 roll → the Sep (U) contract is live
-    assert front_month("/MES", date(2026, 7, 12)) == "/MESU26:XCME"
-    assert front_month("/ES", date(2026, 7, 12)) == "/ESU26:XCME"
-
-
-def test_front_month_rolls_at_the_roll_date() -> None:
-    # Sep expiry is the 18th → roll date is the 10th (expiry − 8 days)
-    assert front_month("/MES", date(2026, 9, 9)) == "/MESU26:XCME"  # day before: still Sep
-    assert front_month("/MES", date(2026, 9, 10)) == "/MESZ26:XCME"  # roll day: now Dec
-
-
-def test_front_month_crosses_the_year_boundary() -> None:
-    # after the Dec 10 roll the front is next March (H) of the following year
-    assert front_month("/MES", date(2026, 12, 15)) == "/MESH27:XCME"
+        profile_for("AAPL")

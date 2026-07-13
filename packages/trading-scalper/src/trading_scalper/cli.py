@@ -31,10 +31,11 @@ from trading_clients.dxlink_stream_client import DxLinkStreamClient
 from trading_clients.tastytrade_client import TastyTradeClient
 
 from trading_scalper.basis import BasisRecorder, default_basis_path
+from trading_scalper.contract import ContractError, ResolvedContract, resolve_contract
 from trading_scalper.detector import SetupDetector, watch_setups
 from trading_scalper.domain import OrderId, Side, TradeProposal
 from trading_scalper.feed import DxLinkFeed, drive_paper_fills
-from trading_scalper.instruments import Geometry, Instrument, front_month, instrument_for
+from trading_scalper.instruments import Geometry, profile_for
 from trading_scalper.notify import Notifier
 from trading_scalper.paper import PaperBroker, round_to_tick
 from trading_scalper.persist import (
@@ -167,10 +168,11 @@ def build_session(
     only feed the offline ``--demo-setup`` path. The detector's ``record`` sink lands
     the B4 telemetry in a per-fire ``SignalLog`` alongside the fills/summary.
 
-    ``geometry`` is the traded instrument's price-distance band-set (``instruments.py``);
-    ``_run`` passes ``inst.geometry`` so the detector's bands match the symbol's price
-    magnitude, exactly as ``point_value``/``tick`` are threaded into the ``PaperBroker``.
-    The default is the S&P set, for tests/demo that don't wire a specific instrument.
+    ``geometry`` is the traded root's price-distance band-set — our calibration, from
+    ``instruments.py`` — so the detector's bands match the symbol's price magnitude. Its
+    counterparts ``point_value``/``tick`` are *not* ours: they ride in on the resolved
+    contract and are threaded into the ``PaperBroker`` by ``_run``. The default is the
+    S&P set, for tests/demo that don't wire a specific instrument.
 
     ``policy`` + ``live_exec`` are the live gate (``policy.py``): the paper broker fills
     every fire, and an approved ``(root, mode)`` at this ``__version__`` *additionally*
@@ -245,6 +247,14 @@ def _plan_key(symbol: str) -> str:
     return symbol.lstrip("/").split(":")[0]
 
 
+# --demo-setup runs with no network, so it has no exchange to ask for economics. These are
+# stand-ins — realistic /MES numbers so the printed P&L reads sensibly — and they are
+# deliberately *not* a lookup table: a real session gets its $/pt and tick from the venue
+# (contract.py), and nothing here can leak into one.
+_DEMO_POINT_VALUE = 5.0
+_DEMO_TICK = 0.25
+
+
 def _parse_demo_setup(spec: str) -> tuple[str, int, float]:
     """Parse ``SYMBOL[:QTY[:PRICE]]`` for the offline --demo-setup affordance.
 
@@ -263,12 +273,17 @@ def _parse_demo_setup(spec: str) -> tuple[str, int, float]:
 
 
 def _print_banner(
-    plan: SessionPlan | None, path: object, symbols: list[str], date: str, inst: Instrument
+    plan: SessionPlan | None,
+    path: object,
+    symbols: list[str],
+    date: str,
+    contract: ResolvedContract,
 ) -> None:
     print("=" * 64)
     print("trading-scalper — PAPER entry-detector (no live orders)")
     print(
-        f"date: {date}   symbol: {' '.join(symbols)}   (${inst.point_value}/pt, {inst.tick:g} tick)"
+        f"date: {date}   symbol: {' '.join(symbols)}   "
+        f"(${contract.point_value:g}/pt, {contract.tick:g} tick — exchange-verified)"
     )
     if plan is not None:
         print(f"plan: {path}")
@@ -292,12 +307,12 @@ def _print_banner(
 def _run_demo(broker: PaperBroker, session: ScalpSession, notifier: Notifier, args) -> None:
     """Offline (no-network) demo: inject a long setup, fill the bracket, persist a summary."""
     symbol, qty, price = _parse_demo_setup(args.demo_setup)
-    inst = instrument_for(symbol)
     print("=" * 64)
     print("trading-scalper — DEMO (offline, no network)")
+    print(f"  economics: ${_DEMO_POINT_VALUE:g}/pt, {_DEMO_TICK:g} tick — DEMO, not the exchange's")
     broker.trade(symbol, price)  # seed a tape price
-    stop_price = round_to_tick(price - args.stop_points, inst.tick)
-    target_price = round_to_tick(price + args.target_points, inst.tick)
+    stop_price = round_to_tick(price - args.stop_points, _DEMO_TICK)
+    target_price = round_to_tick(price + args.target_points, _DEMO_TICK)
     notifier.notify(
         f"(demo) {symbol} long {qty} — stop {args.stop_points:g}pt ({stop_price:g}) / "
         f"target {args.target_points:g}pt ({target_price:g})"
@@ -309,7 +324,7 @@ def _run_demo(broker: PaperBroker, session: ScalpSession, notifier: Notifier, ar
         f"  entry filled @ {price:g}; bracket resting "
         f"(stop {stop_price:g} / target {target_price:g})"
     )
-    broker.trade(symbol, target_price + inst.tick)  # cross the target → win; OCO cancels the stop
+    broker.trade(symbol, target_price + _DEMO_TICK)  # cross the target → win; OCO cancels the stop
     print(f"  target hit; position flat; realized ${broker.realized_pnl():.0f}")
     session.persister.write_summary()
     print(f"  fills   → {session.persister.fills_path}")
@@ -317,7 +332,7 @@ def _run_demo(broker: PaperBroker, session: ScalpSession, notifier: Notifier, ar
     print("=" * 64)
 
 
-async def _run_basis(tt_cfg, future_symbol: str, reference_symbol: str) -> None:
+async def _run_basis(tasty: TastyTradeClient, future_symbol: str, reference_symbol: str) -> None:
     """`--basis`: print the current future↔reference carry basis and exit (prep helper).
 
     `/scalp` prep adds this basis to each cash-index gamma wall to get its futures
@@ -325,7 +340,6 @@ async def _run_basis(tt_cfg, future_symbol: str, reference_symbol: str) -> None:
     (the cash index must be live); off-hours the future has drifted against a stale
     cash index.
     """
-    tasty = TastyTradeClient(tt_cfg)
     feed = DxLinkFeed(DxLinkStreamClient(tasty.get_quote_token))
     rec = BasisRecorder(future_symbol, reference_symbol, basis_path=Path("/dev/null"))
     rec.attach(feed)
@@ -338,7 +352,6 @@ async def _run_basis(tt_cfg, future_symbol: str, reference_symbol: str) -> None:
                 break
     finally:
         task.cancel()
-        await tasty.close()
     row = rec.snapshot_row()
     if row is None:
         print(f"no basis yet — {future_symbol}/{reference_symbol} haven't both printed (try RTH)")
@@ -360,29 +373,21 @@ async def _demo_token() -> tuple[str, str]:
 
 async def _run(args: argparse.Namespace) -> None:
     cfg = load_config()
-    primary = args.symbols[0]
-    inst = instrument_for(primary)
-    plan_path = default_plan_path(_plan_key(primary), args.date)
     notifier = Notifier(bell=not args.no_bell)
-    plan_store = PlanStore(plan_path, on_error=notifier.notify)  # bad hot-edit -> warn, keep last
-    plan = plan_store.current()
-    broker = PaperBroker(multiplier=inst.point_value, tick=inst.tick)
-
-    if args.basis:
-        if cfg.tastytrade is None:
-            raise SystemExit("--basis needs a [tastytrade] section in ~/.tradingrc (DXLink feed).")
-        fut = primary if ":" in primary else front_month(primary, date.fromisoformat(args.date))
-        await _run_basis(cfg.tastytrade, fut, args.reference or inst.reference)
-        return
 
     if args.demo_setup:
-        # offline: no feed/network. A throwaway feed just satisfies build_session's wiring.
+        # offline self-test: no feed, no network, no exchange to ask — so it runs on the
+        # labeled _DEMO_* economics above. Exercises the bracket plumbing, not a session.
+        primary = args.symbols[0]
+        plan_path = default_plan_path(_plan_key(primary), args.date)
+        plan_store = PlanStore(plan_path, on_error=notifier.notify)
+        broker = PaperBroker(multiplier=_DEMO_POINT_VALUE, tick=_DEMO_TICK)
         session = build_session(
-            DxLinkFeed(DxLinkStreamClient(_demo_token)),
+            DxLinkFeed(DxLinkStreamClient(_demo_token)),  # throwaway: satisfies build_session
             broker,
             plan_store.current,
             notifier=notifier,
-            geometry=inst.geometry,
+            geometry=profile_for(primary).geometry,
             date=args.date,
             underlyings=args.symbols,
         )
@@ -395,23 +400,49 @@ async def _run(args: argparse.Namespace) -> None:
             "Tastytrade DXLink (needs OAuth client_secret + refresh_token)."
         )
     tasty = TastyTradeClient(cfg.tastytrade)
+
+    # Ask the exchange which contract is live, and what it's worth, before anything keys off
+    # the symbol: a bare root (/MES) becomes its active-month contract, a dated symbol gets
+    # checked against the live set, and $/pt + tick come back with it. No fallback — an
+    # unanswerable lookup ends the session (contract.py).
+    try:
+        contract = await resolve_contract(tasty, args.symbols[0])
+    except ContractError as exc:
+        await tasty.close()
+        raise SystemExit(f"contract: {exc}") from exc
+    for warning in contract.warnings:
+        notifier.notify(f"contract: {warning}")
+    primary = contract.symbol
+    symbols_arg = [primary, *args.symbols[1:]]
+
+    if args.basis:
+        try:
+            await _run_basis(tasty, primary, args.reference or contract.reference)
+        finally:
+            await tasty.close()
+        return
+
+    plan_path = default_plan_path(_plan_key(primary), args.date)
+    plan_store = PlanStore(plan_path, on_error=notifier.notify)  # bad hot-edit -> warn, keep last
+    plan = plan_store.current()
+    broker = PaperBroker(multiplier=contract.point_value, tick=contract.tick)
     stream = DxLinkStreamClient(tasty.get_quote_token)
     feed = DxLinkFeed(stream)
     # default: the traded instrument's cash index (SPX for /MES, NDX for /MNQ); "" disables
-    reference = inst.reference if args.reference is None else (args.reference or None)
+    reference = contract.reference if args.reference is None else (args.reference or None)
     session = build_session(
         feed,
         broker,
         plan_store.current,
         notifier=notifier,
-        geometry=inst.geometry,
+        geometry=contract.geometry,
         date=args.date,
-        underlyings=args.symbols,
+        underlyings=symbols_arg,
         reference_symbol=reference,
     )
 
-    _print_banner(plan, plan_path, args.symbols, args.date, inst)
-    symbols = collect_symbols(plan, args.symbols)
+    _print_banner(plan, plan_path, symbols_arg, args.date, contract)
+    symbols = collect_symbols(plan, symbols_arg)
     if reference and reference not in symbols:
         symbols.append(reference)  # stream the cash-index reference for the carry-basis shadow
     print(f"streaming: {' '.join(symbols)}")

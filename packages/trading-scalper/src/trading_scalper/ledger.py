@@ -2,8 +2,9 @@
 
 A pure, deterministic primitive — the single verifiable place all the
 position-and-P&L arithmetic lives, so nothing downstream (the PaperBroker) does
-ad hoc math. P&L is in dollars via the contract multiplier — the instrument's
-point value (5 for /MES, 50 for /ES; the legacy options books used 100).
+ad hoc math. P&L is in dollars via the contract multiplier — the instrument's point
+value, read off the exchange at resolution (see ``contract.py``), never typed in.
+Fractional by type, not by accident: CME's micro Dow pays $0.50/pt.
 
 Average-cost basis: a reducing fill realizes
 ``(exit - avg_cost) * closed_qty * multiplier``, signed by position direction; a
@@ -24,7 +25,7 @@ class _Book:
 class Ledger:
     """Per-symbol cost basis + cumulative realized P&L (dollars)."""
 
-    multiplier: int = 100
+    multiplier: float = 100
     realized: float = 0.0
     _books: dict[str, _Book] = field(default_factory=dict)
 

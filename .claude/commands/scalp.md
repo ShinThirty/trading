@@ -106,7 +106,7 @@ A degenerate map is a *prep* verdict, not a geometry problem — never widen ban
 
    **Fire geometry + gating:** `fade` = touch-and-reject in the band; `break` = cross + follow-through; `reversal`/`retest` = the state machine's verdict. `fade`/`break` also require **tape confirmation** (long wants buyers lifting offers, short wants sellers hitting bids). `reversal`/`retest` are **geometry + lean only, NOT tape-gated**. `lean` gates trade direction: `long-only` permits any long, `short-only` any short, `both` either, `no-trade` none. Attach `direction` only to walls the lean permits; leave the rest alert-only.
 
-   **Basis-shift each wall:** futures price = cash-index wall + live basis (SPX 7600 + basis 50 → /MES 7650); fetch with `trading-scalper --basis` (RTH only). Set level `price` to the futures value. Optionally set explicit `stop`/`target` futures prices; else `default_stop_points` / `default_target_points` derive them.
+   **Basis-shift each wall:** futures price = cash-index wall + live basis (SPX 7600 + basis 50 → /MES 7650); fetch with `uv run --package trading-scalper trading-scalper --basis --symbols /MES` (RTH only) — its output also names the exchange's current front-month contract, which is the plan's `symbol`. Set level `price` to the futures value. Optionally set explicit `stop`/`target` futures prices; else `default_stop_points` / `default_target_points` derive them.
 
 2. **Write the file** (Write tool) to `~/.trading/scalp/{date}-{key}.yaml` — `{date}` = session date `YYYY-MM-DD`, `{key}` = plan `symbol` without the leading `/` and the `:XCME` suffix (`/MESU26:XCME` → `MESU26`). Shape:
 
@@ -142,7 +142,7 @@ notes: "Clean +GEX pin. Fade the walls to the 7625 zero-gamma flip; a break of 7
    - **Subscribe symbol fixed at launch** — a new front-month / symbol change mid-session needs a restart (levels/lean/direction hot-reload).
    - **Graceful degrade:** a level with no `direction` is alert-only; no file = daemon silent.
    - **`zero_gamma` always set** — use the `Zero-Gamma Flip` from Step 1. Bidirectional tripwire; on a cross the daemon alerts "re-run /scalp prep" (it never recomputes GEX).
-   - **Run it:** `uv run --package trading-scalper trading-scalper --symbols /MESU26:XCME`. Needs `[tastytrade]` in `~/.tradingrc` + a funded customer account for CME data. Streams the cash-index reference (auto-resolved; override `--reference`, disable `--reference ''`) and records the live carry basis (`{date}-basis.jsonl`, RTH only) + shadow volume telemetry (`{date}-tape.jsonl`, `{date}-shadow.jsonl`).
+   - **Run it:** `uv run --package trading-scalper trading-scalper --symbols /MES` — the bare root resolves to the exchange's active-month contract (`GET /instruments/futures`), which must match the plan's `symbol`; pass the dated symbol to override. The banner prints `exchange-verified`, and warns if the contract is stale or closing-only; a lookup the exchange can't answer aborts the run (no fallback — never trade a contract nobody confirmed is live). Needs `[tastytrade]` in `~/.tradingrc` + a funded customer account for CME data. Streams the cash-index reference (auto-resolved; override `--reference`, disable `--reference ''`) and records the live carry basis (`{date}-basis.jsonl`, RTH only) + shadow volume telemetry (`{date}-tape.jsonl`, `{date}-shadow.jsonl`).
 
 **No-trade day:** still write the file with `lean: no-trade` + reference levels but **no `direction` fields** — daemon prints the banner and stays silent.
 
