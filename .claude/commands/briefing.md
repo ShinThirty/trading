@@ -141,6 +141,19 @@ When due, web-pull DRAMeXchange/TrendForce spot commentary (no free API, no MCP 
 - **Rollover forming** (first down-week, or spot/contract divergence) → surface "🟡 DRAM spot softening" with the readings; re-check next briefing rather than waiting a week.
 - **Sustained rollover confirmed (2+ weeks)** → surface "🔴 DRAM spot rollover — MU exit ladder T2 fires: exit to residual tranche regardless of headline strength." Add to Step 4 Urgent and offer to record via `decision_add`.
 
+## Step 1h: Neocloud Epicenter Check (daily, alert-only)
+
+Call `get_quote NBIS,IREN,CRWV,APLD` — the externally-financed neocloud cohort, the epicenter of the alarm-window ladder (feeds tripwire 1 of the late-cycle tripwires; these names' demand exists only while external capital flows, and the epicenter cracks before the generals). Watch-only names: quote check only, no signals run, not pipeline candidates.
+
+**Surface this section ONLY if a trigger fires**, otherwise skip entirely (silence is the signal):
+
+1. **Cohort crack**: ≥3 of 4 down >5% on the day → "🔴 Neocloud epicenter cracking" — tripwire 1 candidate; cross-check Step 1f's credit dim (epicenter crack + HY OAS widening = tripwires 1+3 aligning → alarm-window playbook actions).
+2. **New 52W low** by any member (from the quote's 52W Low column) → "🔴 [ticker] new 52W low" — epicenter junk at new lows while SPY holds near highs is the 1999-Q4/2007 early-alarm pattern, regardless of the day's % move.
+3. **Single-name collapse >12%**: pull the headline (`get_company_news`) — if financing-related (pulled/repriced offering, punitive convert, credit downgrade), flag as a **tripwire 2 candidate**, not just single-name noise.
+4. **Divergence day**: all 4 red while SPY is up ≥0.3% → one line: "🟡 epicenter divergence (all 4 red on green tape)". Persistent recurrence across briefings matters more than one day.
+
+Thresholds are initial calibration (2026-07-14) for names with 3-6% daily vol — retune against false-positive rate after a few weeks.
+
 ## Step 2: Position Alerts
 
 1. Call `get_portfolio_summary` — it spans Webull + Tradier + TastyTrade + Fidelity in one call.
