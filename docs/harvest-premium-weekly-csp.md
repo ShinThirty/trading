@@ -60,4 +60,4 @@ Per `feedback_shadow_then_live` — prove positive expectancy on a small sample 
 
 ## Status
 
-**Investigation/trial phase as of 2026-07-17.** First trial legs identified (IWM 285P + GLD 355P, 7/24 weekly, ~$64K). No live position yet. Do not scale past the trial size until the 8–12 week ledger clears the success metric.
+**Trial phase (started 2026-07-17).** This doc holds the stable rules only — the live trial-leg state (which legs are on, account placement, fills, the running ledger) is tracked in memory (`project_harvest_premium_sleeve`), not here. Do not scale past the trial size until the 8–12 week ledger clears the success metric.
