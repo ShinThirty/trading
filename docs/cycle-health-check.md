@@ -1,95 +1,122 @@
-# Cycle Health Check: Leading Indicators for AI Capex Turn
+# AI-Capex Cycle Health Check & Watch-Only Governance
 
-By the time a hyperscaler CEO says "capex moderation" on an earnings call, AVGO and VRT are already down 20% in after-hours. You cannot wait for the official announcement. The covered calls provide a floor, but detecting the turn early lets you tighten strikes, pull expiries closer, and accelerate the exit before the gap-down.
+**Rewritten 2026-07-17.** This doc used to be a covered-call defense manual — "detect the capex turn early so you can tighten CC strikes before the gap-down." That framing is obsolete: the book exited the AI-capex theme on 2026-07-17 (see memory `project_ai_capex_theme_exit`), the cohort is now ~10% of NLV with the book ~81% cash, and 19 names sit in a **watch-only** tier. This doc's job now is **governance**: it decides, on objective signals, when each parked name should **re-enter** (relax to CSP-entry), **stay parked**, or **harden to short** (L2 long puts — the alarm-window trade).
 
-**Run this check monthly (around the 10th-15th). If 2+ signals flash yellow, execute the defensive playbook below.**
+**Run the baseline check monthly (10th–15th).** Run the event-driven checks when they trigger (earnings cluster, an AI mega-IPO print, an HY-OAS move, a neocloud-cohort crack). Cross-reference the daily reads already wired into `/briefing`: neocloud epicenter (1h), DRAM spot (1g), bear-regime score (1f).
 
-## Key Thesis Nuances
+---
 
-### The Custom Silicon Inflection (AVGO)
+## The core tension (why this is hard right now)
 
-The semi cycle thesis assumes NVDA and AVGO peak together, but that's wrong. Hyperscalers are actively pivoting from merchant silicon (Nvidia GPUs) toward custom ASICs for inference: Google TPU v7, Meta MTIA, Amazon Trainium 3. A massive chunk of their $600B+ 2026 capex is flowing to in-house chips.
+**The physical cycle is still accelerating while price, narrative, and macro have turned.** As of the 2026-07-17 exit:
 
-**Impact:** Broadcom is the primary design and networking partner for custom hyperscaler silicon (Google, Meta). If NVDA's data center revenue plateaus, don't assume the whole cycle is dead — it may be hyperscalers shifting capex internally, which *benefits* AVGO. **Decouple AVGO's thesis timeline from pure GPU metrics.** Track AVGO through custom silicon design wins and networking revenue, not NVDA sympathy.
+- **Fundamentals — accelerating.** TSMC June 2026 revenue printed **+67.9% YoY, +6.2% MoM** — the strongest YoY in the trailing year. The foundry under every accelerator is not rolling over; it's speeding up. HBM, WFE guidance, and ODM sales were not confirming a turn either.
+- **Price — diverging.** SMH −10.6% vs SPY (20d). The stocks are derating while the fundamentals accelerate — a classic late-cycle *price-leads-fundamentals* fingerprint (2000: capex peaked **after** the equities did; Cisco's best quarters were its last).
+- **Narrative + macro — bearish.** Model-layer commoditization (China frontier models), circular capex financing, mega-IPO distribution, Bear-Setup regime, ERP Tight, Bear Steepener.
 
-### The Physical Power Bottleneck (VRT)
+**So the exit deliberately front-runs the hard data.** That is a legitimate bet — the original thesis was "you cannot wait for the official announcement; by the time a CEO says 'capex moderation,' AVGO and VRT are down 20% after-hours." But it means the re-entry / harden-to-short decision must be **signal-gated**, not narrative-gated. The signal classes below tell you whether the hard data is *catching down* to the price (harden) or the price was *wrong* and fundamentals hold (re-enter). Two of these signal classes did not exist in the old doc and are exactly what drove the exit — **model-layer commoditization** and **capex funding stress**.
 
-In 2026, the AI capex cycle is constrained not just by TSMC packaging capacity but by the electrical grid itself. Gas turbines and transformers are backlogged for years.
+---
 
-**Impact:** The cycle might plateau because hyperscalers physically cannot procure the megawatts to plug in new clusters. If data center permitting slows due to grid constraints, hardware orders follow. This makes VRT potentially the *last* to roll over, not the first — its backlog stays full even after GPU orders slow. VRT is both a leading indicator for new construction AND a beneficiary of physical constraints that extend the power buildout timeline beyond the silicon cycle.
+## The watch-list, tiered by unwind phase
 
-**Book-to-Bill trap:** Stock prices trade on the *derivative* of the backlog, not its absolute size. VRT can have 3 years of backlog and still crash if the Book-to-Bill ratio (new orders received / orders billed) drops below 1.0 — that means the pipeline is draining faster than it's being replenished. Wall Street is forward-looking: a declining book-to-bill signals the growth inflection has passed, regardless of remaining backlog. Track power/thermal book-to-bill ratios in quarterly earnings, not just absolute backlog figures.
+The cycle frays from the edges inward, not all at once (see the four-phase unwind in Signal F). The tier sets each name's default governance. Higher tier = structurally later to roll = longer leash.
 
-## Signal 1: Cloud Compute Spot Market (canary in the coal mine)
+### Tier 0 — Exiting (sell now, then watch-only)
+**QCOM, RMBS** (also CRM, no pipeline entry). Held positions being sold into the exit. All in Fidelity accounts (SnapTrade read-only) → manual sells. Zero tax friction (tax-advantaged wrappers).
 
-Hyperscalers buy GPUs to rent them out. If rental demand softens, buying stops.
+### Tier 1 — Hard cut (froth; rolls first)
+**CRDO, FN, AMD, MRVL, CLS, DOCN, PLTR.** High-multiple, customer-concentrated, pure GPU/optical-attach, or application-layer narrative names — the weakest hands, punished first (Phase 2). Governance: **no re-entry** without a genuine valuation reset *and* confirmed intact fundamentals. These are the **first to harden-to-short** (Tier-1 long puts) if funding stress (Signal E) fires — they have the least floor. Examples of what puts them here: CRDO P/E ~758 + top-2 customer 61%; FN single-customer optical attach + Liq 1; AMD PEG 3.73 / P/E 128; MRVL beta 2.15 + "next Nvidia" euphoria; CLS margin-compressing ODM; DOCN ROE −20% / D/E 31 / already −35% drawdown; PLTR most valuation-extreme application-layer.
 
-- **GPU rental lead times**: If securing a large GPU cluster from AWS/Azure drops from months to days/weeks, supply has caught up to demand.
-- **Spot pricing for compute**: Track hourly rates for GPU instances (AWS P5, Azure ND H100) on spot/secondary markets. Aggressively dropping spot prices = excess un-rented capacity. Why buy more hardware if current hardware sits idle?
+### Tier 2 — Mid leash (core quality, cyclical)
+**NVDA, MU, AVGO, LRCX, ADI.** Highest-quality pure-plays — monopoly/oligopoly, best PEGs, real cash flow — but still cyclical and still capex-derived. NVDA/MU are Phase-3 "last safe havens" (roll when the last man stumbles). AVGO decouples from NVDA on custom silicon (see nuance below) but carries the circular-financing red flag (XPU/Apollo vendor-financing Anthropic/OpenAI). Governance: **re-enter only** on the post-earnings-cluster reaction **and** a real pullback (not at ATH), per the physical signals still confirming. MU additionally governed by its own exit ladder (`~/Documents/analysis/MU/`) and the `/briefing` DRAM-spot check.
 
-*Manual research — check monthly:*
-- [vast.ai](https://vast.ai) — peer-to-peer GPU marketplace, best real-time pricing aggregator
-- [Lambda Labs](https://lambdalabs.com/service/gpu-cloud) — GPU cloud pricing
-- [AWS EC2 Spot](https://aws.amazon.com/ec2/spot/pricing/) — P5/P4d spot pricing history
+### Tier 3 — Longest leash (power/grid + hyperscaler hybrids; roll last)
+**GEV, CEG, VRT, META, MSFT.** Power/grid names fray **last** — the physical grid bottleneck keeps their backlog full past the silicon cycle, and TSMC's acceleration confirms that runway. The hyperscaler hybrids (META, MSFT) have orthogonal moats (ads / enterprise) that survive a capex cut — same logic that retained GOOGL + AMZN as holds. Governance: **retain-watch**; these are the last to harden-to-short and the names whose *own* backlog/book-to-bill (not GPU sympathy) is the tell.
 
-## Signal 2: Upstream Supply Chain & ODMs
+> Retained as **holds** (not on this list): **GOOGL** (200 sh), **AMZN** (245 sh) — mega-cap hyperscaler hybrids held through their prints (7/22, 7/30). If GOOGL/AMZN capex guides confirm digestion, that is a Tier-3 harden signal for META/MSFT by extension.
 
-The companies that actually build the servers and chips report earlier and more frequently than their hyperscaler customers.
+---
 
-- **Wafer Fab Equipment (WFE) makers**: ASML, Applied Materials (AMAT), Lam Research (LRCX). These are the *true* upstream — before TSMC can expand CoWoS capacity, they must order the machines to do it. If TSMC or Samsung cancels or delays tool orders, it shows up in ASML guidance months before TSMC's own revenue dips. An ASML guidance miss is the earliest physical warning of a cycle top. *(Tool: `get_income_statement`, `get_company_news` — all US-listed with full data.)*
-- **TSMC monthly revenue**: Reported around the 10th of each month. Watch for unseasonal plateaus or declines, and YoY decel — a YoY surprise typically pre-prints upside (or downside) in the broader semi tape (NVDA / AMD / AVGO / MRVL / ASML / AMAT) before any of those names report. More importantly, watch CoWoS advanced packaging capacity — if TSMC pauses its own capex for expanding CoWoS, the cycle is topping. *(Tool: `get_tsmc_monthly_revenue` for the monthly print with YoY + computed MoM; `get_income_statement` for quarterly financials of TSM ADR.)*
-- **Taiwanese ODM monthly sales**: Quanta, Wistron, Wiwynn report sales around the 10th of every month. A sudden, unseasonal plateau in monthly revenue growth = hyperscalers quietly tapped the brakes on deliveries. *(Manual research — Taiwan-listed, no US data. Check [TWSE MOPS](https://mops.twse.com.tw/mops/web/index) for mandatory monthly filings.)*
-- **SMCI revenue trajectory**: Already volatile, but a sustained downturn here leads the broader semi space. *(Tool: `get_income_statement`, `get_company_news`.)*
+## Signal classes (the leading indicators)
 
-## Signal 3: Memory Pricing (HBM)
+### Nuance A — The custom-silicon decouple (AVGO)
+Hyperscalers are pivoting from merchant GPUs to custom ASICs (Google TPU, Meta MTIA, Amazon Trainium). If NVDA data-center revenue plateaus, don't assume the cycle is dead — capex may be shifting **internal**, which *benefits* AVGO/MRVL. Track AVGO through custom-silicon design wins and networking revenue, **not** NVDA sympathy. Caveat added 2026: the XPU/Apollo vendor-financing structure means AVGO's custom-silicon growth is now partly *circularly financed* — a Signal-E exposure, not a clean decouple.
 
-High-Bandwidth Memory is attached to every AI accelerator. Memory is notoriously cyclical and sensitive to demand shocks.
+### Nuance B — The physical power bottleneck (VRT/GEV/CEG, the book-to-bill trap)
+The cycle is constrained by the electrical grid, not just packaging. Power names can hold full backlogs even after GPU orders slow — which is why they're Tier 3. **But stock prices trade on the *derivative* of the backlog.** VRT can have 3 years of backlog and still crash if **book-to-bill drops below 1.0** (pipeline draining faster than refilled). Track power/thermal **book-to-bill**, not absolute backlog, in quarterly prints.
 
-- **HBM spot pricing**: If spot prices for HBM start softening, GPU production is slowing. *(Manual research — [TrendForce](https://trendforce.com) publishes DRAM/HBM pricing trends; detailed data is paywalled but free bulletins cover headline moves.)*
-- **Memory maker guidance**: MU is the primary tool-trackable read. SK Hynix and Samsung are Korea-listed with no usable US data — track their guidance via `get_company_news` for MU (which references competitors) and general market news. *(Tool: `get_income_statement`, `get_earnings_calendar`, `get_company_news` for MU.)*
-- **MU is in the portfolio** — its earnings calls and guidance are a direct read on HBM demand.
+### Signal Baseline — Physical cycle: is the hard data confirming yet?
+The "are fundamentals catching down to price" check. As long as these are *up*, the exit is front-running and re-entry stays live; when they roll, harden-to-short is confirmed.
+- **TSMC monthly revenue** (`get_tsmc_monthly_revenue`) — ~10th of month. Watch YoY decel and unseasonal MoM plateaus; watch commentary on CoWoS advanced-packaging capex (a pause = topping). *Current: accelerating (+67.9% YoY June).*
+- **WFE makers** — ASML, AMAT, LRCX guidance (`get_income_statement`, `get_company_news`). An ASML guidance miss is the earliest physical warning of a top (they ship the machines before TSMC expands).
+- **Taiwanese ODM monthly sales** — Quanta, Wistron, Wiwynn (~10th, manual, [TWSE MOPS](https://mops.twse.com.tw/mops/web/index)). Unseasonal plateau = hyperscalers tapped the brakes on deliveries.
+- **HBM / DRAM spot** — MU is the tool-trackable read (`get_income_statement`, `get_company_news`); spot via TrendForce/DRAMeXchange (manual, [`/briefing` 1g](../.claude/skills)). Spot *declining while contract still rises* = canonical memory rollover; leads MU earnings by 2–3 quarters.
 
-## Signal 4: Networking & Power (edge fraying)
+### Signal C — Model-layer commoditization (NEW — the demand ceiling)
+The newest and now arguably the #1 leading indicator, and the one the old doc entirely lacked. If the model layer commoditizes without an AGI breakthrough, the labs can't monetize the compute they rent — and the capex chain's end-demand premise fails (see `project_ai_commoditization`).
+- **Chinese frontier models** — DeepSeek V4, Moonshot Kimi K3 (2.8T params, largest open-source), Zhipu GLM-5.2, Alibaba Qwen (>50% of global open-source downloads). Now ~30% of global usage at ~1/10th the token cost. Track: new frontier releases, benchmark parity vs OpenAI/Anthropic, enterprise adoption of open weights, token-price collapse. (`get_market_news`, `WebSearch`.)
+- **⚠ The Jevons counter (bull refutation — watch for it).** Cheaper intelligence can mean *more* inference → *more* compute, not less. Commoditization is only bearish for the capex chain if cheaper models **fail to expand usage enough to offset the price collapse**. Before hardening on this signal, check whether aggregate inference volume is rising fast enough to keep compute demand intact — if it is, the commoditization read is *wrong* and Tier 2/3 re-entry gets stronger, not weaker. This is the single best argument against the exit; keep it in view.
 
-Semi cycles rarely turn all at once — the edges fray first, then the core.
+### Signal E — Capex funding / circular financing (NEW — who pays, and is the money nervous)
+The buildout is externally financed; the turn shows up as **funding stress** before order books (see `project_anthropic_circular_financing`, `project_ai_capex_funding_phase`, `project_alarm_window_playbook`). The old doc had nothing here.
+- **Neocloud epicenter cohort** — NBIS, IREN, CRWV, APLD (`get_quote`, wired into `/briefing` 1h). Externally-financed demand exists only while capital flows; the epicenter cracks before the generals. Cohort crack (≥3 of 4 down >5%), new 52W lows while SPY holds, or a financing-related single-name collapse (pulled/repriced offering, punitive convert, downgrade) = tripwire.
+- **HY credit** — HY OAS is the master switch (`get_bear_regime_score` credit dim, `get_market_regime`). Widening = the marginal financer is repricing risk; the capex chain's cheapest fuel is drying up.
+- **Same-issuer issuance terms** — track the *terms*, not the fact, of hyperscaler/neocloud debt (book coverage, new-issue concession, G-spreads on ORCL/AMZN paper). Deteriorating terms same-issuer = early funding stress. (Cross-issuer noise is not the signal.)
+- **Mega-IPO distribution** — SpaceX (~$1.75T, SPCX), OpenAI ($852B–$1T), Anthropic ($965B) queued for late-2026. Insiders distributing paper at peak = textbook top window. Watch first-print reactions and lockup calendars (`project_spcx_bearish_entry`, `reference_ipo_lifecycle_playbook`).
 
-- **Optical transceivers & networking**: Coherent (COHR), Lumentum (LITE), Marvell (MRVL). If they guide down, GPUs are next. CRDO connectivity is a direct read here. *(Tool: all US-listed with full data.)*
-- **Data center power equipment**: Eaton (ETN), Vertiv (VRT). If backlog for data center thermal management and power delivery stops growing, new data center construction is slowing. VRT is the canary for this subsector. *(Tool: all US-listed with full data.)*
+### Signal S — Software ROI / depreciation cliff (present-tense now)
+The $600B+ capex must be justified by software revenue. **This window is now open, not future** (the old doc said "by late 2026" — it's July 2026).
+- **AI software adoption** — Copilot, Agentforce, ServiceNow AI, Adobe Firefly revenue contribution (`get_income_statement` for MSFT, CRM, NOW, ADBE).
+- **Hyperscaler operating margins (the depreciation wave)** — 2024–25 GPU capex now depreciating through the P&L over 3–4 years. Compressing op margins with capex still growing = CFOs get forced into cuts. Track MSFT/META/GOOGL op-margin QoQ (`get_income_statement`).
+- **The "AI costs more than the humans it replaces" narrative** — the sharper 2026 version of the ROI-ceiling test. If enterprises won't pay because productivity gains don't materialize, the thesis collapses from the demand side.
 
-## Signal 5: Software ROI Check (the fundamental ceiling)
+### Signal G — GPU spot market (now ambiguous — cross-read required)
+Falling GPU rental prices used to be a clean canary (excess un-rented capacity → stop buying). **It is no longer clean:** a spot-price drop can be commoditization-driven oversupply (bearish, Signal C) *or* Jevons-driven where cheap compute is being consumed as fast as it's added (bullish). Read it **only** alongside Signal C's inference-volume check. Sources (manual, monthly): [vast.ai](https://vast.ai), [Lambda](https://lambdalabs.com/service/gpu-cloud), [AWS EC2 Spot](https://aws.amazon.com/ec2/spot/pricing/).
 
-The $690B+ in AI infra capex must eventually be justified by software revenue. If enterprise AI adoption stalls, hyperscaler CFOs will pull the plug.
+### Signal F — Sector breadth / the four-phase unwind (currently flashing)
+Parabolic semi rallies unwind from the edges inward. **This is the signal currently yellow** (SMH −10.6% vs SPY = narrowing breadth).
+1. **Phase 1 — Everything rips.** Broad rally, small caps lead, SOX runs 18+ days.
+2. **Phase 2 — Weakest hands punished.** Slight misses get crushed −10–20%. "Show me the numbers" activates. *(Tier-1 names live here.)*
+3. **Phase 3 — Capital concentrates.** Money crowds into 1–3 mega-caps (NVDA, MU) at ATH while mid/small caps bleed. Can last weeks. *(Tier-2 leaders live here.)*
+4. **Phase 4 — Last man stumbles.** The final holdout reports "good but not great"; no breadth to cushion; the sector gaps down.
 
-- **Watch Phase 3 AI software adoption**: Microsoft Copilot adoption numbers, ServiceNow AI agents, Salesforce Agentforce, Adobe Firefly revenue contribution. *(Tool: `get_income_statement` for MSFT, CRM, NOW, ADBE — all US-listed.)*
-- **Hyperscaler operating margins (depreciation cliff)**: The $600B+ in 2024-2025 GPU/infra capex goes on the balance sheet as an asset, then depreciates through income statements over 3-4 years. By late 2026, this depreciation wave hits MSFT/META/GOOG operating margins hard. If AI software revenue (Copilot, Agentforce) hasn't scaled to offset the depreciation expense, margins compress. When Wall Street sees margin compression with capex still growing, CFOs get forced into cuts. Track hyperscaler operating margins quarter-over-quarter — expanding margins = AI monetization working, compressing margins = depreciation outrunning revenue. *(Tool: `get_income_statement` for MSFT, META, GOOG — compare operating margin trends.)*
-- **The test**: If multiple quarters pass and enterprises refuse to pay for AI tools because productivity gains aren't materializing, the infrastructure investment thesis collapses from the demand side.
+**Track:** ATH concentration ratio (how many of the top-20 semis within 2% of 52W high — narrowing from 10+ to 2–3 = Phase 3); 1-month dispersion (leaders vs laggards spread widening = late cycle); and the asymmetry rule — at ATH the market sells not on deterioration but when **the rate of improvement slows** (second derivative negative). 25% growth priced for 40% is a selloff.
 
-## Signal 6: Sector Breadth Concentration (late-cycle fingerprint)
+---
 
-Parabolic semi rallies don't end all at once — they unwind from the edges inward. Track how capital distributes across the cap spectrum within semis. When the rally narrows to 1-3 names at ATH while everything else rolls over, the cycle is in its terminal phase.
+## Governance decision tree (replaces the old CC playbook)
 
-**The four-phase unwind pattern:**
+Book context: ~81% cash, L2 options (long puts OK; **no** spreads until L3, ~2027 — `project_option_levels`), structural SPY tail hedge already on (`project_portfolio_hedge`).
 
-1. **Phase 1 — Everything rips.** Broad-based rally, small caps outperform, SOX runs 18+ consecutive days. This is the easy money phase.
-2. **Phase 2 — Weakest hands punished.** Names that miss even slightly get crushed (-10-20%). The "show me the numbers" filter activates. Fundamentals must justify the multiple — 18% YoY growth isn't enough if the market expected 25%.
-3. **Phase 3 — Capital concentrates.** Money flows into 1-3 "safest" mega-cap names (NVDA, MU) while mid/small caps bleed. The last safe havens hit ATH as everything else rolls over. This phase can last weeks.
-4. **Phase 4 — Last man standing stumbles.** The final holdout reports "good but not great" earnings. With no breadth underneath to cushion, the entire sector gaps down.
+> **Governing discipline — don't chase.** The cohort can still rip to new ATHs after this exit; that is *expected*, not a refutation. New highs on narrowing breadth are Phase-3 distribution (Signal F) — a higher exit for eventual puts, **never** a re-entry. Re-entry is earned only by a valuation *reset* with fundamentals intact — never by price making new highs. This is the FOMO-Trap circuit breaker (`decision-framework.md`) applied to the entire theme, and the specific failure mode this exit exists to prevent (`feedback_narrative_meltup_trap`).
 
-**What to track:**
+The three states:
 
-- **ATH concentration ratio**: How many of the top 20 semi names by market cap are within 2% of 52W high? If the answer narrows from 10+ to 2-3, you're in Phase 3.
-- **Dispersion**: Calculate the spread between the best and worst performers in the sector over 1 month. Rising dispersion (leaders up 10%, laggards down 15%) = late cycle.
-- **Asymmetry at ATH**: When the mega-cap leaders are at ATH, earnings must be *exceedingly* good to sustain the rally. "Good" is already priced in. The market doesn't sell when fundamentals deteriorate — it sells when **the rate of improvement slows** (second derivative turns negative). A quarter of 25% growth at a stock priced for 40% growth is a selloff.
+### RE-ENTER (relax a tier to CSP-entry)
+**Only two doors open re-entry — at least one must hold. Nothing else qualifies** (not a strong print, not a new ATH, not "it's up a lot"):
 
-**To assess current phase:** classify the top 20 semi names by proximity to 52W high — at ATH (0 to +3%), near ATH (-1 to -4%), rolling over (-5 to -8%), correcting (-9%+). When only 1-3 names are at ATH while everything else is red, that's Phase 3. When the last holdout reports a "good but not great" quarter, Phase 4 begins.
+1. **Valuation reset** — the froth is out and the name is genuinely *cheap* (multiples compressed to reasonable, not merely off ATH), fundamentals demonstrably intact. This door can open **mid-cycle**: a deep enough individual reset re-qualifies a name even while the broader cycle is still running.
+2. **Cycle turn** — the AI-capex cycle has been through a genuine downturn (the exit thesis played out — physical signals rolled over per the Baseline) **and** is *confirmed* bottoming / re-accelerating into a new up-leg. This is the post-washout door for the survivors.
 
-## Defensive Playbook (when 2+ signals flash yellow)
+Guardrails on either door: macro not actively deteriorating (bear-regime score not rising through tiers, HY OAS stable); sequence by tier — **Tier 3 first** (power/hybrids), **Tier 2 on a real pullback**, **Tier 1 only on a deep reset**; CSP-as-entry per the growth-first philosophy, scaled in, respecting the cluster cap (`get_cluster_concentration`, 35% of book).
 
-| Action | Detail |
-|--------|--------|
-| **Tighten CC strikes** | Roll existing CCs to closer-to-ATM — accept less upside for more downside protection |
-| **Pull CC expiries closer** | Roll long-dated CCs to shorter-dated expiries — accelerate the exit |
-| **Stop rolling CSPs** | On Phase 1 names, let existing CSPs expire. Don't write new ones. |
-| **Accelerate LEAPS exits** | If signals fire before the earnings catalyst, close for whatever profit exists rather than hold into a gap-down |
-| **Rotate into Phase 3** | Begin CSP pipeline on software/application winners at fear-compressed valuations |
-| **Portfolio hedges** | Activate index bear put spreads (deferred until L3 approval) |
+### HOLD PARKED (default)
+Signals mixed / fundamentals accelerating but macro hostile — today's state. Do nothing; cash earns the T-bill yield (~4.5%). Powder deploys faster if HY OAS *tightens*, freezes if it *widens*. This is the low-regret default; most months end here.
+
+### HARDEN TO SHORT (L2 long puts — the alarm-window trade)
+**Gate hard — requires convergence, not a single flicker:** funding stress firing (Signal E: epicenter cracking AND/OR HY OAS widening) **AND** commoditization confirmed with the Jevons counter *failing* (Signal C: inference volume not offsetting price collapse) **AND** breadth in Phase 4 (Signal F). Only then buy long puts, **Tier 1 names first** (least floor), sized as defined-risk tail bets (long puts bleed theta — this is not a carry position). Cross-reference `alarm-window-playbook.md` and the existing bearish theses (SPCX/QNT/CBRS). Do **not** confuse this with the structural SPY tail hedge, which is trigger-based and never opened on these signals.
+
+### Never
+- **Chase strength or a new ATH.** A cohort ripping to new highs is not a re-entry trigger — it is the Phase-3 distribution pattern. The only re-entry is a valuation *reset*, never a breakout. Getting pulled back in by a melt-up is the specific failure this exit exists to prevent.
+- **Re-enter on a single strong hyperscaler print** — one green quarter ≠ theme re-arm.
+- **Tighten/roll CCs as the primary response** (the old playbook) — the book is no longer long-with-CCs.
+- **Deploy powder into a name whose tier hasn't cleared its RE-ENTER gate.**
+
+---
+
+## Cadence
+
+- **Monthly baseline** (10th–15th): TSMC print, WFE/ODM sales, MU/HBM, breadth phase. If Baseline still up → hold parked or continue selective re-entry; if rolling → move toward harden.
+- **Event-driven**: earnings cluster (GOOGL 7/22 canary → MSFT/META/QCOM/LRCX 7/29 → AMZN 7/30), any AI mega-IPO first print, an HY-OAS move, a neocloud-cohort crack.
+- **Daily (via `/briefing`)**: neocloud epicenter (1h), DRAM spot (1g), bear-regime score (1f) — these are the fast tripwires that pull an event-driven check forward.
