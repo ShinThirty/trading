@@ -24,18 +24,27 @@ fit the single-Endpoint shape, and the response is binary XLSX bytes parsed by
 openpyxl in NaaimHistoryResponse.from_response.
 """
 
+from __future__ import annotations
+
 import asyncio
 import json
 import re
 from datetime import date, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
 from trading_clients.cache import TTLCache
 from trading_clients.endpoints.naaim import NaaimHistoryResponse
-from trading_clients.playwright_host import BrowserContext, PlaywrightHost
 from trading_clients.rate_limit import RateLimiter
+
+if TYPE_CHECKING:
+    # Playwright-backed types used only in annotations. With
+    # `from __future__ import annotations` they never evaluate at runtime, so
+    # deferring the import keeps this module — and the Lambda alert watcher that
+    # imports it — loadable WITHOUT Playwright; the httpx fallback path runs
+    # host-less. playwright_host.py hard-requires the extra at import time.
+    from trading_clients.playwright_host import BrowserContext, PlaywrightHost
 
 BASE_URL = "https://www.naaim.org"
 # The WordPress media library indexes the weekly XLSX even though the program
