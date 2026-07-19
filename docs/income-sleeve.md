@@ -51,15 +51,15 @@ Assigned shares (or shares already held, e.g. V) → **wheel with 30–45 DTE co
 ## Structure
 
 - **DTE:** **monthly, 30–45 DTE.** Open ~45, close at 50% profit **or by 21 DTE**. This is the theta sweet spot — harvest the steep part of decay and exit before gamma turns it into a coin-flip. (Weekly was the trial default; it doesn't scale across four accounts on a full-time schedule and gates the vehicle set down to QQQ/IWM only.)
-- **Delta:** **~15Δ** index core (don't want assignment, high win rate) · up to **~25Δ** on willing-to-own names (richer premium, assignment is fine). Split by whether you'd want the shares.
+- **Delta = intent, not instrument.** **~15Δ** for assignment-averse legs (high win rate, don't want the shares) — available on **the index *or* an individual name**; up to **~25Δ** for willing-to-own legs (richer premium, assignment is fine) — single names you'd genuinely own. The delta reflects whether you want the shares, not whether the underlying is an ETF. Only the ~25Δ willing-to-own legs trip gate 4.
 - **Cadence:** roll into the next monthly as legs close. PDT is eliminated (`reference_pdt_rule_eliminated`) so timing is unconstrained.
 
 ## Management (where income programs live or die)
 
 - **Close at 50% of max profit.** The single most important rule — never hold for the last pennies against gamma.
 - **Manage by 21 DTE** regardless of profit — roll to the next monthly or close.
-- **If tested** (short put ITM or delta toward −0.30/−0.40, or loss ≈ 2× the credit): index legs → **roll down-and-out for credit or close** (don't want the shares); willing-to-own legs → **roll or accept assignment**, then wheel with 30–45 DTE CCs.
-- **Event guard:** index legs carry no single-name event risk (a 15Δ / 34-DTE index put spanning a macro print is fine). Willing-to-own legs sold *through* a name's earnings are a deliberate willing-to-own bet — only do it on names you'd own on a bad print.
+- **If tested** (short put ITM or delta toward −0.30/−0.40, or loss ≈ 2× the credit): **assignment-averse legs (~15Δ, index *or* single name)** → **roll down-and-out for credit or close** (don't want the shares); **willing-to-own legs (~25Δ)** → **roll or accept assignment**, then wheel with 30–45 DTE CCs. The stop branches on intent, not instrument.
+- **Event guard:** the index carries no single-name event risk (a 15Δ / 34-DTE index put spanning a macro print is fine). A **single name — even at 15Δ — can gap through the stop on an earnings/headline print** before you can roll, so only span a name's earnings on a leg you'd accept assignment on (which makes it a willing-to-own bet regardless of the delta you opened at). Otherwise keep single-name legs clear of their earnings.
 
 ## ⚠ Late-cycle circuit breaker (load-bearing)
 
