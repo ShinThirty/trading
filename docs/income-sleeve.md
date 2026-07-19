@@ -18,7 +18,9 @@ The sleeve is defined by an **account boundary**, not a dollar carve-out — a c
 
 ## Mandate
 
-Net yield **meaningfully above the ~4.5% T-bill floor** on a bounded slice, without converting powder into a static short-vol position. If it can't clear T-bills net of spread and the inevitable tested weeks, it isn't worth the tail exposure — **kill it.**
+**Match the index with less drawdown** — the honest goal for a capped short-vol book. A CSP sleeve *cannot* beat the S&P on absolute return (upside is capped at the premium); over a full cycle it delivers index-like return with materially lower drawdown — better risk-adjusted, not higher. Success = **SPY-like return with a smaller peak-to-trough**, judged over a full cycle (bull windows lag on return *by design* — don't kill it for that).
+
+The **~4.5% cash floor** is the absolute minimum, not the target: if the sleeve can't clear cash net of the inevitable tested weeks, kill it. And if it merely *matches* SPY's return while taking *similar* drawdown, the sleeve adds nothing — convert that capital (especially the tax-free Roth/HSA space, whose best use is long-term equity compounding) to equity instead. Judge it with `get_income_sleeve_ledger`, which prints the window's sleeve return + realized drawdown next to SPY buy-and-hold.
 
 ## Capital cap (hard)
 
@@ -68,7 +70,7 @@ This is the discipline that reconciles selling vol with the keep-powder posture:
 The sleeve is monitored on its own track so income positions never blur into the growth book:
 
 - **Daily — `/briefing` Step 2c (Income Sleeve Monitor).** Tight: isolate the sleeve legs by account, flag legs at ≥50% profit / tested / expiring / newly assigned, and confirm the circuit-breaker gate. Silence if nothing needs action.
-- **Biweekly — `/review` §3 item 5 (Income Sleeve ledger).** Full: cap utilization vs $250K, net premium harvested vs the T-bill floor (the mandate metric), per-leg management, composition/concentration, circuit-breaker state.
+- **Biweekly — `/review` §3 item 5 (Income Sleeve ledger).** Full, via **`get_income_sleeve_ledger`** (transaction-ledger, contribution-immune): sleeve return + realized drawdown vs SPY buy-and-hold (the mandate metric), net premium vs the ~4.5% cash floor, cap utilization vs $250K, per-leg management, composition/concentration, circuit-breaker state.
 
 ## Status / live state
 

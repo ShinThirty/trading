@@ -460,6 +460,111 @@ async def get_csp_utilization(ctx: Context) -> str:
     return "\n".join(sections)
 
 
+# The harvest-premium income sleeve, defined by an account boundary (see
+# docs/income-sleeve.md). SnapTrade-visible members only; the Webull Roth IRA is
+# also a sleeve account but needs the order-history feed (v2).
+_SLEEVE_SNAPTRADE_NAMES = {"BrokerageLink", "BrokerageLink Roth", "Health Savings Account"}
+_SLEEVE_INCEPTION = "2026-07-18"
+
+
+@mcp.tool()
+async def get_income_sleeve_ledger(
+    ctx: Context,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> str:
+    """Measure the harvest-premium income sleeve's realized yield from its
+    transaction ledger — contribution-immune, unlike account NLV.
+
+    Sums net option premium (opening credits − buyback debits, fees already
+    netted) and share-leg cash flow across the Fidelity sleeve accounts
+    (BrokerageLink, BrokerageLink Roth, HSA) since the sleeve inception, then
+    divides net premium by current open-CSP collateral to annualize. Contributions,
+    withdrawals, dividends, interest, and money-market sweeps are excluded — they
+    are what pollute an NLV-based yield. Also benchmarks the window's return and
+    realized drawdown against SPY buy-and-hold — the mandate is index-like return
+    with LESS drawdown, not beating the index outright. See docs/income-sleeve.md.
+
+    Coverage: Webull Roth IRA (also a sleeve account) is not included yet —
+    SnapTrade can't see Webull, and its premium needs the order-history feed.
+    Early readings are conservative: pre-inception legs still open add collateral
+    without their (uncounted) premium, until they close/roll.
+
+    start_date: inclusive YYYY-MM-DD; defaults to the 2026-07-18 inception.
+    end_date: inclusive YYYY-MM-DD; defaults to today.
+    """
+    from datetime import date
+
+    from trading_clients.income_sleeve import (
+        compute_sleeve_ledger,
+        format_sleeve_ledger,
+        max_drawdown_pct,
+    )
+
+    start = start_date or _SLEEVE_INCEPTION
+    as_of = end_date or date.today().isoformat()
+
+    client = _snaptrade(ctx)
+    accts = await _snaptrade_targets(client, None)
+    sleeve = [a for a in accts if (a.get("name") or "") in _SLEEVE_SNAPTRADE_NAMES]
+    if not sleeve:
+        return (
+            "No SnapTrade sleeve accounts found "
+            "(expected BrokerageLink / BrokerageLink Roth / Health Savings Account)."
+        )
+
+    activity_resps, option_resps = await asyncio.gather(
+        asyncio.gather(
+            *(
+                client.get(
+                    sn.ACTIVITIES,
+                    sn.AccountActivitiesRequest(
+                        a.get("id") or "", limit=1000, start_date=start, end_date=end_date
+                    ),
+                )
+                for a in sleeve
+            )
+        ),
+        asyncio.gather(
+            *(client.get(sn.OPTIONS, sn.AccountPathRequest(a.get("id") or "")) for a in sleeve)
+        ),
+    )
+
+    activities_by_account: dict[str, list[dict]] = {}
+    collateral_by_account: dict[str, float] = {}
+    for acct, acts, opts_resp in zip(sleeve, activity_resps, option_resps):
+        label = _snaptrade_label(acct)
+        activities_by_account[label] = acts.activities
+        collateral = sum(
+            p.strike * CONTRACT_MULTIPLIER * abs(p.quantity)
+            for p in opts_resp.to_normalized()
+            if p.option_type == "put" and p.quantity < 0
+        )
+        if collateral:
+            collateral_by_account[label] = collateral
+
+    ledger = compute_sleeve_ledger(activities_by_account, collateral_by_account, start, as_of)
+
+    # Benchmark the window against SPY buy-and-hold (return + max drawdown) — the
+    # mandate is index-like return with less drawdown, not beating the index.
+    spy_return_pct = spy_maxdd_pct = None
+    if ledger.days >= 1 and ledger.collateral > 0:
+        hist = await _tradier(ctx).get(t.HISTORY, t.GetHistoryRequest("SPY", "daily", start, as_of))
+        closes = [float(d["close"]) for d in hist.days if d.get("close") is not None]
+        if len(closes) >= 2:
+            spy_return_pct = (closes[-1] / closes[0] - 1) * 100.0
+            spy_maxdd_pct = max_drawdown_pct(closes)
+
+    coverage = (
+        "Coverage: Fidelity BrokerageLink / BrokerageLink Roth / HSA. Webull Roth IRA not yet "
+        "included (needs order-history feed). Excludes contributions, withdrawals, dividends, "
+        "interest, and money-market sweeps."
+    )
+    return format_sleeve_ledger(
+        ledger, coverage, spy_return_pct=spy_return_pct, spy_maxdd_pct=spy_maxdd_pct
+    )
+
+
 @mcp.tool()
 async def get_free_capital(ctx: Context) -> str:
     """Calculate free (deployable) capital across all brokerage accounts.
