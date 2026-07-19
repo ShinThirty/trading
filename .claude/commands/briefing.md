@@ -158,6 +158,8 @@ Thresholds are initial calibration (2026-07-14) for names with 3-6% daily vol �
 
 1. Call `get_portfolio_summary` — it spans Webull + Tradier + TastyTrade + Fidelity in one call.
 
+   **Scope:** this step covers the **growth / position-building book** (Webull Individual Cash + Margin). The **income-sleeve** legs (Webull Roth IRA + Fidelity BrokerageLink / BrokerageLink Roth / HSA) are handled separately in **Step 2c** — don't double-cover them here. See [income-sleeve.md](../../docs/income-sleeve.md).
+
 2. Scan for positions needing attention TODAY or within the next 7 days:
    - **Options expiring within 14 DTE**: flag for roll/close/let-expire decision
    - **Options at >50% profit**: flag for early close
@@ -195,6 +197,20 @@ Flag only against playbook triggers:
 - **No hedge in book** → One-time program-commit decision, not a daily signal call. Run `/hedge` Step 5.
 
 Do NOT flag on cleared signals, vol normalizing, premium decay, or drawdown anxiety — none are valid close reasons. No triggers + hedge exists → **"Hedge healthy, hold."**
+
+## Step 2c: Income Sleeve Monitor
+
+Daily health check on the harvest-premium income sleeve, kept separate from the growth book (Step 2) so the income-vs-growth division stays clean. Per [income-sleeve.md](../../docs/income-sleeve.md), the sleeve lives in the tax-advantaged accounts (**Webull Roth IRA + Fidelity BrokerageLink / BrokerageLink Roth / HSA**); the two main Webull Individual Cash/Margin accounts are the growth book and are NOT part of this monitor.
+
+From the `get_portfolio_summary` output already pulled in Step 2, isolate the income-sleeve legs by account. Flag only what needs action:
+- **≥50% of max profit** → close (the core rule — never hold for the last pennies against gamma).
+- **Tested** (short put ITM or <3% OTM, or delta toward −0.30) → roll down-and-out for credit / close (index legs), or accept assignment→wheel (willing-to-own legs).
+- **Expiring ≤7 DTE**, or a monthly leg **past 21 DTE** → close / roll to next month / let-expire decision.
+- **Newly assigned** → flag for a 30–45 DTE covered-call overlay (wheel).
+
+**Circuit breaker (gates NEW legs only):** if Step 1f bear-regime is **Building+ (≥4)** OR HY OAS is widening → surface "🔴 income sleeve PAUSED — manage only, no new CSPs" and propose no adds. Otherwise, if a new leg is being considered, note cap headroom (open collateral vs the **$250K cap**).
+
+No income-sleeve action needed → skip the section (silence is fine). The full ledger — net premium vs the T-bill floor, per-account cap utilization, composition — lives in the biweekly `/review` (§3 item 5).
 
 ## Step 3: Pipeline Catalysts
 

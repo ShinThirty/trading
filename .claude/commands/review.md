@@ -159,12 +159,19 @@ Present as carry-forward items before starting any analysis.
 
 3. Call `get_iv_metrics` on covered positions to check if IV Rank favors writing new CCs.
 
-4. **Wheel accounts** (Webull Roth + Fidelity HSA):
+4. **Wheel accounts** (Webull Roth + Fidelity HSA — part of the income sleeve; see item 5 for the sleeve-wide ledger):
    - Open CSPs: distance to strike, % profit, buy back at 50%?
    - Held shares (if assigned): write CC? At what strike?
    - Open CCs: approaching strike? Let assign or roll?
    - Chain P&L: running total across all wheel cycles per name.
    - Thesis check: still range-bound? Any catalysts changing the picture?
+
+5. **Income Sleeve ledger** — the harvest-premium theta book, reviewed as ONE ledger and kept separate from the growth-first CSPs in items 1–3. Per [income-sleeve.md](../../docs/income-sleeve.md), the sleeve spans the tax-advantaged accounts (Webull Roth IRA + Fidelity BrokerageLink / BrokerageLink Roth / HSA); the main Webull Individual Cash/Margin accounts are the growth book (Section 2). Review:
+   - **Cap utilization** — sum open-CSP collateral (strike × 100 per leg) across the 4 accounts vs the **$250K cap**. Cross-check the 60% rule (sleeve + growth-first entry-CSP collateral ≤ 60% of cash).
+   - **Net premium vs T-bill floor** — premium harvested − buybacks − assignment MTM, annualized, vs ~4.5%. The mandate metric: if the sleeve isn't clearing T-bills *meaningfully* net of tested weeks, flag for kill/resize per the doc.
+   - **Per-leg management** — legs at ≥50% profit (close), tested legs (roll/close/assign per the index-vs-willing-to-own rule), expiring ≤14 DTE or past 21 DTE, assigned shares to wheel with 30–45 DTE CCs.
+   - **Composition** — index-core vs willing-to-own mix and over-concentration in any one underlying; upcoming single-name earnings on willing-to-own legs (sold-through = a deliberate own-it bet; index legs carry no single-name event).
+   - **Circuit breaker** — confirm Section 1 item 2a tier: Building+ or HY OAS widening = sleeve paused (manage only, no adds). State the gate explicitly.
 
 ## 4. HEDGE PROGRAM
 
