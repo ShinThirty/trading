@@ -28,19 +28,25 @@ The **~4.5% cash floor** is the absolute minimum, not the target: if the sleeve 
 - Cross-check the 60% rule (`feedback_60pct_rule`): income-sleeve collateral **+** the growth-first entry-CSP collateral ≤ 60% of the cash account. At the $250K cap plus the entry CSPs this sits far under — verify each review, don't assume.
 - The rest of the cash stays **powder / T-bills**. Incremental yield on a slice, never a redeployment of the pile.
 
-## Universe
+## Universe — your choice, gated
 
-**Index core (the engine):**
-- **QQQ + IWM.** Tight monthly spreads (<3%), diversified, both clear the T-bill floor at 15Δ.
-- **DIA is out** — at 15Δ its monthly annualized yield (~3.9%) is *below* the 4.5% floor. Fails the mandate.
-- **SPY is out** — selling SPY puts shorts the same vol the structural tail hedge is long (`tail-hedge-playbook.md` / `project_portfolio_hedge`).
+**You pick the instrument.** The sleeve no longer prescribes a fixed list — any underlying you choose is admitted if it clears the gates below. The gates are what protect the mandate (match the index with less drawdown); the specific ticker is yours. QQQ + IWM remain the natural *default* core (tight <3% monthly spreads, diversified, both clear the floor at 15Δ) — a starting point, not a fence.
 
-**Willing-to-own bucket (opportunistic):**
-- Liquid quality single names you'd genuinely own, sold at ~25Δ so assignment→wheel is a *feature*.
-- **Spread gate: only sell when the monthly bid/ask spread is < ~15%.** Wide-spread names (e.g. COST ran ~21%) eat the edge — drop them even when the headline yield looks rich. Indices are the clean vehicle; single names are opportunistic.
-- **Sector ETFs are permanently out** — XLP/XLU/XLE etc. show rich headline IV but 40–125% option spreads at every tenor; un-harvestable.
-- **Gold is capped** — GLD/GDX carry rich IV but the book already holds a large (underwater) gold position; no more gold beta.
-- Assigned shares (or shares already held, e.g. V) → **wheel with 30–45 DTE covered calls** (`feedback_cc_duration`).
+**The gates — a candidate must clear all that apply:**
+
+1. **Liquidity gate** — monthly bid/ask spread **< ~15%** at your target strike. Wide-spread names eat the edge before theta pays (COST ran ~21%; **sector ETFs — XLP/XLU/XLE etc. — run 40–125% at every tenor and are effectively un-harvestable**). Tighter is better; the index ETFs sit <3%.
+2. **Yield-floor gate** — the 15Δ monthly annualized premium must clear the **~4.5% cash floor**, else you're taking assignment risk for less than SGOV pays (this is why DIA, ~3.9% at 15Δ, fails as a *core* engine).
+3. **Hedge-conflict gate** — **no SPY puts.** Selling SPY vol shorts the same tail the structural hedge is long (`tail-hedge-playbook.md` / `project_portfolio_hedge`). QQQ / IWM / single names don't conflict.
+4. **Willing-to-own gate** — anything sold above ~15Δ (the 25Δ bucket) must be a name **you'd genuinely own on assignment**, because at 25Δ assignment is the base case, not the tail. Index ETFs auto-pass; single names need the judgment.
+5. **Concentration gate** — respect existing book exposure. **Gold is capped** (GLD/GDX carry rich IV but the book already holds a large, underwater gold position — no more gold beta). A name already large in the growth book counts against the cluster cap (`project_circular_financing_buckets`).
+
+**Overriding a gate** is allowed *only* as a conscious willing-to-own decision on gate 4 — e.g. a slightly-wide single name you truly want. Gates 1–3 and 5 are hard: a below-floor yield, a hedge conflict, or an over-concentrated add defeats the sleeve's purpose regardless of how much you like the ticker.
+
+**Mandate guardrail:** free choice widens the drawdown profile — the more collateral concentrates in single names, the more the sleeve drifts from index-like behavior toward idiosyncratic risk. Keep the *core* diversified (indices or a spread of names) and use single-name free choice as the opportunistic layer. `get_income_sleeve_ledger`'s drawdown-vs-SPY check is the backstop that flags when your choices have drifted off-mandate.
+
+**Pre-trade check (run before every new leg):** name the instrument; the flow pulls `get_iv_metrics` (liquidity rating + IV rank) and `get_option_chain` (spread at your delta), computes the 15Δ annualized yield vs the floor, and confirms the gates before previewing the order. Clears → preview → your approval → place.
+
+Assigned shares (or shares already held, e.g. V) → **wheel with 30–45 DTE covered calls** (`feedback_cc_duration`).
 
 ## Structure
 
