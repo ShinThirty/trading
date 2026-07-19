@@ -30,7 +30,11 @@ DISCORD_BOT_TOKEN  := $(shell python3 -c "$(READ_RC); print(c['discord']['bot_to
 # AWS credentials: uses "personal" profile with credential_process bridge to aws login
 export AWS_PROFILE := personal
 
-.PHONY: build deploy destroy credentials credentials-delete register-commands test test-local init clean
+# Dispatcher Lambda + smoke-test artifacts
+DISPATCHER := trading-alerts-dispatcher
+SMOKE_OUT  := /tmp/trading-alerts-smoke.json
+
+.PHONY: build deploy destroy credentials credentials-delete register-commands test test-local smoke init clean
 
 ## Build Lambda deployment ZIP
 build:
@@ -40,9 +44,11 @@ build:
 init:
 	@cd $(TF_DIR) && terraform init
 
-## Build + deploy all AWS resources
+## Build + deploy all AWS resources, then smoke-test the dispatcher
 deploy: build init
-	@cd $(TF_DIR) && terraform apply -var="discord_public_key=$(DISCORD_PUBLIC_KEY)"
+	@set -e
+	cd $(TF_DIR) && terraform apply -var="discord_public_key=$(DISCORD_PUBLIC_KEY)"
+	$(MAKE) -C $(PKG_DIR) smoke
 
 ## Populate SSM credentials from ~/.tradingrc
 credentials:
@@ -72,6 +78,35 @@ test:
 ## Test locally without AWS — defaults to --list; pass TRIGGER=name to actually run a watcher
 test-local:
 	@uv run python $(PKG_DIR)/scripts/invoke_local.py $(if $(TRIGGER),--trigger $(TRIGGER),--list)
+
+## Post-deploy smoke test — fail if the dispatcher can't import + dispatch.
+## Runs automatically at the end of `deploy`; also runnable standalone.
+## A bogus trigger is used on purpose: the handler returns its "unknown trigger"
+## payload *before* loading config/DynamoDB, so no watcher runs and nothing posts
+## to Discord — yet the whole module (all 18 watchers) must still IMPORT, which is
+## exactly the Runtime.ImportModuleError failure that silently took the fleet down
+## (2026-07-08). Asserts FunctionError is null and the expected payload came back.
+smoke:
+	@set -e
+	aws lambda wait function-updated --function-name $(DISPATCHER)
+	echo "==> Smoke-testing $(DISPATCHER) (import + handler dispatch)"
+	FUNC_ERR=$$(aws lambda invoke \
+	  --function-name $(DISPATCHER) \
+	  --payload '{"trigger":"__smoke__"}' \
+	  --cli-binary-format raw-in-base64-out \
+	  --query 'FunctionError' --output text \
+	  $(SMOKE_OUT))
+	if [ "$$FUNC_ERR" != "None" ]; then
+	  echo "!! SMOKE FAILED — dispatcher raised (FunctionError=$$FUNC_ERR):"
+	  python3 -m json.tool $(SMOKE_OUT) 2>/dev/null || cat $(SMOKE_OUT)
+	  exit 1
+	fi
+	if ! python3 -c "import json,sys; d=json.load(open('$(SMOKE_OUT)')); sys.exit(0 if isinstance(d,dict) and 'available' in d else 1)"; then
+	  echo "!! SMOKE FAILED — unexpected dispatcher response:"
+	  python3 -m json.tool $(SMOKE_OUT) 2>/dev/null || cat $(SMOKE_OUT)
+	  exit 1
+	fi
+	echo "==> SMOKE PASSED — dispatcher imports + dispatches cleanly (no watcher ran, no Discord post)"
 
 ## Destroy all AWS resources
 destroy:
