@@ -6,6 +6,7 @@ import asyncio
 from datetime import date, timedelta
 
 from fastmcp import Context, FastMCP
+from trading_clients import fcf
 from trading_clients.endpoints import finnhub as fh
 from trading_clients.endpoints import fmp
 from trading_clients.endpoints import tastytrade as tt
@@ -111,6 +112,47 @@ async def get_cash_flow(ctx: Context, symbol: str, period: str = "annual", limit
         fh.FINANCIALS_REPORTED, fh.FinancialsReportedRequest(symbol, freq)
     )
     return result.cash_flow_markdown(limit)
+
+
+@mcp.tool()
+async def get_fcf_margin(
+    ctx: Context, symbol: str, quarters: int = 8, threshold_pct: float = 15.0
+) -> str:
+    """Get free-cash-flow margin — (Operating CF − Capex) / Revenue — per quarter,
+    plus TTM, prior TTM, and the trend. Makes an FCF-margin thesis trigger
+    mechanically checkable instead of a judgment call.
+
+    Reports the trigger verdict on TTM, not on a single quarter: one quarter of
+    working-capital build or a lumpy capex step can halve the margin with nothing
+    changed in the business, so a quarter below threshold reads as EARLY WARNING
+    while TTM holds. Also reports an ex-SBC variant, which additionally subtracts
+    stock compensation that standard FCF adds back as non-cash — for heavy-SBC
+    semis and software that add-back can be a third of reported FCF.
+
+    symbol: ticker symbol (e.g. 'AMD').
+    quarters: fiscal quarters to pull (default 8 — enough for TTM vs prior TTM).
+    threshold_pct: the margin floor the trigger is checked against (default 15.0).
+
+    Requires [finnhub] section in ~/.tradingrc.
+    """
+    client = _finnhub(ctx)
+    # Both feeds are required: the quarterly rows are year-to-date cumulative and
+    # never contain a Q4, which is recovered as (10-K annual - nine-month).
+    quarterly, annual = await asyncio.gather(
+        client.get(fh.FINANCIALS_REPORTED, fh.FinancialsReportedRequest(symbol, "quarterly")),
+        client.get(fh.FINANCIALS_REPORTED, fh.FinancialsReportedRequest(symbol, "annual")),
+    )
+    n = max(quarters, 1)
+    years = n // 4 + 2
+    report = fcf.analyze(
+        symbol,
+        quarterly.income_numeric(n),
+        quarterly.cf_numeric(n),
+        annual.income_numeric(years),
+        annual.cf_numeric(years),
+        threshold_pct,
+    )
+    return report.to_output()
 
 
 @mcp.tool()

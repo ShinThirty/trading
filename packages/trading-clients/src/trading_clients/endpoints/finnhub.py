@@ -291,8 +291,13 @@ _BS_ITEMS: list[tuple[str, list[str]]] = [
 
 _CF_ITEMS: list[tuple[str, list[str]]] = [
     (
+        # Continuing operations first: when a filer has discontinued operations the
+        # plain concept folds them in, which inflates cash flow around a divestiture
+        # and breaks the tie-out to the issuer's own reported free cash flow. Filers
+        # without discontinued ops tag only the plain concept, where the two are equal.
         "Operating CF",
         [
+            "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations",
             "NetCashProvidedByUsedInOperatingActivities",
             "NetCashProvidedByOperatingActivities",
         ],
@@ -313,6 +318,13 @@ _CF_ITEMS: list[tuple[str, list[str]]] = [
     ),
     ("Dividends", ["PaymentsOfDividends", "PaymentsOfDividendsCommonStock"]),
     ("Buybacks", ["PaymentsForRepurchaseOfCommonStock"]),
+    (
+        "Stock Comp",
+        [
+            "ShareBasedCompensation",
+            "AllocatedShareBasedCompensationExpense",
+        ],
+    ),
     (
         "Financing CF",
         [
