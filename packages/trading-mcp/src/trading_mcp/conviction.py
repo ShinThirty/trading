@@ -10,27 +10,46 @@ import asyncio
 from typing import Any
 
 from fastmcp import Context
+from trading_clients import fcf
 from trading_clients.endpoints import finnhub as fh
 from trading_clients.endpoints import tradier as t
 from trading_clients.table_helpers import to_float
 
 from trading_mcp.helpers import _finnhub, _tradier
 
+# Percentage points of sequential operating-margin change before the move is
+# called a trend rather than ordinary quarterly variation.
+#
+# Calibrated on |QoQ margin change| across 20 large caps (n=325 quarter pairs,
+# discrete quarters): median 1.91pp, p60 2.75pp, p70 3.90pp. Structurally stable
+# businesses sit well below (COST 0.22, WMT 0.40, AMAT 0.56, GOOGL 1.47), while
+# seasonal ones swing 2.5-4pp with nothing changing (AAPL 2.66, META 2.95,
+# NVDA 3.01, AMD 3.64). At 3.0pp a "trend" means the move is larger than ~60% of
+# ordinary quarterly variation, while genuine cyclicals still trip it (INTC 7.36,
+# MU 10.23). The old 0.5pp band labelled nearly every quarter pair a trend, which
+# was harmless only while the underlying rows were cumulative and incomparable.
+#
+# Residual: a slow bleed just under the band (say 2.9pp every quarter) reads
+# Stable indefinitely. A band cannot catch that; a persistence rule would.
+_MARGIN_TREND_BAND_PP = 3.0
+
 
 async def _conviction_data(ctx: Context, symbol: str) -> dict[str, Any]:
     finnhub_client = _finnhub(ctx)
     tradier_client = _tradier(ctx)
-    basics_r, fin_r, quote_r = await asyncio.gather(
+    basics_r, fin_r, annual_r, quote_r = await asyncio.gather(
         finnhub_client.get(fh.BASIC_FINANCIALS, fh.BasicFinancialsRequest(symbol)),
         finnhub_client.get(
             fh.FINANCIALS_REPORTED, fh.FinancialsReportedRequest(symbol, "quarterly")
         ),
+        finnhub_client.get(fh.FINANCIALS_REPORTED, fh.FinancialsReportedRequest(symbol, "annual")),
         tradier_client.get(t.QUOTES, t.GetQuotesRequest(symbol)),
         return_exceptions=True,
     )
 
     basics = None if isinstance(basics_r, BaseException) else basics_r
     fin = None if isinstance(fin_r, BaseException) else fin_r
+    annual = None if isinstance(annual_r, BaseException) else annual_r
     quote_resp = None if isinstance(quote_r, BaseException) else quote_r
 
     metric = basics.data.get("metric", {}) if basics else {}
@@ -42,8 +61,15 @@ async def _conviction_data(ctx: Context, symbol: str) -> dict[str, Any]:
     price = to_float(q.get("last"))
     high_52w = to_float(q.get("week_52_high"))
 
-    quarters = fin.income_numeric(8) if fin else []
-    cf_quarters = fin.cf_numeric(4) if fin else []
+    # Finnhub's quarterly rows are year-to-date cumulative (Q2 = six months, Q3 =
+    # nine months, no Q4 at all), so every factor below has to run on de-cumulated
+    # quarters. Left raw, "margin trend" would compare a six-month margin against
+    # a three-month one and the burn check would hide a bad quarter inside a good
+    # year-to-date. Q4 is recovered from the annual 10-K.
+    annual_income = annual.income_numeric(5) if annual else []
+    annual_cf = annual.cf_numeric(5) if annual else []
+    quarters = fcf.to_discrete(fin.income_numeric(12), annual_income) if fin else []
+    cf_quarters = fcf.to_discrete(fin.cf_numeric(12), annual_cf) if fin else []
 
     drawdown_pct = None
     if price and high_52w and high_52w > 0:
@@ -76,9 +102,10 @@ async def _conviction_data(ctx: Context, symbol: str) -> dict[str, Any]:
 
     margin_trend = None
     if len(margins) >= 2:
-        if margins[0][1] > margins[1][1] + 0.5:
+        delta = margins[0][1] - margins[1][1]
+        if delta > _MARGIN_TREND_BAND_PP:
             margin_trend = "Expanding"
-        elif margins[0][1] < margins[1][1] - 0.5:
+        elif delta < -_MARGIN_TREND_BAND_PP:
             margin_trend = "Compressing"
         else:
             margin_trend = "Stable"
@@ -175,8 +202,9 @@ async def _conviction_data(ctx: Context, symbol: str) -> dict[str, Any]:
         op_cf = cfq.get("Operating CF")
         capex = cfq.get("Capex")
         if op_cf is not None:
-            fcf = op_cf - (capex or 0)
-            fcf_values.append(fcf)
+            # abs(): capex is an outflow either way, so a filer presenting it
+            # negative can't flip the subtraction into an addition.
+            fcf_values.append(op_cf - abs(capex or 0))
     if len(fcf_values) >= 1:
         latest_fcf = fcf_values[0]
         burning = all(f < 0 for f in fcf_values) and len(fcf_values) >= 2
