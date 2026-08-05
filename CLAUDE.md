@@ -85,6 +85,8 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │       ├── options_multi_exp.py     # Multi-expiration strategy analysis: calendars, diagonals, PMCC (uses BSM for far leg)
 │   │       ├── portfolio.py             # Multi-account portfolio aggregation (Webull + Tradier + TastyTrade + SnapTrade/Fidelity APIs)
 │   │       ├── regime.py                # Market regime classification from pre-fetched data (pure functions)
+│       ├── vrp.py                   # Variance risk premium: realized/EWMA-forecast variance, ex-ante
+│       │                            #   snapshot vs ex-post aligned series, up-move artifact guard (pure)
 │   │       └── endpoints/               # Typed request/response models + Endpoint defs
 │   │           ├── webull.py            # 11 endpoints (account, orders, instruments)
 │   │           ├── tradier.py           # 13 endpoints (options, quotes + read-only account: profile, balances, positions, orders)
@@ -140,7 +142,8 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │           ├── quotes.py            # Stock/option quotes, history, intraday, technicals, clock,
 │   │           │                        #   foreign-market quotes (Yahoo), FX rates, ADR parity gauge
 │   │           ├── options.py           # Chains, expected move, strategy/roll analysis,
-│   │           │                        #   IV metrics, comparators, projection grid, CC overlay
+│   │           │                        #   IV metrics, variance risk premium, comparators,
+│   │           │                        #   projection grid, CC overlay
 │   │           ├── fundamentals.py      # Financials, profile, EPS estimates, ownership,
 │   │           │                        #   insider activity, informed-flow scanner
 │   │           ├── calendar.py          # Earnings, dividends, upcoming economic releases

@@ -16,6 +16,7 @@ Call in parallel:
 - `get_company_profile` for $ARGUMENTS.symbol (market cap)
 - `get_fmp_earnings_calendar` for $ARGUMENTS.symbol (next print date)
 - `get_iv_metrics` for $ARGUMENTS.symbol (IV Rank, IV-HV, liquidity, implied move)
+- `get_variance_risk_premium` for $ARGUMENTS.symbol (is the vol you're about to buy actually cheap?)
 - `get_tradier_history` for $ARGUMENTS.symbol (YTD price change — for washout check)
 
 Present as a single eligibility table:
@@ -27,10 +28,13 @@ Present as a single eligibility table:
 | Weekly expiration covers print | event-week expiry exists | [check via `get_option_expirations`] | ✅/❌ |
 | IV Rank | 40-90% | X% | ✅/❌ |
 | Implied move | <12% | X% | ✅/❌ |
+| VRP ratio | < 1.30 (not Rich) | X.XX ([label]) | ✅/❌ |
 | Liquidity rating | ≥ 2 | Liq X | ✅/❌ |
 | Not YTD washed out | YTD > -30% | X% | ✅/❌ |
 
 **If any row fails → state "Skip — [reason]" and stop.** Do not proceed to bucket assignment.
+
+**On the VRP row:** this basket is a *long*-premium strategy, so a **Rich** read (≥1.30) means you're paying above fair value for the move and the 1:3 implied:realized edge is already arbitraged away — hard fail. A **Cheap** read (<0.95) is the ideal setup and should be called out as strengthening the grade. Note that IV Rank and VRP measure different things (IV vs its *own* history, vs IV against *realized*); a name can be IV Rank 80% and still VRP-cheap if realized vol is running hotter than implied — that combination is the best entry this playbook sees. If the ⚠ up-move artifact flag is present, the cheap read is unproven — do not upgrade on it.
 
 Also flag if any of these apply (qualitative — note even if quantitative passes):
 - Mega-cap with concurrent capital return announcement (CRM failure mode)

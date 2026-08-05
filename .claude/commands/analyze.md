@@ -38,11 +38,13 @@ Run the complete post-screening decision framework for **$ARGUMENTS.symbol**. Ex
 
 ## Step 2: Read the Signals
 
-1. Call `get_market_regime`, `get_equity_risk_premium`, and `get_yield_curve_state` in parallel for full macro context (regime: Vol/Trend/Breadth/Macro/Sectors/Credit/Tape/Sentiment/Positioning/Policy + ⚠ Extended/Sentiment; ERP tier; curve regime). For commodity-linked names, also call `get_cot_positioning` on the relevant contract. For event-driven names (FOMC-sensitive, election, FDA, M&A), call `get_prediction_market` for what's priced.
+1. Call `get_market_regime`, `get_equity_risk_premium`, `get_yield_curve_state`, and `get_variance_risk_premium` for $ARGUMENTS.symbol in parallel for full macro + vol-pricing context (regime: Vol/Trend/Breadth/Macro/Sectors/Credit/Tape/Sentiment/Positioning/Policy + ⚠ Extended/Sentiment; ERP tier; curve regime; VRP read). For commodity-linked names, also call `get_cot_positioning` on the relevant contract. For event-driven names (FOMC-sensitive, election, FDA, M&A), call `get_prediction_market` for what's priced.
 
 2. Cross-reference the market regime with the stock-level signals from Step 1. Note:
    - IV environment: Is IV Rank high (>50%, sell premium) or low (<30%, buy premium)?
-   - IV-HV spread: >10% (options rich) or <5% (options fair/cheap)?
+   - **VRP** (`get_variance_risk_premium`): this is the *authoritative* vol-pricing read — IV against a forecast of forward realized vol. Ratio ≥1.30 rich / 1.10-1.30 modestly rich / 0.95-1.10 fair / <0.95 cheap.
+   - IV-HV spread: the raw trailing spread, kept only as a cross-check. **Where IV-HV and VRP disagree, VRP wins** — IV-HV compares forward IV to *trailing* realized vol, so it misreads the window right after a vol spike. The VRP output flags the divergence explicitly when it exceeds 3 vol points.
+   - If the VRP output carries the **⚠ up-move artifact** flag, treat any "cheap" reading as unproven — realized vol was inflated by a one-way rally that IV never prices.
    - Momentum: RSI, SMA alignment, 2-week price action.
    - Earnings proximity: How close is the next earnings date?
    - Liquidity: Liq rating 1-2 (tight, good) or 3-4 (wide, caution)?
@@ -60,6 +62,17 @@ Run the complete post-screening decision framework for **$ARGUMENTS.symbol**. Ex
 ## Step 3: Choose Strategy
 
 Match intent + signals to strategy via the intent→strategy matrix in [decision-framework.md](../../docs/decision-framework.md) Step 3. Detailed mechanics live in [strategy-catalog.md](../../docs/strategy-catalog.md).
+
+**VRP gates the credit-vs-debit choice** once intent is fixed. Intent decides *what* you're expressing; VRP decides whether you express it by selling or buying premium:
+
+| VRP read | Effect on structure |
+|---|---|
+| **Rich** (≥1.30) | Prefer the credit form — CSP over direct buy, BPS over bull call spread, bear call spread over bear put spread |
+| **Modestly rich** (1.10-1.30) | Default matrix stands; mild tilt to credit |
+| **Fair** (0.95-1.10) | No vol edge — pick on directional/capital grounds alone, and don't pay up for a vol view you don't have |
+| **Cheap** (<0.95) | Prefer the debit form — long call/put over spreads, straddle for a vol bet; selling premium here is underwriting below fair value |
+
+VRP never overrides intent — a Cheap read on a highest-conviction name still means accumulate, just via shares or LEAPS rather than a CSP.
 
 For **Accumulate** with 100 shares >$15K, proactively compare LEAPS vs shares. For credit/debit strategies with peer pipeline names, recommend `compare_credit_efficiency` / `compare_debit_efficiency`.
 

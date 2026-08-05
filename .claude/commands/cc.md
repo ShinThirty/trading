@@ -28,6 +28,16 @@ For each **uncovered** equity position, check the CC overlay "When NOT to write"
 
 Call `get_iv_metrics` in a single batch for all uncovered symbols to check IV Rank, earnings dates, and liquidity in one call. **In parallel**, call `get_equity_risk_premium` and `get_yield_curve_state` — these flex Step 3 coverage and Step 4 strike aggressiveness. Note the ERP tier and curve regime; carry forward.
 
+**VRP check on the survivors.** After the filter table, call `get_variance_risk_premium` for each position still READY (these are usually few — call them in parallel). A CC is a short-premium trade, so selling into **Cheap** vol (<0.95) means capping upside for less than the cap is worth:
+
+| VRP read | Effect |
+|---|---|
+| **Rich** / **Modestly rich** (≥1.10) | Proceed — the cap is being well paid for |
+| **Fair** (0.95-1.10) | Proceed only on thesis-exit or oversized-position intent, where the cap is the *point* and premium is incidental |
+| **Cheap** (<0.95) | **Skip the income and growth+income writes.** Thesis exits still proceed — you want the shares gone regardless of what the premium pays |
+
+This is a sharper version of the existing IV Rank < 25% filter and takes precedence where they disagree: IV Rank asks "is IV high for this name," VRP asks "is IV above what the name actually realizes," and only the second one determines whether the premium compensates the cap.
+
 **Valuation-regime relaxation on the IV Rank filter:** At **Compressed-Negative ERP** OR **Bear Steepener with long end leading**, the IV Rank < 25% filter is loosened — write even at lower IV. Reason: caps are protecting against likely downside, not just capping unlikely upside. Multiple expansion is mechanically improbable in those regimes, so writing thin-premium CCs still earns their keep. Keep the filter strict at **Generous ERP** / **Bull Steepener** (multiples have room — don't cap for low premium).
 
 Present the filter results as a table:

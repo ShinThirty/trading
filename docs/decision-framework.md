@@ -56,6 +56,8 @@ When the trade thesis hinges on an **IPO-mechanics catalyst** — a lockup-expir
 
 **Bear regime score:** Run `get_bear_regime_score` for the composite 0-10 synthesis across 9 dimensions (curve, ERP, credit, positioning, sentiment, vol, technicals, breadth, dealer flow). Tier label (Clear / Watchful / Building / Defensive / Crisis) gates portfolio-level actions per [bear-regime-playbook.md](bear-regime-playbook.md). Surfaced daily in `/briefing` Step 1f; full action review biweekly in `/review` Section 1 item 2a. Tier transitions matter more than absolute level — a move from Watchful to Building inside a week is the actionable event.
 
+**Vol pricing:** Run `get_variance_risk_premium` before any decision to buy or sell premium. It compares current IV to a forecast of *forward* realized vol, which is the question the IV-HV spread is usually asked to answer but can't — IV-HV compares forward IV to *trailing* realized vol and so misreads the window right after a vol spike. Where the two disagree, VRP wins; the tool flags the divergence when it exceeds 3 vol points. Ratio ≥1.30 = rich (favors credit structures), 0.95-1.10 = fair (no vol edge — choose on direction and capital alone), <0.95 = cheap (favors debit structures). Index VRP runs persistently richer than single-name VRP because it is largely a *correlation* premium — never read a single name's ratio against the index's typical level. See [strategy-catalog.md](strategy-catalog.md) for how the read maps onto each intent's structure.
+
 Before any spread or roll, check liquidity via `get_iv_metrics` (Liq 3-4 = tight, Liq 1-2 = caution) and `get_option_chain` bid/ask spreads. Cross-check earnings dates from `get_iv_metrics` and `get_earnings_calendar`; if they disagree, use the later date.
 
 ### Active Macro Overhangs
@@ -97,6 +99,8 @@ Once intent is set and signals are collected, match to the right strategy. See [
 | **Bearish (L2)** | Long put (IV Rank <30%) | Wait (puts expensive) | Long put (sweet spot) |
 | **Bearish (L3)** | Bear spread (credit or debit per IV) | Bear call spread | Bear put spread |
 | **Hedge** | Protective put / collar | Collar (sell rich calls) | Protective put |
+
+The IV-HV columns above are the legacy trigger for those shifts. **Prefer the VRP read from Step 2 where it's available** — same decision, better-measured: "IV-HV > 10%" corresponds to a Rich VRP ratio (≥1.30), "IV-HV < 5%" to Fair-or-Cheap (<1.10). When the two disagree, VRP wins.
 
 For **single-name hedging** (protective puts and collars on positions you own), see [protective-put-collar-playbook.md](protective-put-collar-playbook.md). For **portfolio-level tail-risk hedging** (deep OTM index puts as a structural program, not tactical correction protection), see [tail-hedge-playbook.md](tail-hedge-playbook.md).
 

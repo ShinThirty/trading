@@ -5,12 +5,14 @@ IV metrics, projection grid, and covered-call overlay tools.
 import asyncio
 from dataclasses import dataclass
 from datetime import date, timedelta
-from math import gcd
+from math import gcd, sqrt
 
 from fastmcp import Context, FastMCP
 from trading_clients import options as opts
+from trading_clients import vrp
 from trading_clients.bsm import bsm_price
 from trading_clients.endpoint import CONTRACT_MULTIPLIER
+from trading_clients.endpoints import fred as fr
 from trading_clients.endpoints import tastytrade as tt
 from trading_clients.endpoints import tradier as t
 from trading_clients.endpoints.webull import (
@@ -23,7 +25,7 @@ from trading_clients.options import EnrichedLeg
 from trading_clients.table_helpers import fmt_number, kv_table, list_table, to_float, to_float_zero
 from trading_clients.tradier_client import TradierClient
 
-from trading_mcp.helpers import _retry, _tastytrade, _tradier, _webull
+from trading_mcp.helpers import _fred, _retry, _tastytrade, _tradier, _webull
 from trading_mcp.portfolio_fetching import _fetch_risk_free_rate
 
 mcp = FastMCP("options-tools")
@@ -199,6 +201,176 @@ async def get_expected_move(ctx: Context, symbol: str, expiration: str) -> str:
         data["IV/HV Ratio"] = f"{ratio:.2f} ({label})"
 
     return f"## {symbol} Expected Move ({expiration})\n\n{kv_table(data)}"
+
+
+# ── Variance risk premium ───────────────────────────────────
+
+# VIX measures 30-calendar-day implied variance; 21 trading days is its realized
+# equivalent, so that is the default forward window for the aligned series.
+_VRP_HORIZON_DAYS = 21
+# ~4.3 years of bars: enough for a 1y RV-percentile history (needs 252 windows
+# each with 21 bars of runway) plus a multi-year ex-post VIX series.
+_VRP_HISTORY_DAYS = 1600
+
+
+@mcp.tool()
+async def get_variance_risk_premium(
+    ctx: Context,
+    symbol: str,
+    horizon_days: int = _VRP_HORIZON_DAYS,
+    index_context: bool = True,
+) -> str:
+    """Measure the variance risk premium — whether options are priced above or
+    below the variance the underlying actually delivers. Use before any decision
+    to buy or sell premium.
+
+    Reports the ex-ante VRP: current 30-day IV against an EWMA forecast of
+    forward realized vol. This is sharper than the raw IV-HV spread from
+    get_iv_metrics / get_entry_signals, which compares forward-looking IV to
+    *trailing* realized vol and therefore reads deeply negative right after a
+    vol spike — exactly when forward VRP is richest. When the two disagree by
+    3+ vol points the output flags it; trust the forecast row.
+
+    Read: ratio >= 1.30 rich (favors selling premium), 1.10-1.30 modestly rich,
+    0.95-1.10 fair (no vol edge — trade direction instead), <0.95 cheap (favors
+    buying premium — straddles, long calls/puts, debit spreads).
+
+    With index_context (default on), also calibrates against SPX: the ex-post
+    VIX-vs-realized series showing how often the index premium was actually
+    earned, and where today's index VRP sits in its own history. Index VRP is
+    largely a correlation premium and runs persistently richer than single-name
+    VRP — do not read a single name's ratio against the index's typical level.
+
+    symbol: underlying ticker (e.g. 'QQQ', 'NVDA').
+    horizon_days: forward realized window in trading days (default 21 ~= 30
+        calendar days, matching the 30-day IV and VIX).
+    index_context: include the SPX/VIX calibration block (needs [fred]).
+
+    Requires [tastytrade] and [tradier]; [fred] for index context.
+    """
+    tastytrade = _tastytrade(ctx)
+    tradier = _tradier(ctx)
+    sym = symbol.upper()
+    start = (date.today() - timedelta(days=_VRP_HISTORY_DAYS)).isoformat()
+
+    want_index = index_context and sym not in {"SPY", "SPX", "^GSPC"}
+
+    async def _histories() -> tuple[object, object | None]:
+        # Intra-provider calls stay sequential (shared rate bucket).
+        own = await tradier.get(t.HISTORY, t.GetHistoryRequest(sym, "daily", start=start))
+        spy = None
+        if index_context:
+            spy = (
+                own
+                if not want_index
+                else await tradier.get(t.HISTORY, t.GetHistoryRequest("SPY", "daily", start=start))
+            )
+        return own, spy
+
+    jobs: list = [
+        tastytrade.get(tt.MARKET_METRICS, tt.MarketMetricsRequest(sym)),
+        _histories(),
+    ]
+    fred = None
+    if index_context:
+        try:
+            fred = _fred(ctx)
+            jobs.append(fred.get(fr.OBSERVATIONS, fr.GetObservationsRequest("VIXCLS", limit=1300)))
+        except RuntimeError:
+            fred = None
+
+    results = await asyncio.gather(*jobs, return_exceptions=True)
+    iv_r, hist_r = results[0], results[1]
+    vix_r = results[2] if len(results) > 2 else None
+
+    if isinstance(hist_r, BaseException):
+        return f"(no price history for {sym}: {hist_r})"
+    own_hist, spy_hist = hist_r
+
+    bars = getattr(own_hist, "days", None) or []
+    closes = [float(b["close"]) for b in bars]
+    if len(closes) < 80:
+        return f"(insufficient price history for {sym} — {len(closes)} bars, need 80+)"
+
+    iv_item = {}
+    if not isinstance(iv_r, BaseException) and getattr(iv_r, "items", None):
+        iv_item = iv_r.items[0]
+
+    # `implied-volatility-30-day` arrives already in percent units; the
+    # `implied-volatility-index` fallback is a decimal ratio.
+    iv_30 = to_float(iv_item.get("implied-volatility-30-day"))
+    implied = (
+        iv_30 / 100 if iv_30 is not None else to_float(iv_item.get("implied-volatility-index"))
+    )
+    if implied is None or implied <= 0:
+        return f"(no implied volatility available for {sym} — TastyTrade returned no IV metrics)"
+
+    snap = vrp.vrp_snapshot(sym, implied, closes, short_window=horizon_days)
+
+    out = [f"## {sym} Variance Risk Premium\n", snap.to_output()]
+
+    liq = iv_item.get("liquidity-rating")
+    if liq:
+        out.append(f"\nLiquidity: {liq}/4 — spread friction erodes a thin edge.")
+
+    # ── SPX / VIX calibration ───────────────────────────────
+    if index_context and fred is not None and not isinstance(vix_r, BaseException) and vix_r:
+        spy_bars = getattr(spy_hist, "days", None) or []
+        spy_closes = [(str(b["date"]), float(b["close"])) for b in spy_bars]
+        vix_obs = [
+            (str(o.get("date")), float(o["value"]) / 100)
+            for o in vix_r.observations
+            if o.get("value") not in (None, "", ".")
+        ]
+        vix_obs.sort(key=lambda x: x[0])
+
+        if vix_obs and spy_closes:
+            series = vrp.vrp_series("SPX", vix_obs, spy_closes, horizon_days=horizon_days)
+            ex_ante = vrp.ex_ante_history(vix_obs, spy_closes, horizon=horizon_days)
+
+            out.append("\n### SPX calibration (VIX vs realized)\n")
+            out.append(series.to_output())
+
+            spy_only = [c for _, c in spy_closes]
+            spy_var = vrp.har_forecast_variance(spy_only, horizon_days)
+            method = "HAR"
+            if spy_var is None:
+                spy_var, method = vrp.ewma_variance(spy_only), "EWMA"
+            today_vix = vix_obs[-1][1]
+            if spy_var is not None:
+                today_idx_vrp = (today_vix**2 - spy_var) * 10000
+                pctl = vrp.percentile_rank(ex_ante, today_idx_vrp)
+                data = {
+                    "VIX": f"{today_vix * 100:.1f}%",
+                    f"SPY RV forecast ({method})": f"{sqrt(spy_var) * 100:.1f}%",
+                    "Index VRP today (variance pts)": f"{today_idx_vrp:+.0f}",
+                }
+                if pctl is not None:
+                    data["Percentile vs own history"] = f"{pctl:.0f}%"
+                out.append("\n" + kv_table(data))
+                out.append(
+                    "\nPercentile is like-for-like (today's forecast-based VRP against "
+                    "the same calculation historically), not against the ex-post table above."
+                )
+    elif index_context and fred is None:
+        out.append("\n(index context skipped — [fred] not configured)")
+
+    if sym not in {"SPY", "SPX", "^GSPC"}:
+        out.append(
+            f"\n**No {sym} VRP percentile**: no provider exposes a per-name historical IV "
+            "series, so the snapshot has no self-history to rank against. The trailing-RV "
+            "percentile above is the available substitute — high RV percentile with a rich "
+            "ratio usually means IV is chasing a move that already happened."
+        )
+
+    out.append(
+        "\n⚠ Caveats: VRP concentrates in the OTM put wing, so a 15Δ put seller earns more "
+        "than this ATM-anchored number implies; single-name VRP is much thinner than index "
+        "VRP (the index premium is largely a correlation premium); and the premium is "
+        "conditional — it can go negative into a known event."
+    )
+
+    return "\n".join(out)
 
 
 # TODO(positioning-trend): Tradier exposes OI only as a live snapshot, not as a

@@ -40,11 +40,13 @@ The **~4.5% cash floor** is the absolute minimum, not the target: if the sleeve 
 4. **Willing-to-own gate** — anything sold above ~15Δ (the 25Δ bucket) must be a name **you'd genuinely own on assignment**, because at 25Δ assignment is the base case, not the tail. Index ETFs auto-pass; single names need the judgment.
 5. **Concentration gate** — respect existing book exposure. **Gold is capped** (GLD/GDX carry rich IV but the book already holds a large, underwater gold position — no more gold beta). A name already large in the growth book counts against the cluster cap (`project_circular_financing_buckets`).
 
-**Overriding a gate** is allowed *only* as a conscious willing-to-own decision on gate 4 — e.g. a slightly-wide single name you truly want. Gates 1–3 and 5 are hard: a below-floor yield, a hedge conflict, or an over-concentrated add defeats the sleeve's purpose regardless of how much you like the ticker.
+6. **Vol-pricing gate** — `get_variance_risk_premium` must not read **Cheap** (IV / forecast RV < 0.95). The sleeve's entire premise is that sold vol is priced above delivered vol; a Cheap read says the opposite is true right now for that underlying, and the correct response is to wait rather than to underwrite below fair value. **Fair** (0.95–1.10) is admissible but thin — prefer a richer candidate if one clears the other gates. Unlike the structural gates this one is *conditional* and re-checks per leg, because VRP is time-varying — the premium is compensation for a tail, and it is not always being paid.
+
+**Overriding a gate** is allowed *only* as a conscious willing-to-own decision on gate 4 — e.g. a slightly-wide single name you truly want. Gates 1–3, 5 and 6 are hard: a below-floor yield, a hedge conflict, an over-concentrated add, or vol priced below realized defeats the sleeve's purpose regardless of how much you like the ticker.
 
 **Mandate guardrail:** free choice widens the drawdown profile — the more collateral concentrates in single names, the more the sleeve drifts from index-like behavior toward idiosyncratic risk. Keep the *core* diversified (indices or a spread of names) and use single-name free choice as the opportunistic layer. `get_income_sleeve_ledger`'s drawdown-vs-SPY check is the backstop that flags when your choices have drifted off-mandate.
 
-**Pre-trade check (run before every new leg):** name the instrument; the flow pulls `get_iv_metrics` (liquidity rating + IV rank) and `get_option_chain` (spread at your delta), computes the 15Δ annualized yield vs the floor, and confirms the gates before previewing the order. Clears → preview → your approval → place.
+**Pre-trade check (run before every new leg):** name the instrument; the flow pulls `get_iv_metrics` (liquidity rating + IV rank), `get_variance_risk_premium` (vol-pricing gate), and `get_option_chain` (spread at your delta), computes the 15Δ annualized yield vs the floor, and confirms the gates before previewing the order. Clears → preview → your approval → place.
 
 Assigned shares (or shares already held, e.g. V) → **wheel with 30–45 DTE covered calls** (`feedback_cc_duration`).
 
