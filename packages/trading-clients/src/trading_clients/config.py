@@ -48,6 +48,21 @@ class EiaConfig:
 
 
 @dataclass(frozen=True)
+class FinraConfig:
+    """FINRA Query API credentials (free developer account).
+
+    The credential pair alone is not sufficient: corporate and agency datasets
+    stay invisible (404, not 403) until the **Fixed Income Data user agreement**
+    is accepted in the FINRA developer portal, and entitlements are baked into
+    the OAuth token at mint time — so a token minted before accepting keeps
+    404ing until it expires.
+    """
+
+    api_client_id: str
+    api_secret: str
+
+
+@dataclass(frozen=True)
 class TastyTradeConfig:
     client_secret: str
     refresh_token: str
@@ -83,6 +98,7 @@ class AppConfig:
     fred: FredConfig | None = None
     alphavantage: AlphaVantageConfig | None = None
     eia: EiaConfig | None = None
+    finra: FinraConfig | None = None
     tastytrade: TastyTradeConfig | None = None
     snaptrade: SnapTradeConfig | None = None
     edgar: EdgarConfig | None = None
@@ -148,6 +164,14 @@ def load_config(path: Path = RC_PATH) -> AppConfig:
     if parser.has_section("eia"):
         eia = EiaConfig(api_key=parser.get("eia", "api_key"))
 
+    # FINRA (optional)
+    finra = None
+    if parser.has_section("finra"):
+        finra = FinraConfig(
+            api_client_id=parser.get("finra", "api_client_id"),
+            api_secret=parser.get("finra", "api_secret"),
+        )
+
     # TastyTrade (optional)
     tastytrade = None
     if parser.has_section("tastytrade"):
@@ -177,6 +201,7 @@ def load_config(path: Path = RC_PATH) -> AppConfig:
         fred=fred,
         alphavantage=alphavantage,
         eia=eia,
+        finra=finra,
         tastytrade=tastytrade,
         snaptrade=snaptrade,
         edgar=edgar,

@@ -18,6 +18,10 @@ def open_db(path: Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
+    # WAL allows one writer at a time, and SQLite's default is to fail a
+    # contended write instantly. A backfill script running alongside the server
+    # would otherwise surface as "database is locked" rather than a short wait.
+    conn.execute("PRAGMA busy_timeout=10000")
     return conn
 
 

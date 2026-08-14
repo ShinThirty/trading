@@ -20,7 +20,7 @@ Run the complete post-screening decision framework for **$ARGUMENTS.symbol**. Ex
 
      If **yes**, call `get_earnings_transcript` and `get_earnings_release` in parallel, then reference their content when assessing the qualitative factors below and explicitly note any guidance changes or segment-mix shifts that move conviction. If **no** (or earnings >45 days old), proceed with the normal qualitative assessment.
    - **Qualitative factors** (Moat and AI ROI): Provide your assessment based on what you know about the company. If you need more context, call `get_company_news` for $ARGUMENTS.symbol.
-   - **If 2+ quantitative factors score Negative**: State "Conviction: Negative — routing to bearish framework" and follow the bearish assessment in docs/bearish-framework.md (deterioration scoring → valuation disconnect → bearish conviction level → L2 strategy selection).
+   - **If 2+ quantitative factors score Negative**: State "Conviction: Negative — routing to bearish framework" and follow the bearish assessment in docs/bearish-framework.md (deterioration scoring → valuation disconnect → bearish conviction level → L2 strategy selection). Scoring the valuation-disconnect gate needs `get_issuer_credit` — see Step 2 item 1.
 
 3. Based on the combined conviction assessment, determine the **intent** from this table:
 
@@ -39,6 +39,12 @@ Run the complete post-screening decision framework for **$ARGUMENTS.symbol**. Ex
 ## Step 2: Read the Signals
 
 1. Call `get_market_regime`, `get_equity_risk_premium`, `get_yield_curve_state`, and `get_variance_risk_premium` for $ARGUMENTS.symbol in parallel for full macro + vol-pricing context (regime: Vol/Trend/Breadth/Macro/Sectors/Credit/Tape/Sentiment/Positioning/Policy + ⚠ Extended/Sentiment; ERP tier; curve regime; VRP read). For commodity-linked names, also call `get_cot_positioning` on the relevant contract. For event-driven names (FOMC-sensitive, election, FDA, M&A), call `get_prediction_market` for what's priced.
+
+   **Also call `get_issuer_credit` for $ARGUMENTS.symbol when the thesis touches financing** — a debt-funded buildout, a refinancing wall, a covenant test, heavy capex against negative FCF, or any name routed to the bearish framework. Credit usually reprices such a name before equity does, so its own bond spreads are a read the equity tape doesn't carry. Skip it for asset-light, net-cash names where there's nothing to find. Two ways to use the output:
+   - **Level** — the issuer's median G-spread against its matched rating-cohort OAS says whether credit prices it consistent with, or materially worse than, its rating.
+   - **Direction** — spreads wider than a prior reading while the equity is higher is the disconnect worth acting on. This is a row in the [bearish-framework.md](../../docs/bearish-framework.md) valuation-disconnect table.
+
+   If the tool reports no priceable bonds, score it **n/a** rather than "no disconnect" — a company whose debt is all convertibles (IREN, NBIS) has no readable credit spread, which is a coverage gap, not a clean bill of health.
 
 2. Cross-reference the market regime with the stock-level signals from Step 1. Note:
    - IV environment: Is IV Rank high (>50%, sell premium) or low (<30%, buy premium)?

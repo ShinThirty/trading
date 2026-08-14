@@ -15,6 +15,7 @@ from trading_clients.eia_client import EiaClient
 from trading_clients.factset_client import FactsetClient
 from trading_clients.fed_client import FedClient
 from trading_clients.finnhub_client import FinnhubClient
+from trading_clients.finra_client import FinraClient
 from trading_clients.fmp_client import FmpClient
 from trading_clients.fool_client import FoolClient
 from trading_clients.fred_client import FredClient
@@ -22,6 +23,7 @@ from trading_clients.freightos_client import FreightosClient
 from trading_clients.kalshi_client import KalshiClient
 from trading_clients.morningstar_client import MorningstarClient
 from trading_clients.naaim_client import NaaimClient
+from trading_clients.openfigi_client import OpenFigiClient
 from trading_clients.playwright_host import PlaywrightHost
 from trading_clients.polymarket_client import PolymarketClient
 from trading_clients.portwatch_client import PortwatchClient
@@ -29,6 +31,7 @@ from trading_clients.reddit_client import RedditClient
 from trading_clients.sentiment_client import SentimentClient
 from trading_clients.snaptrade_client import SnapTradeClient
 from trading_clients.squeeze_metrics_client import SqueezeMetricsClient
+from trading_clients.ssga_client import SsgaClient
 from trading_clients.tastytrade_client import TastyTradeClient
 from trading_clients.tradier_client import TradierClient
 from trading_clients.treasury_client import TreasuryClient
@@ -37,6 +40,7 @@ from trading_clients.webull_client import WebullClient
 
 from trading_mcp import server_lock
 from trading_mcp.db import open_db
+from trading_mcp.db.credit_breadth import init_schema as init_credit_breadth_schema
 from trading_mcp.db.decisions import init_schema as init_decision_schema
 from trading_mcp.db.pipeline import init_schema as init_pipeline_schema
 from trading_mcp.db.rolls import init_schema as init_roll_schema
@@ -54,6 +58,7 @@ from trading_mcp.tools.beige_book import mcp as beige_book_mcp
 from trading_mcp.tools.calendar import mcp as calendar_mcp
 from trading_mcp.tools.cftc import mcp as cftc_mcp
 from trading_mcp.tools.cn_market import mcp as cn_market_mcp
+from trading_mcp.tools.credit import mcp as credit_mcp
 from trading_mcp.tools.crypto import mcp as crypto_mcp
 from trading_mcp.tools.decisions import mcp as decisions_mcp
 from trading_mcp.tools.earnings import mcp as earnings_mcp
@@ -102,6 +107,8 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
         ctx["alphavantage"] = AlphaVantageClient(config.alphavantage)
     if config.eia:
         ctx["eia"] = EiaClient(config.eia)
+    if config.finra:
+        ctx["finra"] = FinraClient(config.finra)
     if config.tastytrade:
         ctx["tastytrade"] = TastyTradeClient(config.tastytrade)
     if config.snaptrade:
@@ -121,6 +128,10 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
     ctx["beige_book"] = BeigeBookClient()
     ctx["squeeze_metrics"] = SqueezeMetricsClient()
     ctx["factset"] = FactsetClient()
+    # Single-name corporate credit: OpenFIGI supplies the issuer's bond universe,
+    # SSGA holdings files supply the marks. Both are keyless public sources.
+    ctx["openfigi"] = OpenFigiClient()
+    ctx["ssga"] = SsgaClient()
     # Shared Chromium for all Playwright-backed scrapers (SentimentClient,
     # MorningstarClient). One process, many isolated contexts. If Chromium
     # can't launch (missing binary, sandbox issue), all Playwright clients
@@ -174,6 +185,7 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
     init_roll_schema(db)
     init_decision_schema(db)
     init_twse_revenue_schema(db)
+    init_credit_breadth_schema(db)
     ctx["db"] = db
     # Mark the DB as in-use so scripts/env_sync.py refuses to sync over a live
     # server (even an idle one a WAL checkpoint wouldn't catch).
@@ -219,6 +231,7 @@ mcp.mount(treasury_mcp)
 mcp.mount(freight_mcp)
 mcp.mount(beige_book_mcp)
 mcp.mount(squeeze_metrics_mcp)
+mcp.mount(credit_mcp)
 mcp.mount(naaim_mcp)
 mcp.mount(eia_mcp)
 mcp.mount(factset_mcp)

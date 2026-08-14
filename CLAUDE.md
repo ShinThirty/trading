@@ -23,6 +23,11 @@ uv run ruff format packages/       # Format all packages
 uv run ty check packages/trading-clients/src/    # Type check trading-clients
 uv run ty check packages/trading-mcp/src/        # Type check trading-mcp
 uv run ty check packages/trading-alerts/src/     # Type check trading-alerts
+# Corporate credit history (FINRA breadth). Backfill is resumable — re-run to top up.
+uv run --package trading-mcp python packages/trading-mcp/scripts/backfill_credit_breadth.py --status
+uv run --package trading-mcp python packages/trading-mcp/scripts/backfill_credit_breadth.py
+uv run --package trading-mcp python packages/trading-mcp/scripts/analyze_credit_divergence.py
+
 uv run python packages/trading-alerts/scripts/invoke_local.py --list             # List wired watchers
 uv run python packages/trading-alerts/scripts/invoke_local.py --trigger naaim    # Run a watcher locally
 ```
@@ -50,6 +55,7 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │       ├── dxlink_stream_client.py  # Tastytrade DXLink (dxFeed) streaming transport — token+channel handshake + COMPACT FEED_DATA wire parsing; the scalper's FUTURES feed. [streaming] extra
 │   │       ├── market_stream.py         # Provider-neutral streaming value types (Quote/Trade/TimeSale) — what any feed emits
 │   │       ├── finnhub_client.py        # API key auth
+│   │       ├── finra_client.py          # OAuth2 client-credentials (FINRA Query API; corporate credit breadth/flow)
 │   │       ├── fmp_client.py            # API key auth
 │   │       ├── fred_client.py           # API key auth
 │   │       ├── alphavantage_client.py   # API key auth
@@ -72,12 +78,17 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │       ├── freightos_client.py      # No auth, identifies via User-Agent (Freightos Baltic Index lane pages)
 │   │       ├── portwatch_client.py      # No auth, identifies via User-Agent (IMF PortWatch ArcGIS chokepoint data)
 │   │       ├── beige_book_client.py     # No auth, identifies via User-Agent (Fed Beige Book)
+│   │       ├── openfigi_client.py      # No auth (OpenFIGI /v3/search — equity ticker → issuer bond universe)
+│   │       ├── ssga_client.py          # No auth (SPDR daily-holdings XLSX → single-name bond marks; _request returns bytes)
 │   │       ├── squeeze_metrics_client.py # No auth (SqueezeMetrics public DIX/GEX CSV)
 │   │       ├── naaim_client.py          # No auth (NAAIM since-inception XLSX history); Cloudflare Bot Mgmt 403s httpx, so routes discovery+download through the shared Playwright browser context when a host is present (httpx fallback for Lambda)
 │   │       ├── reddit_client.py         # Reddit JSON API (search, subreddit, post); httpx fetch + Playwright-minted loid cookie (anonymous .json is 403-blocked); takes PlaywrightHost
 │   │       ├── playwright_host.py       # Shared Chromium process (one Browser, many isolated Contexts) used by all Playwright-backed clients
 │   │       ├── sentiment_client.py      # Playwright-based scraper (CBOE p/c, AAII); takes PlaywrightHost
 │   │       ├── adr.py                   # ADR/ADS parity math: fair value + premium vs home listing (pure, no I/O)
+│   │       ├── bond_math.py             # Corporate bond YTM (accrued reconstructed from time-to-maturity,
+│   │       │                            #   no coupon calendar), Treasury-curve interpolation, nominal
+│   │       │                            #   G-spread (pure math, no I/O)
 │   │       ├── bsm.py                   # Black-Scholes-Merton option pricing (pure math, no I/O)
 │   │       ├── btc_regime.py            # BTC macro regime classification (pure functions)
 │   │       ├── indicators.py            # Technical analysis indicators on OHLCV bars (pure functions)
@@ -91,6 +102,9 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │           ├── webull.py            # 11 endpoints (account, orders, instruments)
 │   │           ├── tradier.py           # 13 endpoints (options, quotes + read-only account: profile, balances, positions, orders)
 │   │           ├── finnhub.py           # 11 endpoints (news, earnings, financials)
+│   │           ├── finra.py             # 4 endpoints (corporate + 144A market breadth / sentiment).
+│   │           │                        #   NOTE: breadth uses productCategory=grade; sentiment SWAPS them
+│   │           │                        #   (tradeType=grade, productCategory=side) — models normalize both
 │   │           ├── fmp.py               # 8 endpoints (financial statements, profiles, sector perf)
 │   │           ├── fred.py              # 4 endpoints (economic data series)
 │   │           ├── alphavantage.py      # 2 endpoints (sentiment, movers)
@@ -113,6 +127,9 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │           ├── treasury.py          # 3 endpoints (QRA most-recent index, archive index, statement page)
 │   │           ├── freight.py           # 2 endpoints (Freightos FBX lane page + IMF PortWatch chokepoints query) with FBX_LANES + CHOKEPOINTS catalogs
 │   │           ├── beige_book.py        # 2 endpoints (release index, National Summary by period)
+│   │           ├── openfigi.py          # 1 endpoint (Corp-sector search) + bond-ticker parser
+│   │           │                        #   ("CRWV 9.75 10/01/31 144A" → coupon + maturity)
+│   │           ├── ssga.py              # 1 endpoint (fund holdings XLSX) + CORPORATE_BOND_FUNDS panel
 │   │           ├── squeeze_metrics.py   # 1 endpoint (DIX/GEX daily history CSV)
 │   │           ├── naaim.py             # NaaimHistoryResponse (XLSX-parsed weekly history with z-score)
 │   │           ├── prediction_market.py # Shared PredictionEvent / PredictionOutcome types
@@ -122,6 +139,14 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │           └── yahoo.py             # Response models for Yahoo Finance (via yfinance)
 │   ├── trading-mcp/                     # MCP server (composed via fastmcp mount)
 │   │   ├── pyproject.toml               # depends on: trading-clients + fastmcp + yfinance
+│   │   ├── scripts/
+│   │   │   ├── backfill_credit_breadth.py    # One-shot FINRA breadth backfill (one request per
+│   │   │   │                                 #   date × universe; resumable, idempotent, --status)
+│   │   │   ├── analyze_credit_divergence.py  # Base rate of the 144A divergence: firings/year by
+│   │   │   │                                 #   run length → the alert threshold, plus forward
+│   │   │   │                                 #   HY OAS vs unconditional
+│   │   │   ├── backfill_bear_regime.py       # Bear-regime composite vs historical episodes
+│   │   │   └── seed_tsmc_revenue.py          # Prepopulate older TWSE revenue months
 │   │   └── src/trading_mcp/
 │   │       ├── server.py                # Lifespan, parent FastMCP, mount() calls, dependency middleware
 │   │       ├── helpers.py               # Client extractors, shared helpers (_retry, etc.)
@@ -135,7 +160,12 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │       │   ├── pipeline.py          # Pipeline table schema, enums, async CRUD
 │   │       │   ├── rolls.py             # Rolls table schema, enums, async CRUD
 │   │       │   ├── decisions.py         # Option decisions table schema, enums, async CRUD
-│   │       │   └── twse_revenue.py      # TWSE monthly revenue cache (TSMC + future TW tickers)
+│   │       │   ├── twse_revenue.py      # TWSE monthly revenue cache (TSMC + future TW tickers)
+│   │       │   └── credit_breadth.py    # FINRA corporate/144A breadth history (one row per
+│   │       │                            #   date × universe × grade) + a confirmed-empty table so
+│   │       │                            #   the backfill is resumable. Populated by
+│   │       │                            #   scripts/backfill_credit_breadth.py (history → 2023-07-28)
+│   │       │                            #   and extended by every get_credit_market_breadth call
 │   │       └── tools/                   # Subdomain-organized tool modules
 │   │           ├── account.py           # Balances, positions, orders, activities, instruments, portfolio aggregates (Webull + Tradier + TastyTrade + SnapTrade read-only; per-broker get_<broker>_* tools)
 │   │           ├── orders.py            # Place/preview/replace/cancel orders, order history
@@ -158,6 +188,13 @@ trading-mcp/                             # monorepo root (uv workspace)
 │   │           ├── treasury.py          # QRA Policy Statement texture (latest + prior for diff)
 │   │           ├── freight.py           # Container freight signals: FBX lane prices + chokepoint transit volumes
 │   │           ├── beige_book.py        # Fed Beige Book National Summary + 12 district highlights
+│   │           ├── credit.py            # get_issuer_credit (single-name bond YTM/G-spread vs cohort OAS,
+│   │           │                        #   SSGA marks + OpenFIGI universe + FRED curve) and
+│   │           │                        #   get_credit_market_breadth (FINRA corporate + 144A A/D,
+│   │           │                        #   52w highs/lows, customer-vs-dealer flow; reads history
+│   │           │                        #   from db/credit_breadth and extends it on every call.
+│   │           │                        #   Validated use = duration-vs-credit split; the 144A
+│   │           │                        #   divergence is reported but measured-and-failed)
 │   │           ├── squeeze_metrics.py   # SqueezeMetrics DIX (dark-pool flow) + GEX (dealer gamma)
 │   │           ├── naaim.py             # NAAIM Exposure Index history with 52w z-score / percentile
 │   │           ├── eia.py               # EIA Weekly Petroleum Status Report (stocks, refinery util, retail gasoline)
@@ -298,6 +335,9 @@ signature) handles button clicks (`mute:<seconds>:<dedup_key>`) and the
 | **Treasury** | Quarterly Refunding Announcement (QRA) Policy Statement — auction sizes, bill-vs-coupon mix, buyback program, and forward guidance. Released 4x/year (early Feb / May / Aug / Nov), Wednesday 8:30 AM after Monday's borrowing estimate. | None (User-Agent only) |
 | **Freightos** | Freightos Baltic Index (FBX) — weekly container freight prices per lane (USD/FEU). Published Fridays. Used for geopolitical-risk rerouting confirmation. | None (User-Agent only) |
 | **IMF PortWatch** | Daily chokepoint vessel transit volumes (Suez, Bab el-Mandeb, Hormuz, Panama, Cape of Good Hope, Bosporus, Malacca and 21 more). ArcGIS REST. ~5-day publish lag. | None (User-Agent only) |
+| **FINRA** | Corporate bond **market-wide** breadth and flow via the Query API (`fixedIncomeMarket`): daily advances/declines, 52-week highs/lows and volume by grade (IG / HY / convertibles), separately for the 144A market, plus customer-buy vs customer-sell vs inter-dealer volume. **The validated use is the IG-vs-HY 52w high/low split**, which separates a duration selloff from genuine credit stress — something a single HY OAS print cannot do. The **144A "cracks first" divergence was measured over 765 stored sessions and FAILED** (0 of 7 firings preceded a ≥50bp HY OAS widening vs a 27% base rate); it largely tracks new issuance, since newly issued bonds can't print a 52-week high. Reported as context, not a tripwire. **No CUSIP-level prices** — `trace*` datasets are a paid Firm tier and are firm execution-quality report cards, not quotes. Corporate/agency datasets return **404 until the Fixed Income Data user agreement is accepted**, and entitlements are fixed when the token is minted. Requests must send `Accept: application/json` (default is CSV); `tradeReportDate` is a partition key so every query pins one date. | OAuth2 client-credentials (free developer account) |
+| **OpenFIGI** | Equity ticker → the issuer's outstanding **bond universe**, including the 144A / Reg S / euro tranche split. Supplies the coverage denominator for `get_issuer_credit` (which bonds exist vs which we could price). No prices. Anonymous quota is 5 searches/min, so results cache for a day. Scope name lookups by ticker prefix — a bare search for "IREN" also returns the unrelated Italian utility IREN SpA. | None |
+| **SSGA (SPDR)** | The free single-name corporate bond mark. Daily fund-holdings XLSX carries par value + market value per ISIN; the ratio is the pricing service's **clean** price (verified accrued-exclusive). Queried as a panel (JNK, SJNK, SPBO, SPIB, SPSB, SPLB) because coverage is the union of what those funds hold. **T+1 evaluated marks, not trade prints** — for thin HY paper possibly a matrix estimate. | None (User-Agent only) |
 | **SqueezeMetrics** | DIX (dark-pool dollar-weighted short ratio of S&P 500 components) + GEX (dealer net gamma in $) — daily history CSV powering the public /monitor/dix chart | None (User-Agent only) |
 | **CBOE** | Equity put/call ratio (daily) | None (Playwright, realistic browser context) |
 | **AAII** | Investor sentiment survey bull/neutral/bear (weekly) | None (Playwright, realistic browser context) |
@@ -339,6 +379,12 @@ api_key = <your_api_key>
 
 [eia]
 api_key = <your_api_key>
+
+[finra]
+# Free account at developer.finra.org. The credentials alone are not enough:
+# accept the Fixed Income Data user agreement or corporate datasets 404.
+api_client_id = <your_client_id>
+api_secret = <your_secret>
 
 [tastytrade]
 client_secret = <your_oauth_client_secret>

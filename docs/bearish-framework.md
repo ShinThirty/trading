@@ -38,9 +38,18 @@ The deterioration must be **mispriced** for a bearish trade to work. Score at le
 |--------|-----------|---------------|
 | **P/E vs growth** | P/E >50x with negative or <5% growth | Market pricing growth that doesn't exist |
 | **Price vs analyst targets** | Stock >50% above consensus target | Speculative premium over professional estimates |
+| **Equity vs own credit** | `get_issuer_credit`: median G-spread ≥2x the matched rating-cohort OAS, **or** spreads wider than the prior reading while the equity is higher | Two markets on the same capital structure disagree, and the bond market is the one with a maturity date |
 | **Narrative dependency** | Entire bull case rests on unmonetized future | Price supported by story, not revenue |
 | **Insider selling** | Net insider selling >$10M in past 6 months | Insiders don't believe the story |
 | **Speculative rally** | >20% rally in 2 weeks on no fundamental catalyst | Momentum/squeeze disconnected from reality |
+
+**On the credit row.** Added because the analyst-target test failed on the 2026 neocloud cohort — all four names traded *below* consensus (targets are junk where sell-side coverage is thin or promotional), yet CRWV's own paper was at ~700bp, 2.4x the single-B index, while its equity ran +76% off the low. Where a thesis turns on financing, credit is the better disconnect measure and the convergence mechanism is mechanical rather than narrative: a maturity wall reprices at the market's spread whether or not sentiment agrees.
+
+Three cautions:
+
+- **Absence of the signal is not a pass.** The test only exists for issuers with straight bonds held by a fund in the SPDR panel. IREN and NBIS have *no* readable spread — their debt is entirely convertibles, whose price is equity-driven. Score the row "n/a", not "no disconnect".
+- **The ratio runs high by construction.** These are nominal G-spreads on callable paper against option-adjusted index spreads. Compare to the *matched* cohort (a BBB- name against broad IG will look wide and isn't), and read the placement, not the basis points.
+- **A wide spread that is already wide is not an edge.** If credit has fully repriced, a put buyer is betting on convergence, not discovery. The direction test — spread widening while equity rises — is the stronger form, and needs a prior reading to compare against, so pull it on a cadence rather than once.
 
 ### Bearish Conviction Levels
 

@@ -17,6 +17,7 @@ from trading_clients.endpoints import tradier as t
 from trading_clients.factset_client import FactsetClient
 from trading_clients.fed_client import FedClient
 from trading_clients.finnhub_client import FinnhubClient
+from trading_clients.finra_client import FinraClient
 from trading_clients.fmp_client import FmpClient
 from trading_clients.fool_client import FoolClient
 from trading_clients.fred_client import FredClient
@@ -24,12 +25,14 @@ from trading_clients.freightos_client import FreightosClient
 from trading_clients.kalshi_client import KalshiClient
 from trading_clients.morningstar_client import MorningstarClient
 from trading_clients.naaim_client import NaaimClient
+from trading_clients.openfigi_client import OpenFigiClient
 from trading_clients.polymarket_client import PolymarketClient
 from trading_clients.portwatch_client import PortwatchClient
 from trading_clients.reddit_client import RedditClient
 from trading_clients.sentiment_client import SentimentClient
 from trading_clients.snaptrade_client import SnapTradeClient
 from trading_clients.squeeze_metrics_client import SqueezeMetricsClient
+from trading_clients.ssga_client import SsgaClient
 from trading_clients.tastytrade_client import TastyTradeClient
 from trading_clients.tradier_client import TradierClient
 from trading_clients.treasury_client import TreasuryClient
@@ -136,6 +139,25 @@ def _eia(ctx: Context) -> EiaClient:
             "(register free at https://www.eia.gov/opendata/register.php)."
         )
     return client
+
+
+def _finra(ctx: Context) -> FinraClient:
+    client = _lc(ctx).get("finra")
+    if client is None:
+        raise RuntimeError(
+            "FINRA not configured. Add [finra] api_client_id/api_secret to ~/.tradingrc "
+            "(free account at developer.finra.org), and accept the Fixed Income Data "
+            "user agreement — corporate datasets 404 until you do."
+        )
+    return client
+
+
+def _openfigi(ctx: Context) -> OpenFigiClient:
+    return _lc(ctx)["openfigi"]
+
+
+def _ssga(ctx: Context) -> SsgaClient:
+    return _lc(ctx)["ssga"]
 
 
 def _tastytrade(ctx: Context) -> TastyTradeClient:
