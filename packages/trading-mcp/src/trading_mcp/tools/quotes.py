@@ -10,7 +10,7 @@ from trading_clients.adr import compute_adr_parity
 from trading_clients.endpoints import tradier as t
 from trading_clients.table_helpers import fmt_large, fmt_number, kv_table, list_table
 
-from trading_mcp.helpers import _tradier
+from trading_mcp.helpers import _HV_EFF_FLOOR, _HV_EFF_WINDOW, _hv_effective_n, _tradier
 from trading_mcp.yfinance_helper import _yfc
 
 mcp = FastMCP("quotes-tools")
@@ -477,12 +477,46 @@ async def get_market_clock(ctx: Context) -> str:
     return (await _tradier(ctx).get(t.CLOCK, t.EmptyRequest())).to_output()
 
 
+# Indicators whose reading is built on short-window return dispersion, and so inherit
+# whatever single bar dominates it (see _hv_effective_n in helpers for the calibration).
+# `hv` is opt-in, so gating the diagnostic on it alone would hide it from every default
+# call — rsi and bbands are both in the default set.
+_VARIANCE_CONSUMERS = frozenset({"hv", "bbands", "stochrsi", "rsi"})
+
+
+def _concentration_warning(
+    bars: list[dict], closes: list[float], indicators: list[str]
+) -> list[str]:
+    """Report how many bars the short-window variance reading actually rests on."""
+    if not _VARIANCE_CONSUMERS.intersection(indicators):
+        return []
+    measured = _hv_effective_n(closes)
+    if measured is None:
+        return []
+    eff_n, top_share, bar_idx = measured
+    when = str(bars[bar_idx].get("date", "?")) if bar_idx < len(bars) else "?"
+    if eff_n >= _HV_EFF_FLOOR:
+        return [
+            f"Short-window variance rests on ~{eff_n:.1f} of {_HV_EFF_WINDOW} bars "
+            f"(largest, {when}, is {top_share:.0f}% of it; ~4/10 is typical).\n"
+        ]
+    return [
+        f"⚠ **Short-window variance is ~{eff_n:.1f} of {_HV_EFF_WINDOW} bars** — {when} "
+        f"alone owns {top_share:.0f}% of it. Readings built on it (HV10, Bollinger "
+        "%B/width, StochRSI, RSI) describe that bar more than the tape; a gap can invert "
+        "%B and StochRSI outright. Prefer `get_variance_risk_premium` — its HAR "
+        "forecast blends daily/weekly/monthly precisely to survive this — and anchor "
+        "OBV past the bar via `obv_anchor_date`.\n",
+    ]
+
+
 @mcp.tool()
 async def get_technical_indicators(
     ctx: Context,
     symbol: str,
     indicators: list[str] | None = None,
     period: str = "daily",
+    obv_anchor_date: str | None = None,
 ) -> str:
     """Compute technical indicators from historical price data.
 
@@ -501,8 +535,24 @@ async def get_technical_indicators(
       - 'stochrsi' — Stochastic RSI %K / %D (14/14/3/3) (opt-in)
       - 'hv' — Historical (realized) volatility term structure 10d/30d/60d annualized (opt-in)
     period: bar interval — 'daily', 'weekly', or 'monthly'. Default 'daily'.
+    obv_anchor_date: optional ISO date (inclusive) to anchor the OBV accumulation,
+        e.g. '2026-08-06'. Affects the 'obv' line only — every other indicator is a
+        fixed-lookback window. Default (unset) is the trailing 20-bar slope.
+
+        Anchor at the first session after a gap event when the question is "who has
+        been accumulating since". The default 20-bar window spans roughly a month, so
+        an earnings gap inside it contributes one bar at several times normal volume
+        and dominates the sum — the reported divergence is then the gap itself, not
+        the flow after it. Anchoring drops the gap bar and starts the count at zero.
 
     Returns the latest values for each indicator plus a recent history table.
+
+    When any short-window-variance indicator is requested (rsi, bbands, stochrsi, hv),
+    the output leads with how many bars that variance window effectively rests on —
+    inverse-Herfindahl effective N. A 10-bar window carries a median 4.1 of its 10
+    bars, so treat HV10, %B and StochRSI as indicative rather than measured, and treat
+    a reading below ~2.5 as one bar wearing a trend's clothing.
+
     Requires [tradier] section in ~/.tradingrc.
     """
     if indicators is None:
@@ -519,6 +569,7 @@ async def get_technical_indicators(
 
     sections: list[str] = [f"## {symbol} Technical Indicators ({latest_date})"]
     sections.append(f"**Price:** {latest_price:,.2f}\n")
+    sections.extend(_concentration_warning(bars, closes, indicators))
 
     tail = 10
 
@@ -602,26 +653,50 @@ async def get_technical_indicators(
             sections.append(f"**ADX(14):** {a:.1f} ({zone}); +DI={p:.1f}, -DI={m:.1f} ({bias})")
 
     if "obv" in indicators:
-        obv_vals = ta.obv(bars)
-        if obv_vals[-1] is not None and len(obv_vals) >= 21 and obv_vals[-21] is not None:
-            cur = obv_vals[-1]
-            prior = obv_vals[-21]
-            price_prior = closes[-21]
-            obv_chg = cur - prior
-            price_chg_pct = (latest_price - price_prior) / price_prior * 100
-            if obv_chg > 0 and price_chg_pct > 0:
-                tag = "confirming (both up)"
-            elif obv_chg < 0 and price_chg_pct < 0:
-                tag = "confirming (both down)"
-            elif price_chg_pct > 0 and obv_chg <= 0:
-                tag = "bearish divergence (price up, OBV flat/down)"
-            elif price_chg_pct < 0 and obv_chg >= 0:
-                tag = "bullish divergence (price down, OBV up)"
-            else:
-                tag = "mixed"
-            sections.append(
-                f"**OBV:** 20d Δ={obv_chg:+,.0f} vs price {price_chg_pct:+.1f}% — {tag}"
+        # Anchored: baseline is the anchor bar (OBV resets to 0 there). Otherwise the
+        # legacy trailing 20-bar window.
+        anchor_idx = 0
+        if obv_anchor_date:
+            anchor_idx = next(
+                (i for i, b in enumerate(bars) if str(b.get("date", "")) >= obv_anchor_date), -1
             )
+        if anchor_idx < 0:
+            sections.append(
+                f"**OBV:** anchor {obv_anchor_date} is past the last bar ({latest_date}) — "
+                "nothing to accumulate"
+            )
+        elif obv_anchor_date and anchor_idx >= len(bars) - 1:
+            sections.append(
+                f"**OBV:** anchor {obv_anchor_date} resolves to the last bar ({latest_date}) — "
+                "no bars of flow since"
+            )
+        else:
+            obv_vals = ta.obv(bars, anchor_idx)
+            prior_idx = anchor_idx if obv_anchor_date else len(bars) - 21
+            cur = obv_vals[-1]
+            prior = obv_vals[prior_idx] if prior_idx >= 0 else None
+            if cur is not None and prior is not None:
+                obv_chg = cur - prior
+                price_prior = closes[prior_idx]
+                price_chg_pct = (latest_price - price_prior) / price_prior * 100
+                if obv_chg > 0 and price_chg_pct > 0:
+                    tag = "confirming (both up)"
+                elif obv_chg < 0 and price_chg_pct < 0:
+                    tag = "confirming (both down)"
+                elif price_chg_pct > 0 and obv_chg <= 0:
+                    tag = "bearish divergence (price up, OBV flat/down)"
+                elif price_chg_pct < 0 and obv_chg >= 0:
+                    tag = "bullish divergence (price down, OBV up)"
+                else:
+                    tag = "mixed"
+                if obv_anchor_date:
+                    span = f"since {bars[anchor_idx].get('date', obv_anchor_date)}"
+                    span += f" ({len(bars) - 1 - anchor_idx} bars)"
+                else:
+                    span = "20d"
+                sections.append(
+                    f"**OBV:** {span} Δ={obv_chg:+,.0f} vs price {price_chg_pct:+.1f}% — {tag}"
+                )
 
     if "donchian" in indicators:
         u20, _, l20 = ta.donchian(bars, 20)

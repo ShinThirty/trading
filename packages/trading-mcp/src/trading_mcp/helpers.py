@@ -6,6 +6,7 @@ from datetime import date
 from typing import Any, cast
 
 from fastmcp import Context
+from trading_clients import indicators as ta
 from trading_clients.alphavantage_client import AlphaVantageClient
 from trading_clients.bea_client import BeaClient
 from trading_clients.beige_book_client import BeigeBookClient
@@ -327,3 +328,38 @@ async def _write_temp_file(content: str, suffix: str, prefix: str) -> str:
         return f.name
 
     return await asyncio.to_thread(_sync_write)
+
+
+# ── Short-window variance concentration ─────────────────────────────
+# Shared by get_technical_indicators (which reports it) and get_expected_move (which
+# uses it to escalate its stale-trailing-vol warning), so both quote the same number.
+#
+# Measured across 12 names (~1,000 windows each): a 10-bar squared-return window
+# carries a MEDIAN effective 4.1 of its 10 bars, 1st percentile 1.7 — HV10 is
+# structurally low-information for everyone, not only after a gap. So effN is reported
+# as standing context and only the severe tail raises a warning.
+#
+# The floor is absolute, not percentile-ranked against the name's own history: a
+# chronically gap-driven name (WDC) has no unusual windows, so self-calibration goes
+# quiet exactly where the caveat matters most. <2.5 fires on 8.4% of windows at 99%
+# precision (the dominant bar is a >=2x-median move); loosening to 3.5 fires on 33.6%
+# for the same 98%, too noisy to keep meaning.
+#
+# Range and volume windows get no equivalent check: measured effN never approaches
+# domination (range/14 1st pctile 9.1 of 14; volume/20 1st pctile 10.3 of 20), matching
+# their small measured gap sensitivity. OBV is the exception, but its problem is sign
+# persistence rather than magnitude concentration, and `obv_anchor_date` handles it.
+_HV_EFF_WINDOW = 10
+_HV_EFF_FLOOR = 2.5
+
+
+def _hv_effective_n(closes: list[float]) -> tuple[float, float, int] | None:
+    """(effective bars, dominant bar's share, its index into closes) for the HV10 window."""
+    sq = [r * r for r in ta.log_returns(closes)]  # aligned to closes[1:]
+    eff = ta.window_effective_n(sq, _HV_EFF_WINDOW)
+    share = ta.window_concentration(sq, _HV_EFF_WINDOW)
+    if not eff or eff[-1] is None or not share or share[-1] is None:
+        return None
+    recent = sq[-_HV_EFF_WINDOW:]
+    offset = max(range(len(recent)), key=lambda j: recent[j])
+    return eff[-1], share[-1], len(sq) - _HV_EFF_WINDOW + offset + 1

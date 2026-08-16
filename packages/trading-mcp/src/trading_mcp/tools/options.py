@@ -25,7 +25,15 @@ from trading_clients.options import EnrichedLeg
 from trading_clients.table_helpers import fmt_number, kv_table, list_table, to_float, to_float_zero
 from trading_clients.tradier_client import TradierClient
 
-from trading_mcp.helpers import _fred, _retry, _tastytrade, _tradier, _webull
+from trading_mcp.helpers import (
+    _HV_EFF_FLOOR,
+    _fred,
+    _hv_effective_n,
+    _retry,
+    _tastytrade,
+    _tradier,
+    _webull,
+)
 from trading_mcp.portfolio_fetching import _fetch_risk_free_rate
 
 mcp = FastMCP("options-tools")
@@ -141,13 +149,72 @@ async def get_iv_metrics(ctx: Context, symbols: str) -> str:
     return resp.to_output()
 
 
+_VOL_REGIME_SHIFT = 1.15  # HV20/HV50 ratio at which the trailing read is actively stale
+
+
+def _vol_verdict(
+    atm_iv: float | None,
+    hv20: float | None,
+    hv50: float | None,
+    closes: list[float] | None = None,
+) -> dict[str, str]:
+    """Report the trailing IV/HV ratio as data, and route the verdict to VRP.
+
+    This ratio used to carry a cheap/rich label, but it compares forward-looking IV to
+    *trailing* realized vol, so after a vol spike it reads "cheap" exactly when forward
+    vol is about to mean-revert down and the options are not cheap. WDC and AMD both
+    printed 0.70 "cheap" days after their earnings gaps while the forecast-based read
+    put them at fair.
+
+    The verdict is delegated rather than recomputed here. `get_variance_risk_premium`
+    fits HAR on ~1,600 calendar days and prices it against constant-maturity 30-day IV;
+    this tool holds ~155 bars (HAR needs 100 rows to fit at all) and the ATM IV of one
+    expiration. Fitting a second, weaker forecast here produced a materially different
+    number for the same question — a competing source of truth is worse than no label.
+    """
+    out: dict[str, str] = {}
+    if atm_iv is None or hv20 is None or hv20 <= 0:
+        return out
+
+    out["IV/HV Ratio (trailing)"] = f"{atm_iv / hv20:.2f}"
+    note = (
+        "trailing HV, not a forecast — reads 'cheap' right after a vol spike. "
+        "Run get_variance_risk_premium for the cheap/rich verdict."
+    )
+    # An HV20-vs-HV50 gap catches a drifting vol regime, but NOT the case this whole
+    # check exists for: a gap bar sits in both windows, so they agree with each other
+    # while both run hot against forward vol. The concentration statistic sees it.
+    concentrated = _hv_effective_n(closes) if closes else None
+    if concentrated is not None and concentrated[0] < _HV_EFF_FLOOR:
+        note = (
+            f"⚠ one bar drives {concentrated[1]:.0f}% of recent variance "
+            f"(~{concentrated[0]:.1f} effective bars) — the HV figures above are "
+            "event-inflated, so this ratio understates how rich the options are. "
+            "Run get_variance_risk_premium before acting on it."
+        )
+    elif hv50 is not None and hv50 > 0 and max(hv20 / hv50, hv50 / hv20) >= _VOL_REGIME_SHIFT:
+        direction = "cooling" if hv20 < hv50 else "heating"
+        note = (
+            f"⚠ vol regime is {direction} (HV20 {hv20 * 100:.0f}% vs HV50 "
+            f"{hv50 * 100:.0f}%), so this trailing ratio is stale in a known direction. "
+            "Run get_variance_risk_premium before acting on it."
+        )
+    out["Vol read"] = note
+    return out
+
+
 @mcp.tool()
 async def get_expected_move(ctx: Context, symbol: str, expiration: str) -> str:
     """Compute the expected move for a stock at a given option expiration.
 
     Shows the ATM straddle price (expected 1-sigma move), implied volatility,
-    historical volatility, and IV/HV ratio. Useful for sizing positions and
-    evaluating whether options are cheap or expensive.
+    historical volatility, and IV/HV ratio. Useful for sizing positions.
+
+    The IV/HV ratio is reported WITHOUT a cheap/rich verdict: it measures forward IV
+    against trailing realized vol, which reads "cheap" precisely after a vol spike,
+    when forward vol is about to mean-revert down. Use get_variance_risk_premium for
+    the cheap/rich call — it forecasts forward realized vol instead. This tool flags
+    when a vol-regime shift makes the trailing ratio stale in a known direction.
 
     symbol: underlying ticker symbol (e.g. 'AAPL').
     expiration: option expiration date (YYYY-MM-DD, from get_option_expirations).
@@ -195,10 +262,7 @@ async def get_expected_move(ctx: Context, symbol: str, expiration: str) -> str:
     if hv50 is not None:
         data["Historical Vol (50d)"] = f"{hv50 * 100:.1f}%"
 
-    if em["atm_iv"] is not None and hv20 is not None and hv20 > 0:
-        ratio = em["atm_iv"] / hv20
-        label = "rich" if ratio > 1.2 else "cheap" if ratio < 0.8 else "fair"
-        data["IV/HV Ratio"] = f"{ratio:.2f} ({label})"
+    data.update(_vol_verdict(em["atm_iv"], hv20, hv50, closes))
 
     return f"## {symbol} Expected Move ({expiration})\n\n{kv_table(data)}"
 
