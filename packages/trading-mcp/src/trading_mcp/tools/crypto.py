@@ -153,20 +153,18 @@ async def get_btc_entry_signals(ctx: Context) -> str:
     closes = [float(b["close"]) for b in bars if b.get("close")] if bars else []
     ath: float | None = None
 
-    # ATH is taken from monthly bars, never from the daily series: 250 daily bars
-    # reach back only ~8 months, so a cycle top older than that is invisible and the
-    # "ATH" decays into a recent local high as the window rolls forward — understating
-    # the drawdown, and understating it more the longer the bear market runs.
     monthly_highs = (
         [float(b["high"]) for b in monthly_resp.bars if b.get("high")] if monthly_resp else []
     )
 
     if closes:
         current = btc_price or closes[-1]
-        ath = max(monthly_highs) if monthly_highs else max(closes)
-        ath = max(ath, current)
-        drawdown = (current - ath) / ath * 100 if ath > 0 else 0
-        data["ATH Drawdown"] = f"{drawdown:+.1f}% (ATH ${ath:,.0f})"
+        # See btc.all_time_high: the ATH must come from monthly bars, never from
+        # the 250-bar daily window, which only reaches back ~8 months.
+        ath = btc.all_time_high(monthly_highs, closes, current)
+        drawdown = (current - ath) / ath * 100 if ath and ath > 0 else 0
+        if ath:
+            data["ATH Drawdown"] = f"{drawdown:+.1f}% (ATH ${ath:,.0f})"
 
         rsi_vals = ta.rsi(closes)
         rsi_val = rsi_vals[-1] if rsi_vals else None

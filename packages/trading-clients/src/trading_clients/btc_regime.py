@@ -335,6 +335,35 @@ def macro_scorecard(labels: dict[str, str]) -> str:
     return f"Strongly Unfavorable ({bearish}/{total} bearish)"
 
 
+def all_time_high(
+    monthly_highs: list[float],
+    daily_closes: list[float],
+    current: float | None = None,
+) -> float | None:
+    """Pick the all-time high that the dca_sizing drawdown is measured against.
+
+    Must come from monthly bars. The provider caps a daily series at 250 bars
+    and crypto trades 7 days a week, so a daily window reaches back only ~8
+    months: a cycle top older than that is invisible, and the "ATH" silently
+    decays into a recent local high as the window rolls forward. That
+    understates the drawdown — and understates it more the longer the bear
+    market runs, shrinking the DCA size exactly as the real discount deepens.
+
+    Highs rather than closes, because an all-time high means the peak print.
+
+    monthly_highs: high of each monthly bar, any order.
+    daily_closes: fallback only, for when the monthly fetch fails.
+    current: spot, so a high being set right now is never below the reported ATH.
+    """
+    if monthly_highs:
+        ath = max(monthly_highs)
+    elif daily_closes:
+        ath = max(daily_closes)
+    else:
+        return None
+    return max(ath, current) if current else ath
+
+
 DCA_TIERS: list[tuple[float, int, str]] = [
     (-50, 400, "2x baseline — capitulation zone"),
     (-30, 200, "baseline — deep discount"),
