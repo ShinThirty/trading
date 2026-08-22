@@ -688,12 +688,22 @@ class CryptoSnapshotResponse:
 
 @dataclass
 class CryptoBarsResponse:
+    """Crypto OHLCV bars, always oldest -> newest.
+
+    Webull hands these back newest-first. Every consumer wants the opposite:
+    the indicators in trading_clients.indicators are written oldest-first and
+    read their latest value as [-1], so an unsorted series silently reports the
+    *oldest* bar in the window. Normalizing here rather than at each call site
+    keeps that impossible to get wrong again.
+    """
+
     bars: list[dict]
 
     @classmethod
     def from_response(cls, data: list[dict]) -> "CryptoBarsResponse":
         if data and isinstance(data, list) and data[0].get("result"):
-            return cls(bars=data[0]["result"])
+            # ISO-8601 timestamps, so lexical order is chronological order.
+            return cls(bars=sorted(data[0]["result"], key=lambda b: b.get("time") or ""))
         return cls(bars=[])
 
     def to_output(self) -> str:
