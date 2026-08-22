@@ -91,8 +91,8 @@ async def get_btc_entry_signals(ctx: Context) -> str:
     - Sentiment: Crypto Fear & Greed Index (contrarian indicator)
 
     Price technicals (from Webull crypto bars):
-    - BTC price, drawdown from ATH
-    - RSI(14), SMA(50), SMA(200)
+    - BTC price, drawdown from the all-time high (monthly bars, ~20y of history)
+    - RSI(14), SMA(50), SMA(200) (250 daily bars)
 
     Correlation regime (from Webull + Tradier):
     - BTC vs QQQ (risk-on) and BTC vs GLD (store-of-value) 30-day correlation
@@ -117,6 +117,7 @@ async def get_btc_entry_signals(ctx: Context) -> str:
         _fetch_fear_greed(),
         tradier.get(t.HISTORY, t.GetHistoryRequest("QQQ", "daily", start=start_date)),
         tradier.get(t.HISTORY, t.GetHistoryRequest("GLD", "daily", start=start_date)),
+        webull.get(CRYPTO_BARS, CryptoBarsRequest("BTCUSD", timespan="M", count=250)),
     ]
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -132,6 +133,7 @@ async def get_btc_entry_signals(ctx: Context) -> str:
     fng_val = results[8] if not isinstance(results[8], BaseException) else None
     qqq_resp = results[9] if not isinstance(results[9], BaseException) else None
     gld_resp = results[10] if not isinstance(results[10], BaseException) else None
+    monthly_resp = results[11] if not isinstance(results[11], BaseException) else None
 
     data: dict[str, str | None] = {}
     labels: dict[str, str] = {}
@@ -151,12 +153,18 @@ async def get_btc_entry_signals(ctx: Context) -> str:
     closes = [float(b["close"]) for b in bars if b.get("close")] if bars else []
     ath: float | None = None
 
+    # ATH is taken from monthly bars, never from the daily series: 250 daily bars
+    # reach back only ~8 months, so a cycle top older than that is invisible and the
+    # "ATH" decays into a recent local high as the window rolls forward — understating
+    # the drawdown, and understating it more the longer the bear market runs.
+    monthly_highs = (
+        [float(b["high"]) for b in monthly_resp.bars if b.get("high")] if monthly_resp else []
+    )
+
     if closes:
-        ath = max(closes)
-        current = closes[-1]
-        if btc_price:
-            current = btc_price
-            ath = max(ath, btc_price)
+        current = btc_price or closes[-1]
+        ath = max(monthly_highs) if monthly_highs else max(closes)
+        ath = max(ath, current)
         drawdown = (current - ath) / ath * 100 if ath > 0 else 0
         data["ATH Drawdown"] = f"{drawdown:+.1f}% (ATH ${ath:,.0f})"
 
