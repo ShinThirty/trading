@@ -18,7 +18,6 @@ class TokenBucket:
         self._tokens = float(capacity)
         self._refill_rate = refill_rate  # tokens per second
         self._last_refill = time.monotonic()
-        self._lock = asyncio.Lock()
 
     def _refill(self) -> None:
         now = time.monotonic()
@@ -28,13 +27,13 @@ class TokenBucket:
 
     async def acquire(self) -> None:
         """Await until a token is available, then consume it."""
-        async with self._lock:
-            self._refill()
-            self._tokens -= 1.0
-            if self._tokens >= 0.0:
-                return
-            wait = -self._tokens / self._refill_rate
-        await asyncio.sleep(wait)
+        # No lock needed: this block has no await, so it is atomic under
+        # cooperative scheduling. Keep the sleep outside it — adding an
+        # await between _refill() and the decrement reintroduces the race.
+        self._refill()
+        self._tokens -= 1.0
+        if self._tokens < 0.0:
+            await asyncio.sleep(-self._tokens / self._refill_rate)
 
 
 class RateLimiter:
